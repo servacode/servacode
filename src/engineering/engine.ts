@@ -270,10 +270,16 @@ export async function resolveEngineeringEngine(
   });
   const profilePath = join(fixture, 'settings.json');
   writeFileSync(profilePath, JSON.stringify(profile.settings, null, 2), 'utf8');
+  // The sandbox runtime speaks its own schema; the launcher writes that file itself
+  // from the same spec, so the two cannot drift.
+  const srtConfigPath = join(fixture, 'srt-settings.json');
 
   const substrate = new SandboxedExecutionSubstrate({
     transport,
-    launcher: new ClaudeSandboxLauncher({ settingsPath: transport.toGuestPath(profilePath) }),
+    launcher: new ClaudeSandboxLauncher({
+      configHostPath: srtConfigPath,
+      configGuestPath: transport.toGuestPath(srtConfigPath),
+    }),
     clock: opts.clock,
     engineVersion: status.version,
     projectRoot: opts.projectRoot,

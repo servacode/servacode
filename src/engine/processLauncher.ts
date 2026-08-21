@@ -68,6 +68,9 @@ export class LocalProcessLauncher implements ProcessLauncher {
 /** `C:\a\b` as WSL sees it. Duplicated from the substrate transport on purpose: this
  * module must not depend on the substrate layer, and the mapping is two lines. */
 export function toWslPath(hostPath: string): string {
+  // Idempotent: an already-translated guest path comes back unchanged. See the
+  // substrate transport for what happened when it was not.
+  if (hostPath.startsWith('/')) return hostPath;
   const p = resolve(hostPath).replace(/\\/g, '/');
   const drive = /^([A-Za-z]):\//.exec(p);
   if (drive === null) return p;

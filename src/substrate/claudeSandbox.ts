@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { fail } from '../core/errors.js';
 import { GUEST_PATH } from './transport.js';
 import type { ExecTransport, TransportCommand } from './transport.js';
@@ -46,9 +47,42 @@ export const SANDBOX_RUNTIME_BIN = 'srt';
 const SETTINGS_FLAGS: readonly string[] = Object.freeze(['--settings', '--config']);
 
 export interface ClaudeSandboxOptions {
-  /** Path, as the GUEST sees it, of the settings profile the Producer will receive. */
-  readonly settingsPath: string;
+  /** Host path the runtime config is written to. */
+  readonly configHostPath: string;
+  /** The same file as the GUEST sees it. */
+  readonly configGuestPath: string;
   readonly binary?: string;
+}
+
+/**
+ * A `SandboxSpec` in the sandbox runtime's OWN configuration schema.
+ *
+ * This was a real defect, found by running the thing: Serva handed `srt` a Claude Code
+ * settings profile — `{"sandbox": {...}}` — and `srt` rejected it outright with
+ * `Invalid configuration: network: Required, filesystem: Required` and, to its credit,
+ * `Refusing to run with the default config`. Every qualification case then failed
+ * identically, including Q-A, which is exactly how a positive control is supposed to
+ * expose "the boundary never started" rather than letting it read as containment.
+ *
+ * The two schemas are cousins, not twins. Claude Code's `settings.json` nests policy
+ * under `sandbox` and speaks of `allowRead`; the runtime takes `network` and
+ * `filesystem` at the top level and has no `allowRead` — reads are permitted unless
+ * denied. Translating between them is this function's whole job, and the difference is
+ * the reason §7's cross-check against the real Producer exists at all.
+ */
+export function srtConfigFrom(spec: SandboxSpec): Record<string, unknown> {
+  return {
+    network: {
+      // No grant means no egress. A domain allowlist is the only way in.
+      allowedDomains: [],
+      deniedDomains: [],
+    },
+    filesystem: {
+      allowWrite: [...spec.allowWrite],
+      denyWrite: [],
+      denyRead: [...spec.denyRead],
+    },
+  };
 }
 
 export class ClaudeSandboxLauncher implements SandboxLauncher {
@@ -129,11 +163,9 @@ export class ClaudeSandboxLauncher implements SandboxLauncher {
   /**
    * Wrap a command in the Producer's own boundary.
    *
-   * `spec` is deliberately NOT translated into flags. The Producer's boundary is
-   * defined by its settings profile — allowed writes, denied reads, network — and
-   * expressing the same policy twice, in two notations, would let the measured boundary
-   * and the dispatched one drift apart while both looked correct. The spec is used only
-   * to assert that the caller is asking for the boundary this launcher was built for.
+   * The spec is translated into the runtime's own configuration schema and written
+   * fresh for each wrap. An earlier version pointed at a pre-written Claude Code
+   * profile instead; the runtime rejected it as invalid and nothing ran.
    */
   wrap(command: TransportCommand, spec: SandboxSpec): TransportCommand {
     if (this.settingsFlag === undefined) {
@@ -165,9 +197,22 @@ export class ClaudeSandboxLauncher implements SandboxLauncher {
       });
     }
 
+    /*
+     * The config is written from the SPEC, at wrap time, rather than read from a file
+     * somebody prepared earlier. Two policies in two places drift; one policy with one
+     * writer cannot.
+     */
+    writeFileSync(this.opts.configHostPath, JSON.stringify(srtConfigFrom(spec), null, 2), 'utf8');
+
     return {
       executable: this.binary,
-      args: [this.settingsFlag, this.opts.settingsPath, '--', command.executable, ...command.args],
+      args: [
+        this.settingsFlag,
+        this.opts.configGuestPath,
+        '--',
+        command.executable,
+        ...command.args,
+      ],
       cwd: command.cwd,
       env: command.env,
       timeoutMs: command.timeoutMs,

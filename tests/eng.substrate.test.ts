@@ -17,7 +17,7 @@ import {
   RECIPE_REQUIRED_BINARIES,
   SandboxedExecutionSubstrate,
 } from '../src/substrate/sandboxed.js';
-import { ClaudeSandboxLauncher } from '../src/substrate/claudeSandbox.js';
+import { ClaudeSandboxLauncher, srtConfigFrom } from '../src/substrate/claudeSandbox.js';
 import { BoundaryPurpose, boundaryMismatch, executionBoundary } from '../src/substrate/boundary.js';
 import {
   BubblewrapLauncher,
@@ -422,6 +422,22 @@ describe('Windows delegates execution into a WSL2 guest', () => {
     ]);
   });
 
+  it('translation is idempotent, because it is applied twice in practice', () => {
+    /*
+     * Qualification builds a guest-path layout and then hands those paths to
+     * `execute`, which translates its own inputs. Without idempotence that produced
+     * `/mnt/c/mnt/c/...`: on Windows `resolve('/mnt/c/x')` yields a path on the current
+     * drive, which then translates a second time. The failure surfaced as Q-A refusing
+     * a PERMITTED write, and the only thing that stopped it being read as successful
+     * containment is that Q-A is a positive control.
+     */
+    const t = new WslTransport('Ubuntu');
+    const once = t.toGuestPath('C:\\Users\\a\\tmp\\wt');
+    expect(once).toBe('/mnt/c/Users/a/tmp/wt');
+    expect(t.toGuestPath(once)).toBe(once);
+    expect(toWslPath(toWslPath('D:\\x'))).toBe('/mnt/d/x');
+  });
+
   it('translates a Windows path to the guest view', () => {
     expect(toWslPath('D:\\SEVACODE\\src')).toBe('/mnt/d/SEVACODE/src');
     expect(new WslTransport('Ubuntu').toGuestPath('C:\\a\\b')).toBe('/mnt/c/a/b');
@@ -465,7 +481,10 @@ describe('prerequisites are detected, not assumed', () => {
     const guest = healthyGuest();
     delete guest['srt --help'];
     const probe = await sandboxed(new StubTransport(guest), {
-      launcher: new ClaudeSandboxLauncher({ settingsPath: '/tmp/settings.json' }),
+      launcher: new ClaudeSandboxLauncher({
+        configHostPath: join(fixture(), 'srt.json'),
+        configGuestPath: '/tmp/srt.json',
+      }),
       purpose: BoundaryPurpose.PRODUCER,
       boundaryId: 'SC-BOUNDARY-PRODUCER',
       requiredBinaries: PRODUCER_REQUIRED_BINARIES,
@@ -477,11 +496,40 @@ describe('prerequisites are detected, not assumed', () => {
     expect(launcher?.remedy).toMatch(/sandbox-runtime/);
   });
 
+  it('the runtime config is written in the runtime OWN schema', () => {
+    /*
+     * Serva used to hand `srt` a Claude Code settings profile — `{"sandbox": {...}}` —
+     * and the runtime rejected it with `network: Required, filesystem: Required` and
+     * `Refusing to run with the default config`. Every case then failed identically,
+     * Q-A included, which is how a positive control exposes "the boundary never
+     * started" instead of letting it read as containment.
+     */
+    const cfg = srtConfigFrom({
+      allowWrite: ['/w'],
+      allowRead: ['/p'],
+      denyRead: ['/p/.serva'],
+      networkAllowed: false,
+    }) as { network: Record<string, unknown>; filesystem: Record<string, unknown> };
+
+    // Top level, not nested under `sandbox`.
+    expect(Object.keys(cfg).sort()).toEqual(['filesystem', 'network']);
+    expect(cfg.network['allowedDomains']).toEqual([]);
+    expect(cfg.network['deniedDomains']).toEqual([]);
+    expect(cfg.filesystem['allowWrite']).toEqual(['/w']);
+    expect(cfg.filesystem['denyRead']).toEqual(['/p/.serva']);
+    // The runtime has no `allowRead`: reads are permitted unless denied. Emitting one
+    // would be emitting a key it validates against and rejects.
+    expect(cfg.filesystem['allowRead']).toBeUndefined();
+  });
+
   it('a sandbox runtime whose command line Serva cannot read is refused, not guessed', async () => {
     const guest = healthyGuest();
     guest['srt --help'] = { code: 0, stdout: 'usage: srt [--wat]\n' };
     const probe = await sandboxed(new StubTransport(guest), {
-      launcher: new ClaudeSandboxLauncher({ settingsPath: '/tmp/settings.json' }),
+      launcher: new ClaudeSandboxLauncher({
+        configHostPath: join(fixture(), 'srt.json'),
+        configGuestPath: '/tmp/srt.json',
+      }),
       purpose: BoundaryPurpose.PRODUCER,
       boundaryId: 'SC-BOUNDARY-PRODUCER',
     }).probe();

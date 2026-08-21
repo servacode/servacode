@@ -174,6 +174,17 @@ export class LocalPosixTransport implements ExecTransport {
 
 /** `C:\a\b` as WSL sees it. */
 export function toWslPath(hostPath: string): string {
+  /*
+   * IDEMPOTENT. A path that is already a guest path comes back unchanged.
+   *
+   * It was not, and the bug was invisible until the positive control caught it. On
+   * Windows, `path.resolve('/mnt/c/x')` returns `C:\mnt\c\x` — Node treats a POSIX
+   * absolute path as absolute on the current drive — so translating an already-guest
+   * path produced `/mnt/c/mnt/c/x`. Qualification then failed with a directory that
+   * does not exist, and the only reason it was not read as "the sandbox refused the
+   * write" is that Q-A exists to distinguish those two.
+   */
+  if (hostPath.startsWith('/')) return hostPath;
   const p = resolve(hostPath).replace(/\\/g, '/');
   const drive = /^([A-Za-z]):\//.exec(p);
   if (drive === null) return p;
@@ -270,6 +281,9 @@ export class WslTransport implements ExecTransport {
   }
 
   toGuestPath(hostPath: string): string {
+    // `toWslPath` is idempotent, so applying this twice is safe. It happens: the
+    // qualification builds a guest-path layout and then hands those paths to
+    // `execute`, which translates its own inputs.
     return isAbsolute(hostPath) || /^[A-Za-z]:/.test(hostPath) ? toWslPath(hostPath) : hostPath;
   }
 
