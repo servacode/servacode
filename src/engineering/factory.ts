@@ -1,0 +1,464 @@
+import { z } from 'zod';
+import { GateVerdict } from '../vocab/index.js';
+import { AuditAction, audit } from '../events/audit.js';
+import { fail } from '../core/errors.js';
+import { buildChangeSet, type ChangeSet, type ScopeOptions } from './changeset.js';
+import {
+  DEFAULT_REQUIRED_CHECKS,
+  RuntimeComponent,
+  runBuild,
+  runLint,
+  runScopeCheck,
+  runSecretsScan,
+  runTests,
+  type ExecutorContext,
+  type ExecutorOutcome,
+  type RequiredChecks,
+} from './executors.js';
+import { evidenceForChangeSet, type EngineeringEvidence, type ExecutorDeps } from './execution.js';
+import { evaluateEngineeringGate, type JudgedInput } from './gate.js';
+import { producerRefusal } from './capability.js';
+import {
+  WorkspaceState,
+  type EngineeringWorkspace,
+  type EngineeringWorkspaceManager,
+} from './workspace.js';
+import type { GateEngineDeps } from '../gates/engine.js';
+import type { GitService } from './git.js';
+import type { RecipeRegistry } from './recipe.js';
+import type { SubstrateQualification } from '../substrate/types.js';
+import type { ContractRegistry } from '../agents/registry.js';
+import type { Store } from '../store/store.js';
+import type { GateResult } from '../gates/types.js';
+
+/**
+ * The Engineering Factory. SPEC: Phase 4 §8, §20–§23.
+ *
+ * The flow, and the reason each arrow points the way it does:
+ *
+ *   work item -> worktree -> Producer -> ChangeSet -> deterministic checks
+ *             -> independent reviewer -> gate -> accept | rework | escalate
+ *
+ * Two properties hold throughout, and everything else follows from them:
+ *
+ *   - **The ChangeSet is computed by Serva, from the repository.** Every piece of
+ *     evidence names it. Change the code and the evidence still describes the old
+ *     ChangeSet — truthfully — and simply no longer applies.
+ *   - **Nothing an agent says becomes evidence.** A Producer's "tests pass" is a claim;
+ *     `SC-RTC-012` observing exit code 0 is a measurement, and only the second reaches
+ *     the gate.
+ */
+
+export const WORKITEM_CANON_TYPE = 'engineeringWorkItem';
+
+export const EngineeringWorkItemSchema = z
+  .object({
+    workItemId: z.string().min(1),
+    requestRef: z.string().optional(),
+    title: z.string().min(1),
+    requirements: z.array(z.string()).min(1),
+    acceptanceCriteria: z.array(z.string()).min(1),
+    decisions: z.array(z.string()).default([]),
+    /** The paths this change may touch. Empty means nothing is in scope. */
+    allowedScope: z.array(z.string()).min(1),
+    forbiddenScope: z.array(z.string()).default([]),
+    producerAgentId: z.string().regex(/^SC-AGENT-\d{3}$/),
+    reviewerAgentId: z.string().regex(/^SC-AGENT-\d{3}$/),
+    /** Registered recipe ids. A model may recommend one; it never composes one. */
+    recipes: z.array(z.string()).default([]),
+    magnitude: z.string(),
+    baseCommit: z.string().min(7),
+    expectedOutputs: z.array(z.string()).default([]),
+    maxAttempts: z.number().int().positive().max(5).default(2),
+  })
+  .strict()
+  .refine((w) => w.producerAgentId !== w.reviewerAgentId, {
+    // SC-POL-006 at the definition boundary: a work item that named one agent for both
+    // roles would be asking for a self-certified change before anything even ran.
+    message: 'The producer and the reviewer must be different agents (SC-POL-006).',
+  });
+
+export type EngineeringWorkItem = z.output<typeof EngineeringWorkItemSchema>;
+
+export const AttemptOutcome = {
+  ACCEPTED: 'ACCEPTED',
+  REWORK: 'REWORK',
+  BLOCKED: 'BLOCKED',
+  ESCALATED: 'ESCALATED',
+} as const;
+export type AttemptOutcome = (typeof AttemptOutcome)[keyof typeof AttemptOutcome];
+
+export interface VerificationResult {
+  readonly changeSet: ChangeSet;
+  readonly outcomes: readonly ExecutorOutcome[];
+  readonly evidence: readonly EngineeringEvidence[];
+  readonly staleEvidence: readonly EngineeringEvidence[];
+  readonly gateResult: GateResult;
+  readonly attemptOutcome: AttemptOutcome;
+  readonly unresolved: readonly string[];
+}
+
+export interface FactoryDeps {
+  readonly store: Store;
+  readonly git: GitService;
+  readonly workspaces: EngineeringWorkspaceManager;
+  readonly recipes: RecipeRegistry;
+  readonly registry: ContractRegistry;
+  readonly qualification: SubstrateQualification;
+  readonly executorDeps: ExecutorDeps;
+  readonly gateDeps: GateEngineDeps;
+  readonly projectRoot: string;
+  readonly enabledProducers: ReadonlySet<string>;
+}
+
+export class EngineeringFactory {
+  constructor(private readonly deps: FactoryDeps) {}
+
+  /**
+   * May this work item be attempted at all?
+   *
+   * Asked before a worktree is created, so a refusal costs nothing and leaves nothing
+   * behind. Returns the reason rather than a boolean: "no" without a reason is not an
+   * answer the owner can act on.
+   */
+  refusal(item: EngineeringWorkItem, workspace?: EngineeringWorkspace): string | undefined {
+    if (!this.deps.registry.has(item.producerAgentId)) {
+      return 'Unknown producer agent ' + item.producerAgentId + '.';
+    }
+    if (!this.deps.registry.has(item.reviewerAgentId)) {
+      return 'Unknown reviewer agent ' + item.reviewerAgentId + '.';
+    }
+    const conflict = this.deps.registry.conflicts(item.producerAgentId, item.reviewerAgentId);
+    void conflict; // distinct agents on a CoI pair is the separation working, not a fault
+
+    for (const recipeId of item.recipes) {
+      if (!this.deps.recipes.has(recipeId)) {
+        return 'Work item names unregistered recipe ' + recipeId + '.';
+      }
+    }
+
+    return producerRefusal({
+      contract: this.deps.registry.get(item.producerAgentId),
+      qualification: this.deps.qualification,
+      enabledProducers: this.deps.enabledProducers,
+      ...(workspace === undefined ? {} : { workspace }),
+      projectRoot: this.deps.projectRoot,
+      reviewerAvailable: this.deps.registry.has(item.reviewerAgentId),
+      executorsAvailable: this.deps.recipes.all().length > 0,
+    });
+  }
+
+  recordWorkItem(item: EngineeringWorkItem): EngineeringWorkItem {
+    const parsed = EngineeringWorkItemSchema.parse(item);
+    const tx = this.deps.store.begin();
+    tx.putCanon(WORKITEM_CANON_TYPE, parsed.workItemId, parsed);
+    tx.commit();
+    return parsed;
+  }
+
+  getWorkItem(workItemId: string): EngineeringWorkItem | undefined {
+    const env = this.deps.store.getCanon<unknown>(WORKITEM_CANON_TYPE, workItemId);
+    if (env === undefined) return undefined;
+    const parsed = EngineeringWorkItemSchema.safeParse(env.body);
+    return parsed.success ? parsed.data : undefined;
+  }
+
+  /** Create the isolated worktree for one attempt. */
+  async openWorkspace(
+    item: EngineeringWorkItem,
+    attempt: number,
+    sandboxProfileDigest: string,
+  ): Promise<EngineeringWorkspace> {
+    const refusal = this.refusal(item);
+    // A missing workspace is the expected state here, so that specific reason is not
+    // a refusal at this point; anything else is.
+    if (refusal !== undefined && !refusal.includes('No isolated worktree')) {
+      return fail({
+        code: 'E_CAPABILITY_NOT_ENABLED',
+        message: 'Cannot open an engineering workspace: ' + refusal,
+        remedy:
+          'Engineering execution requires a qualified substrate and a coherent work item. Nothing was created.',
+        details: { workItemId: item.workItemId, attempt },
+        specRef: 'Phase 4 §9',
+      });
+    }
+    return this.deps.workspaces.create({
+      projectId: this.deps.projectRoot,
+      workItemId: item.workItemId,
+      attempt,
+      producerAgentId: item.producerAgentId,
+      baseCommit: item.baseCommit,
+      expectedScope: { allow: item.allowedScope, forbid: item.forbiddenScope },
+      sandboxProfileDigest,
+      substrateClass: this.deps.qualification.enforcementClass,
+    });
+  }
+
+  /**
+   * Verify one attempt: observe the change, measure it, judge it, gate it.
+   *
+   * The order is not arbitrary. The ChangeSet is built FIRST, before any check runs, so
+   * every measurement that follows is bound to the same identity — and a Producer that
+   * edited a file after the tests ran produces a different ChangeSet, whose evidence
+   * set is empty rather than green.
+   */
+  async verifyAttempt(
+    item: EngineeringWorkItem,
+    workspace: EngineeringWorkspace,
+    o: {
+      readonly required?: RequiredChecks;
+      readonly judged?: readonly JudgedInput[];
+      readonly producerRunId?: string;
+      readonly scopeOptions?: Partial<ScopeOptions>;
+    } = {},
+  ): Promise<VerificationResult> {
+    const required = o.required ?? DEFAULT_REQUIRED_CHECKS;
+    const changeSet = await buildChangeSet(
+      {
+        store: this.deps.store,
+        git: this.deps.git,
+        clock: this.deps.executorDeps.clock,
+        ids: this.deps.executorDeps.ids,
+      },
+      workspace,
+      o.producerRunId,
+    );
+
+    const ctx: ExecutorContext = {
+      deps: this.deps.executorDeps,
+      recipes: this.deps.recipes,
+      workspace,
+      changeSet,
+      projectRoot: this.deps.projectRoot,
+      ...(o.producerRunId === undefined ? {} : { correlationId: o.producerRunId }),
+    };
+
+    const outcomes: ExecutorOutcome[] = [];
+    const unresolved: string[] = [];
+
+    /*
+     * Scope first, and unconditionally.
+     *
+     * A change that escaped its boundary should not have its tests run: the result
+     * would be a true statement about a change nobody authorized, and reporting it
+     * alongside a scope violation invites treating the green as the headline.
+     */
+    if (required.scope) {
+      outcomes.push(
+        runScopeCheck(ctx, {
+          allow: item.allowedScope,
+          forbid: item.forbiddenScope,
+          ...o.scopeOptions,
+        }),
+      );
+    }
+    if (required.secrets) outcomes.push(runSecretsScan(ctx));
+
+    const scopeFailed = outcomes.some(
+      (x) => x.component === RuntimeComponent.SCOPE && x.evidence.outcome === 'FAIL',
+    );
+    if (scopeFailed) {
+      unresolved.push(
+        'Deterministic checks were not run: the change is outside its declared scope, and measuring an unauthorized change would produce true statements about work nobody asked for.',
+      );
+    } else {
+      // Each executor records its own evidence and never throws for a command failure:
+      // a failing build is an outcome the gate must see, not an exception.
+      if (required.build) outcomes.push(await runBuild(ctx));
+      if (required.tests) outcomes.push(await runTests(ctx));
+      if (required.lint) outcomes.push(await runLint(ctx));
+    }
+
+    const { valid, stale } = evidenceForChangeSet(this.deps.store, changeSet.changeSetId);
+
+    const tx = this.deps.store.begin();
+    const gateResult = evaluateEngineeringGate(tx, this.deps.gateDeps, {
+      changeSet,
+      evidence: valid,
+      judged: o.judged ?? [],
+      required,
+    });
+    tx.commit();
+
+    const attemptOutcome = routeVerdict(gateResult.verdict);
+    if (attemptOutcome !== AttemptOutcome.ACCEPTED) {
+      for (const q of gateResult.qualifications) {
+        unresolved.push(q.kind + ' on ' + q.subject + ': ' + q.detail);
+      }
+    }
+
+    this.deps.workspaces.update(workspace.workspaceId, {
+      state:
+        attemptOutcome === AttemptOutcome.ACCEPTED
+          ? WorkspaceState.VERIFIED
+          : WorkspaceState.IN_USE,
+      headCommit: changeSet.headCommit,
+    });
+
+    return {
+      changeSet,
+      outcomes,
+      evidence: valid,
+      staleEvidence: stale,
+      gateResult,
+      attemptOutcome,
+      unresolved,
+    };
+  }
+
+  /**
+   * Accept a verified change and integrate it locally.
+   *
+   * Phase 4 performs NO remote write: no push, no PR, no remote branch. The accepted
+   * change becomes a deterministic local commit on its own branch, and that is where
+   * this phase stops.
+   */
+  async acceptChange(
+    item: EngineeringWorkItem,
+    workspace: EngineeringWorkspace,
+    verification: VerificationResult,
+  ): Promise<{ commit: string; branch: string }> {
+    if (verification.attemptOutcome !== AttemptOutcome.ACCEPTED) {
+      return fail({
+        code: 'E_INVALID_TRANSITION',
+        message:
+          'ChangeSet ' +
+          verification.changeSet.changeSetId +
+          ' is not accepted (' +
+          verification.gateResult.verdict +
+          ')',
+        remedy: 'A change is integrated only after its gate permits it.',
+        details: { verdict: verification.gateResult.verdict },
+        specRef: 'Phase 4 §23',
+      });
+    }
+
+    const paths = verification.changeSet.entries.filter((e) => e.status !== 'D').map((e) => e.path);
+    const staged = await this.deps.git.stagePaths(paths, workspace.path);
+    if (!staged.ok) {
+      return fail({
+        code: 'E_INTERNAL',
+        message: 'Could not stage the accepted paths',
+        remedy: 'Nothing was committed. Inspect the worktree.',
+        details: { stderr: staged.stderr.slice(0, 400) },
+      });
+    }
+
+    const message = [
+      item.title,
+      '',
+      'Work item: ' + item.workItemId,
+      'ChangeSet: ' + verification.changeSet.changeSetId,
+      'Producer:  ' + item.producerAgentId + ' (attempt ' + String(workspace.attempt) + ')',
+      'Reviewer:  ' + item.reviewerAgentId,
+      'Gate:      ' + verification.gateResult.verdict + ' (' + verification.gateResult.id + ')',
+      'Evidence:  ' + verification.evidence.map((e) => e.id).join(', '),
+    ].join('\n');
+
+    const committed = await this.deps.git.commit(message, workspace.path);
+    if (!committed.ok) {
+      return fail({
+        code: 'E_INTERNAL',
+        message: 'Could not create the accepted commit',
+        remedy: 'The worktree is unchanged. Nothing was integrated.',
+        details: { stderr: committed.stderr.slice(0, 400) },
+      });
+    }
+    const commit = await this.deps.git.headCommit(workspace.path);
+
+    this.deps.workspaces.update(workspace.workspaceId, {
+      state: WorkspaceState.ACCEPTED,
+      headCommit: commit,
+    });
+
+    const tx = this.deps.store.begin();
+    audit(tx, {
+      action: AuditAction.CHANGE_ACCEPTED,
+      subject: verification.changeSet.changeSetId,
+      outcome: 'OK',
+      detail: {
+        workItemId: item.workItemId,
+        commit,
+        branch: workspace.branch,
+        gateResult: verification.gateResult.id,
+        verdict: verification.gateResult.verdict,
+        evidence: verification.evidence.map((e) => e.id),
+        producerAgentId: item.producerAgentId,
+        reviewerAgentId: item.reviewerAgentId,
+      },
+    });
+    tx.commit();
+
+    return { commit, branch: workspace.branch };
+  }
+
+  /**
+   * Is another attempt permitted?
+   *
+   * Bounded by the work item's own `maxAttempts`. Past the limit the answer is
+   * ESCALATED with the unresolved evidence named — an unbounded repair loop is how a
+   * system spends a budget producing nothing and calls it persistence.
+   */
+  canRework(item: EngineeringWorkItem, attempt: number): { allowed: boolean; reason: string } {
+    if (attempt >= item.maxAttempts) {
+      return {
+        allowed: false,
+        reason:
+          'Attempt ' +
+          String(attempt) +
+          ' of ' +
+          String(item.maxAttempts) +
+          ' reached. Further attempts require an owner decision, not another retry.',
+      };
+    }
+    return { allowed: true, reason: 'Attempt ' + String(attempt + 1) + ' permitted.' };
+  }
+
+  /**
+   * The structured context a rework attempt receives.
+   *
+   * Deliberately built from EVIDENCE rather than from the previous run's reasoning: a
+   * fresh session gets what was measured, not what the last attempt thought (19 CX-2).
+   */
+  reworkContext(verification: VerificationResult): string {
+    const lines = [
+      'The previous attempt did not pass the Engineering Gate.',
+      'Gate verdict: ' + verification.gateResult.verdict,
+      '',
+      'What was measured against ChangeSet ' + verification.changeSet.changeSetId + ':',
+    ];
+    for (const e of verification.evidence) {
+      lines.push('  [' + e.outcome + '] ' + (e.runtimeComponentId ?? 'JUDGED') + ' — ' + e.detail);
+    }
+    if (verification.unresolved.length > 0) {
+      lines.push('', 'Unresolved:');
+      for (const u of verification.unresolved) lines.push('  - ' + u);
+    }
+    lines.push(
+      '',
+      'Every result above describes the PREVIOUS ChangeSet. Editing the code produces a',
+      'new one, and all of it must be measured again — nothing carries forward.',
+    );
+    return lines.join('\n');
+  }
+}
+
+/** 31 §4 — the gate verdict decides the route; the factory does not re-decide it. */
+export function routeVerdict(verdict: GateVerdict): AttemptOutcome {
+  switch (verdict) {
+    case GateVerdict.PASS:
+    case GateVerdict.PASS_WITH_QUALIFICATION:
+      return AttemptOutcome.ACCEPTED;
+    case GateVerdict.FAIL:
+      return AttemptOutcome.REWORK;
+    case GateVerdict.NOT_VERIFIED:
+      // Nobody looked. Rework, because re-measuring is exactly what is missing.
+      return AttemptOutcome.REWORK;
+    case GateVerdict.BLOCKED:
+      return AttemptOutcome.BLOCKED;
+    case GateVerdict.ESCALATED:
+      return AttemptOutcome.ESCALATED;
+    default:
+      return AttemptOutcome.BLOCKED;
+  }
+}

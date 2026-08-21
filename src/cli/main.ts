@@ -8,6 +8,13 @@ import { cmdGates } from './commands/gates.js';
 import { cmdWorkflows } from './commands/workflows.js';
 import { cmdAi, cmdAgents } from './commands/ai.js';
 import { cmdRoute, cmdRuns, cmdRun, cmdContext } from './commands/route.js';
+import {
+  cmdEngineering,
+  cmdWorktrees,
+  cmdChanges,
+  cmdEvidence,
+  cmdQualificationCatalogue,
+} from './commands/engineering.js';
 import { SERVA_VERSION, SPEC_BASELINE } from '../app/runtime.js';
 
 /**
@@ -74,6 +81,16 @@ const USAGE = [
   '  runs [--incomplete]           Governed AI runs recorded in this project',
   '  run <SC-RUN-...>              One run event log',
   '  context <SC-RUN-...>          Exactly what that run was shown',
+  '',
+  'Engineering factory:',
+  '  engineering status            Substrate class, governance state, enabled producers',
+  '  engineering qualify           Run the adversarial substrate qualification',
+  '  engineering doctor            Full substrate report with prerequisites',
+  '  engineering reconcile         Store vs. repository divergence',
+  '  worktrees [<id>]              Isolated engineering workspaces',
+  '  changes [<change-set-id>]     Observed change sets and their evidence',
+  '  evidence [<id>]               Runtime-captured evidence only',
+  '  qualification                 The adversarial qualification catalogue',
   '  help                          This message',
   '',
   'Global options:',
@@ -96,6 +113,13 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   runs: cmdRuns,
   run: cmdRun,
   context: cmdContext,
+  engineering: cmdEngineering,
+  worktrees: cmdWorktrees,
+  worktree: cmdWorktrees,
+  changes: cmdChanges,
+  change: cmdChanges,
+  evidence: cmdEvidence,
+  qualification: cmdQualificationCatalogue,
   help: () => {
     console.log(USAGE);
     return 0;

@@ -429,6 +429,27 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       if (norm.endsWith('src/cli/commands/ai.ts')) continue;
       if (norm.endsWith('src/cli/commands/route.ts')) continue;
       if (norm.endsWith('src/index.ts')) continue;
+      /*
+       * Phase 4 exceptions, each for a different reason, and each named rather than
+       * waved through by a directory-wide allowance:
+       *
+       *   host.ts / sandboxProfile.ts  the execution substrate IS the engine's sandbox
+       *                                (ADR-003). Probing for the engine binary inside
+       *                                WSL and writing the engine's sandbox settings are
+       *                                irreducibly provider-specific facts; pretending
+       *                                otherwise would hide a real coupling rather than
+       *                                remove it.
+       *   secrets.ts / recipe.ts       these name the provider only as a CREDENTIAL
+       *                                SHAPE — `sk-ant-`, `ANTHROPIC_*`, `CLAUDE*` — in
+       *                                order to detect and scrub it. That is the
+       *                                opposite of coupling to the provider.
+       *
+       * The test below proves none of them reaches into the adapter.
+       */
+      if (norm.endsWith('src/substrate/host.ts')) continue;
+      if (norm.endsWith('src/engineering/sandboxProfile.ts')) continue;
+      if (norm.endsWith('src/engineering/secrets.ts')) continue;
+      if (norm.endsWith('src/engineering/recipe.ts')) continue;
       const text = readFileSync(file, 'utf8');
       const stripped = text
         .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -441,6 +462,20 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  it('the provider-naming exceptions still do not import the adapter', () => {
+    // Naming the provider because a sandbox or a credential pattern is provider-shaped
+    // is one thing. Reaching into `src/engine/claude` from the substrate or the
+    // engineering layer would be the coupling this rule actually exists to prevent.
+    for (const file of [
+      'src/substrate/host.ts',
+      'src/engineering/sandboxProfile.ts',
+      'src/engineering/secrets.ts',
+      'src/engineering/recipe.ts',
+    ]) {
+      expect(readFileSync(file, 'utf8')).not.toContain('engine/claude');
+    }
   });
 
   it('the agent runtime depends on the interface, not on an implementation', () => {

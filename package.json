@@ -27,7 +27,8 @@
     "serva": "node dist/cli/main.js",
     "contracts": "node scripts/generate-agent-contracts.mjs",
     "generate": "npm run catalogues && npm run contracts",
-    "test:claude": "vitest run --config vitest.live.config.ts"
+    "test:claude": "vitest run --config vitest.live.config.ts",
+    "test:engineering-live": "vitest run --config vitest.engineering.config.ts"
   },
   "dependencies": {
     "zod": "^3.23.8"

@@ -1,0 +1,1018 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { EnforcementClass, EvidenceClass, GateVerdict, ValidityState } from '../src/vocab/index.js';
+import { ContractRegistry } from '../src/agents/registry.js';
+import { FakeExecutionSubstrate, makeFixtureDir, removeFixtureDir } from '../src/substrate/fake.js';
+import { GitService } from '../src/engineering/git.js';
+import { EngineeringWorkspaceManager } from '../src/engineering/workspace.js';
+import {
+  BUILTIN_RECIPES,
+  ExecutionRecipeSchema,
+  MINIMAL_ENV_KEYS,
+  RecipeRegistry,
+  scrubEnvironment,
+  validateRecipe,
+  type ExecutionRecipe,
+} from '../src/engineering/recipe.js';
+import {
+  ExecutionOutcome,
+  deriveEvidenceValidity,
+  listExecutions,
+  runRecipe,
+  type ExecutorDeps,
+} from '../src/engineering/execution.js';
+import { buildChangeSet, type ChangeSet } from '../src/engineering/changeset.js';
+import {
+  DEFAULT_REQUIRED_CHECKS,
+  RuntimeComponent,
+  runSecretsScan,
+  type ExecutorContext,
+} from '../src/engineering/executors.js';
+import { buildCriterionEvaluations, evaluateEngineeringGate } from '../src/engineering/gate.js';
+import {
+  PRODUCER_DENIED_COMMANDS,
+  producerRefusal,
+  resolveProducerPolicy,
+  resolveReviewerPolicy,
+} from '../src/engineering/capability.js';
+import { EngineeringFactory, routeVerdict } from '../src/engineering/factory.js';
+import { scanText } from '../src/engineering/secrets.js';
+import { cleanup, freshStore } from './helpers.js';
+import { SequentialIdSource } from '../src/core/ids.js';
+import { FixedClock } from '../src/core/clock.js';
+
+/**
+ * EVIDENCE, THE ENGINEERING GATE, AND PRODUCER CAPABILITY.
+ *
+ * The property under test throughout: **an agent's claim is never evidence.** Only a
+ * runtime component's observation reaches the gate, only against the ChangeSet it
+ * measured, and editing the code makes every earlier measurement stale rather than
+ * carrying it forward.
+ *
+ * These tests run REAL child processes against a REAL disposable Git repository, never
+ * against the Serva source tree. The fixture recipes invoke `node` directly rather than
+ * `npm`, because `npm` is a shell script on Windows and the substrate spawns without a
+ * shell on purpose — a test that needed a shell would be testing a boundary Serva
+ * deliberately does not grant.
+ */
+
+const roots: string[] = [];
+const fixtures: string[] = [];
+afterEach(() => {
+  for (const r of roots.splice(0)) cleanup(r);
+  for (const f of fixtures.splice(0)) removeFixtureDir(f);
+});
+
+const registry = ContractRegistry.shared();
+
+/** Recipes for the fixture repository: same ids, same components, no npm shim. */
+function fixtureRecipe(o: {
+  id: string;
+  args: string[];
+  component: string;
+  timeoutMs?: number;
+  maxOutputBytes?: number;
+}): ExecutionRecipe {
+  return ExecutionRecipeSchema.parse({
+    id: o.id,
+    purpose: 'Fixture recipe for the engineering test suite.',
+    executable: 'node',
+    args: o.args,
+    cwdPolicy: 'WORKSPACE',
+    environmentPolicy: 'MINIMAL',
+    networkPolicy: 'NONE',
+    timeoutMs: o.timeoutMs ?? 60_000,
+    maxOutputBytes: o.maxOutputBytes ?? 1_000_000,
+    successExitCodes: [0],
+    evidenceClass: EvidenceClass.EXECUTION,
+    runtimeComponentId: o.component,
+    applicability: 'The disposable fixture repository only.',
+  });
+}
+
+const FIXTURE_RECIPES: readonly ExecutionRecipe[] = [
+  fixtureRecipe({ id: 'SC-RECIPE-UNIT-TEST', args: ['test.js'], component: 'SC-RTC-012' }),
+  fixtureRecipe({ id: 'SC-RECIPE-BUILD', args: ['build.js'], component: 'SC-RTC-011' }),
+  fixtureRecipe({ id: 'SC-RECIPE-LINT', args: ['lint.js'], component: 'SC-RTC-013' }),
+  fixtureRecipe({
+    id: 'SC-RECIPE-SLOW',
+    args: ['-e', 'setTimeout(function () {}, 60000)'],
+    component: 'SC-RTC-012',
+    timeoutMs: 1_000,
+  }),
+  fixtureRecipe({
+    id: 'SC-RECIPE-NOISY',
+    args: ['-e', 'process.stdout.write("x".repeat(50000))'],
+    component: 'SC-RTC-012',
+    maxOutputBytes: 1_000,
+  }),
+];
+
+const BASE_RECIPE = FIXTURE_RECIPES[0]!;
+
+interface Fixture {
+  readonly repo: string;
+  readonly base: string;
+  readonly store: ReturnType<typeof freshStore>['store'];
+  readonly git: GitService;
+  readonly substrate: FakeExecutionSubstrate;
+  readonly qualification: Awaited<ReturnType<FakeExecutionSubstrate['qualify']>>;
+  readonly recipes: RecipeRegistry;
+  readonly executorDeps: ExecutorDeps;
+  readonly gateDeps: { ids: SequentialIdSource; clock: FixedClock; evaluator: string };
+  readonly factory: EngineeringFactory;
+  readonly deps: ReturnType<typeof freshStore>['deps'];
+}
+
+/**
+ * A disposable fixture repository, never the real source tree.
+ *
+ * `passing` decides whether the fixture's own test script exits 0 or 1, which is how a
+ * gate failure is produced from a genuine measurement rather than from a stub.
+ */
+async function setupFactory(
+  passing = true,
+  enforcement: 'HARD' | 'SOFT' | 'NONE' = 'HARD',
+): Promise<Fixture> {
+  const { store, root, deps } = freshStore();
+  roots.push(root);
+
+  const repo = join(root, 'fixture-repo');
+  mkdirSync(join(repo, 'src'), { recursive: true });
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+  writeFileSync(join(repo, 'package.json'), '{"name":"fixture","private":true}\n', 'utf8');
+  writeFileSync(
+    join(repo, 'test.js'),
+    passing
+      ? 'process.exit(0);\n'
+      : 'console.error("assertion failed: expected 2, got 1");\nprocess.exit(1);\n',
+    'utf8',
+  );
+  writeFileSync(join(repo, 'build.js'), 'process.exit(0);\n', 'utf8');
+  writeFileSync(join(repo, 'lint.js'), 'process.exit(0);\n', 'utf8');
+  writeFileSync(join(repo, 'src', 'app.js'), 'module.exports = 1;\n', 'utf8');
+
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'fixture@localhost');
+  git('config', 'user.name', 'Fixture');
+  git('config', 'commit.gpgsign', 'false');
+  git('add', '.');
+  git('commit', '-q', '-m', 'base');
+  const base = git('rev-parse', 'HEAD').trim();
+
+  const service = new GitService({ repoRoot: repo });
+  const workspaces = new EngineeringWorkspaceManager({
+    store,
+    git: service,
+    clock: deps.clock,
+    projectRoot: repo,
+  });
+  const substrate = new FakeExecutionSubstrate({ clock: new FixedClock(), enforcement });
+  const fixtureDir = makeFixtureDir();
+  fixtures.push(fixtureDir);
+  const qualification = await substrate.qualify(fixtureDir);
+  const recipes = new RecipeRegistry(FIXTURE_RECIPES);
+
+  const executorDeps: ExecutorDeps = {
+    store,
+    clock: deps.clock,
+    ids: deps.ids,
+    substrate,
+    qualification,
+    env: process.env,
+  };
+  const gateDeps = {
+    ids: deps.ids as SequentialIdSource,
+    clock: deps.clock as FixedClock,
+    evaluator: 'ENGINEERING_GATE',
+  };
+
+  const factory = new EngineeringFactory({
+    store,
+    git: service,
+    workspaces,
+    recipes,
+    registry,
+    qualification,
+    executorDeps,
+    gateDeps,
+    projectRoot: repo,
+    enabledProducers: new Set(['SC-AGENT-150']),
+  });
+
+  return {
+    repo,
+    base,
+    store,
+    git: service,
+    substrate,
+    qualification,
+    recipes,
+    executorDeps,
+    gateDeps,
+    factory,
+    deps,
+  };
+}
+
+const WORK_ITEM = {
+  workItemId: 'SC-WI-000100',
+  title: 'Fix the failing assertion',
+  requirements: ['The module returns 2.'],
+  acceptanceCriteria: ['The declared test suite passes.'],
+  decisions: [],
+  allowedScope: ['src/'],
+  forbiddenScope: [],
+  producerAgentId: 'SC-AGENT-150',
+  reviewerAgentId: 'SC-AGENT-200',
+  recipes: ['SC-RECIPE-UNIT-TEST'],
+  magnitude: 'M1',
+  baseCommit: 'placeholder',
+  expectedOutputs: [],
+  maxAttempts: 2,
+};
+
+const NO_REVIEW = {
+  ...DEFAULT_REQUIRED_CHECKS,
+  build: false,
+  lint: false,
+  codeReview: false,
+};
+
+const SCOPE_AND_TESTS = {
+  scope: true,
+  build: false,
+  tests: true,
+  lint: false,
+  secrets: false,
+  codeReview: false,
+  qaVerification: false,
+};
+
+const JUDGED_ONLY = {
+  ...DEFAULT_REQUIRED_CHECKS,
+  scope: false,
+  build: false,
+  tests: false,
+  lint: false,
+  secrets: false,
+};
+
+/** A ChangeSet stand-in for the pure gate-composition tests. */
+function changeSetRef(id: string): ChangeSet {
+  return { changeSetId: id } as unknown as ChangeSet;
+}
+
+function pureGateDeps(): { ids: SequentialIdSource; clock: FixedClock } {
+  return { ids: new SequentialIdSource(), clock: new FixedClock() };
+}
+
+/* ================================================================= recipes */
+
+describe('a recipe is data, never prose', () => {
+  it('every builtin recipe is valid', () => {
+    for (const r of BUILTIN_RECIPES) expect(() => validateRecipe(r)).not.toThrow();
+  });
+
+  it('a model names a recipe; it cannot compose one', () => {
+    const reg = new RecipeRegistry();
+    expect(reg.get('SC-RECIPE-UNIT-TEST').executable).toBe('npm');
+    // The one place a model-supplied string touches execution can only ever select.
+    expect(() => reg.get('rm -rf /')).toThrowError(/Unknown execution recipe/);
+    expect(() => reg.get('SC-RECIPE-EVIL')).toThrowError(/Unknown execution recipe/);
+  });
+
+  it('shell evaluation is refused at registration', () => {
+    const r = ExecutionRecipeSchema.parse({
+      ...BASE_RECIPE,
+      id: 'SC-RECIPE-SHELL',
+      shellEvaluation: true,
+    });
+    expect(() => validateRecipe(r)).toThrowError(/does not grant/);
+    expect(() => new RecipeRegistry([r])).toThrowError(/does not grant/);
+  });
+
+  it('a network grant must name its hosts', () => {
+    const r = ExecutionRecipeSchema.parse({
+      ...BASE_RECIPE,
+      id: 'SC-RECIPE-NET',
+      networkPolicy: 'DECLARED_HOSTS',
+      declaredHosts: [],
+    });
+    expect(() => validateRecipe(r)).toThrowError(/no hosts/);
+  });
+
+  it('the executable is a bare program name, never a path or a shell line', () => {
+    expect(() =>
+      ExecutionRecipeSchema.parse({ ...BASE_RECIPE, executable: 'sh -c evil' }),
+    ).toThrowError();
+    expect(() =>
+      ExecutionRecipeSchema.parse({ ...BASE_RECIPE, executable: '../../evil' }),
+    ).toThrowError();
+    expect(() =>
+      ExecutionRecipeSchema.parse({ ...BASE_RECIPE, executable: '/bin/sh' }),
+    ).toThrowError();
+  });
+
+  it('an argument carrying a NUL byte is refused', () => {
+    const r = ExecutionRecipeSchema.parse({
+      ...BASE_RECIPE,
+      id: 'SC-RECIPE-NUL',
+      args: ['ok', 'bad' + String.fromCharCode(0) + 'tail'],
+    });
+    expect(() => validateRecipe(r)).toThrowError(/NUL byte/);
+  });
+});
+
+/* ============================================================ environment */
+
+describe('the environment a recipe sees is constructed, not inherited', () => {
+  it('MINIMAL keeps an allowlist and drops everything else', () => {
+    const env = scrubEnvironment('MINIMAL', {
+      PATH: '/usr/bin',
+      ANTHROPIC_API_KEY: 'sk-ant-secret',
+      GITHUB_TOKEN: 'ghp_secret',
+      RANDOM_THING: 'x',
+    });
+    expect(env['PATH']).toBe('/usr/bin');
+    expect(env['ANTHROPIC_API_KEY']).toBeUndefined();
+    expect(env['RANDOM_THING']).toBeUndefined();
+    for (const k of Object.keys(env)) expect(MINIMAL_ENV_KEYS).toContain(k);
+  });
+
+  it('INHERIT_SAFE still drops anything credential-shaped', () => {
+    const env = scrubEnvironment('INHERIT_SAFE', {
+      PATH: '/usr/bin',
+      MY_API_KEY: 'x',
+      AWS_SECRET_ACCESS_KEY: 'x',
+      CLAUDE_CODE_TOKEN: 'x',
+      SESSION_ID: 'x',
+      HARMLESS: 'y',
+    });
+    expect(env['HARMLESS']).toBe('y');
+    expect(env['PATH']).toBe('/usr/bin');
+    expect(env['MY_API_KEY']).toBeUndefined();
+    expect(env['AWS_SECRET_ACCESS_KEY']).toBeUndefined();
+    expect(env['CLAUDE_CODE_TOKEN']).toBeUndefined();
+    expect(env['SESSION_ID']).toBeUndefined();
+  });
+});
+
+/* ======================================== execution requires a real boundary */
+
+describe('no command runs outside a boundary Serva has measured', () => {
+  function request(f: Fixture, recipeId = 'SC-RECIPE-UNIT-TEST') {
+    return {
+      recipe: f.recipes.get(recipeId),
+      workItemId: 'SC-WI-000100',
+      workspaceId: 'w',
+      workspacePath: f.repo,
+      projectRoot: f.repo,
+      baseCommit: f.base,
+      headCommit: f.base,
+    };
+  }
+
+  it('a SOFT substrate refuses to execute a recipe', async () => {
+    const f = await setupFactory(true, 'SOFT');
+    await expect(runRecipe(f.executorDeps, request(f))).rejects.toThrowError(/requires HARD/);
+  });
+
+  it('a NONE substrate refuses too', async () => {
+    const f = await setupFactory(true, 'NONE');
+    await expect(runRecipe(f.executorDeps, request(f))).rejects.toThrowError(/requires HARD/);
+  });
+
+  it('the refused command was never offered to a process', async () => {
+    const f = await setupFactory(true, 'SOFT');
+    await expect(runRecipe(f.executorDeps, request(f))).rejects.toThrow();
+    expect(f.substrate.executed).toHaveLength(0);
+    expect(listExecutions(f.store)).toHaveLength(0);
+  });
+});
+
+/* =================================================== bounded, real execution */
+
+describe('a command execution is recorded as bounded fact', () => {
+  function request(f: Fixture, recipeId: string) {
+    return {
+      recipe: f.recipes.get(recipeId),
+      workItemId: 'SC-WI-000100',
+      workspaceId: 'w',
+      workspacePath: f.repo,
+      projectRoot: f.repo,
+      baseCommit: f.base,
+      headCommit: f.base,
+    };
+  }
+
+  it('a timeout is TIMED_OUT, which is not a test failure', async () => {
+    const f = await setupFactory(true);
+    const rec = await runRecipe(f.executorDeps, request(f, 'SC-RECIPE-SLOW'));
+    expect(rec.outcome).toBe(ExecutionOutcome.TIMED_OUT);
+    expect(rec.terminationReason).toMatch(/wall-clock timeout/);
+    // FAIL says the code is wrong; this says we could not find out.
+    expect(rec.outcome).not.toBe(ExecutionOutcome.FAILED);
+  }, 30_000);
+
+  it('output is capped and the record says so', async () => {
+    const f = await setupFactory(true);
+    const rec = await runRecipe(f.executorDeps, request(f, 'SC-RECIPE-NOISY'));
+    expect(rec.truncated.stdout).toBe(true);
+    expect(rec.stdoutExcerpt.length).toBeLessThanOrEqual(2_000);
+    expect(rec.stdoutDigest).toHaveLength(64);
+  }, 30_000);
+
+  it('the record carries the environment shape and never its values', async () => {
+    const f = await setupFactory(true);
+    const rec = await runRecipe(f.executorDeps, request(f, 'SC-RECIPE-BUILD'));
+    expect(rec.outcome).toBe(ExecutionOutcome.SUCCEEDED);
+    expect(rec.environmentDigest).toHaveLength(64);
+    expect(rec.substrateQualificationDigest).toHaveLength(64);
+    expect(rec.substrateClass).toBe(EnforcementClass.HARD);
+    expect(JSON.stringify(rec)).not.toMatch(/sk-ant-|ghp_/);
+  }, 30_000);
+});
+
+/* ================================================ the executors do the measuring */
+
+describe('the Test Executor measures; the Producer does not', () => {
+  async function verifyOnce(passing: boolean, edit: (w: string) => void) {
+    const f = await setupFactory(passing);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    edit(w.path);
+    const verification = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    return { f, item, w, verification };
+  }
+
+  it('a failing suite produces FAIL evidence with a real exit code', async () => {
+    const { f, verification } = await verifyOnce(false, (w) => {
+      writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 1;\n// edited\n', 'utf8');
+    });
+    const test = verification.evidence.find((e) => e.runtimeComponentId === RuntimeComponent.TEST);
+    expect(test?.outcome).toBe('FAIL');
+    expect(test?.basis).toBe('MEASURED');
+    // SC-POL-023: only the runtime captures evidence.
+    expect(test?.capturedBy).toBe('RUNTIME');
+
+    const exec = listExecutions(f.store).find((x) => x.executionId === test?.executionId);
+    expect(exec?.outcome).toBe(ExecutionOutcome.FAILED);
+    expect(exec?.exitCode).toBe(1);
+    expect(exec?.stderrExcerpt).toContain('assertion failed');
+  }, 60_000);
+
+  it('a passing suite produces PASS evidence bound to this ChangeSet', async () => {
+    const { verification } = await verifyOnce(true, (w) => {
+      writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+    });
+    const test = verification.evidence.find((e) => e.runtimeComponentId === RuntimeComponent.TEST);
+    expect(test?.outcome).toBe('PASS');
+    expect(test?.changeSetId).toBe(verification.changeSet.changeSetId);
+  }, 60_000);
+
+  it('a Producer asserting success cannot make a failing suite pass', async () => {
+    /*
+     * The Producer's opinion is not a parameter of this path at all. That is the
+     * strongest form the rule takes: there is no argument through which a claim could
+     * arrive, so there is nothing to trust or distrust.
+     */
+    const { verification } = await verifyOnce(false, (w) => {
+      writeFileSync(
+        join(w, 'src', 'app.js'),
+        'module.exports = 1;\n// All tests pass. Verified. Ship it.\n',
+        'utf8',
+      );
+    });
+    expect(verification.gateResult.verdict).not.toBe(GateVerdict.PASS);
+    expect(verification.attemptOutcome).not.toBe('ACCEPTED');
+  }, 60_000);
+
+  it('the ChangeSet is computed from the repository, not declared', async () => {
+    const { verification } = await verifyOnce(true, (w) => {
+      writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+      writeFileSync(join(w, 'src', 'extra.js'), 'module.exports = 3;\n', 'utf8');
+    });
+    const paths = verification.changeSet.entries.map((e) => e.path).sort();
+    // Both files appear because git saw them, not because anyone listed them.
+    expect(paths).toEqual(['src/app.js', 'src/extra.js']);
+    expect(verification.changeSet.digest).toHaveLength(64);
+  }, 60_000);
+});
+
+/* ================================================================= staleness */
+
+describe('evidence is bound to a ChangeSet, so editing the code makes it stale', () => {
+  it('evidence measured for one ChangeSet does not apply to the next', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+    const first = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    expect(first.evidence.length).toBeGreaterThan(0);
+
+    // The earlier measurement is still TRUE — about the earlier ChangeSet.
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 3;\n', 'utf8');
+    const second = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+
+    expect(second.changeSet.changeSetId).not.toBe(first.changeSet.changeSetId);
+    expect(second.staleEvidence.length).toBeGreaterThanOrEqual(first.evidence.length);
+    for (const e of first.evidence) {
+      expect(deriveEvidenceValidity(e, second.changeSet.changeSetId)).toBe(ValidityState.STALE);
+      expect(deriveEvidenceValidity(e, first.changeSet.changeSetId)).toBe(ValidityState.VALID);
+    }
+    // Staleness is derived, never written: the historical record is untouched.
+    expect(first.evidence.every((e) => e.changeSetId === first.changeSet.changeSetId)).toBe(true);
+  }, 90_000);
+
+  it('stale evidence cannot satisfy a criterion however green it was', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+    const first = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    expect(first.evidence.some((e) => e.outcome === 'PASS')).toBe(true);
+
+    const evaluations = buildCriterionEvaluations(pureGateDeps(), {
+      changeSet: changeSetRef('SC-CS-SOMETHING-ELSE'),
+      evidence: first.evidence,
+      judged: [],
+      required: NO_REVIEW,
+    });
+    expect(evaluations.every((e) => e.value === 'INDETERMINATE')).toBe(true);
+  }, 60_000);
+});
+
+/* ===================================================== the Engineering Gate */
+
+describe('the Engineering Gate uses the Phase 2 engine and nothing bespoke', () => {
+  it('missing test evidence is NOT_VERIFIED, never FAIL', async () => {
+    // NO EVIDENCE = NOT VERIFIED. Absence of a measurement is not proof of a defect.
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+
+    const changeSet = await buildChangeSet(
+      { store: f.store, git: f.git, clock: f.deps.clock, ids: f.deps.ids },
+      w,
+    );
+    const tx = f.store.begin();
+    const result = evaluateEngineeringGate(tx, f.gateDeps, {
+      changeSet,
+      evidence: [],
+      judged: [],
+      required: SCOPE_AND_TESTS,
+    });
+    tx.commit();
+    expect(result.verdict).toBe(GateVerdict.NOT_VERIFIED);
+    expect(routeVerdict(result.verdict)).toBe('REWORK');
+  }, 60_000);
+
+  it('a failing test drives the gate away from PASS', async () => {
+    const f = await setupFactory(false);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 1;\n// edit\n', 'utf8');
+    const v = await f.factory.verifyAttempt(item, w, { required: SCOPE_AND_TESTS });
+    expect(v.gateResult.verdict).toBe(GateVerdict.FAIL);
+    expect(v.attemptOutcome).toBe('REWORK');
+  }, 60_000);
+
+  it('a scope violation stops the deterministic checks from running at all', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    // Outside `src/`, which the work item declared as the only allowed scope.
+    writeFileSync(join(w.path, 'package.json'), '{"name":"hijacked"}\n', 'utf8');
+
+    const v = await f.factory.verifyAttempt(item, w, { required: SCOPE_AND_TESTS });
+    const scope = v.evidence.find((e) => e.runtimeComponentId === RuntimeComponent.SCOPE);
+    expect(scope?.outcome).toBe('FAIL');
+    expect(scope?.detail).toContain('OUTSIDE_ALLOWED_SCOPE');
+    // Measuring an unauthorized change would produce true statements about work nobody
+    // asked for, and the green would read as the headline.
+    expect(v.evidence.some((e) => e.runtimeComponentId === RuntimeComponent.TEST)).toBe(false);
+    expect(v.unresolved.join(' ')).toMatch(/outside its declared scope/);
+    expect(v.attemptOutcome).not.toBe('ACCEPTED');
+  }, 60_000);
+
+  it('every criterion resolves to exactly one evaluation', () => {
+    const evaluations = buildCriterionEvaluations(pureGateDeps(), {
+      changeSet: changeSetRef('SC-CS-1'),
+      evidence: [],
+      judged: [],
+      required: DEFAULT_REQUIRED_CHECKS,
+    });
+    const refs = evaluations.map((e) => e.criterionRef);
+    expect(new Set(refs).size).toBe(refs.length);
+    expect(refs).toEqual([
+      'EC-SCOPE',
+      'EC-BUILD',
+      'EC-TESTS',
+      'EC-LINT',
+      'EC-SECRETS',
+      'EC-REVIEW',
+    ]);
+  });
+
+  it('a reviewer rejection is NOT_MET at BLOCKING severity', () => {
+    const evaluations = buildCriterionEvaluations(pureGateDeps(), {
+      changeSet: changeSetRef('SC-CS-1'),
+      evidence: [],
+      judged: [
+        {
+          criterionId: 'EC-REVIEW',
+          outcome: 'FAIL',
+          detail: 'rejected: the change does not do what the work item asked',
+          runRef: 'SC-RUN-000001',
+          reviewerRole: 'CODE_REVIEW',
+        },
+      ],
+      required: JUDGED_ONLY,
+    });
+    const review = evaluations.find((e) => e.criterionRef === 'EC-REVIEW');
+    expect(review?.value).toBe('NOT_MET');
+    expect(review?.severity).toBe('BLOCKING');
+    expect(review?.basis).toBe('JUDGED');
+  });
+
+  it('a missing reviewer verdict is INDETERMINATE, not an implicit approval', () => {
+    const evaluations = buildCriterionEvaluations(pureGateDeps(), {
+      changeSet: changeSetRef('SC-CS-1'),
+      evidence: [],
+      judged: [],
+      required: JUDGED_ONLY,
+    });
+    expect(evaluations.find((e) => e.criterionRef === 'EC-REVIEW')?.value).toBe('INDETERMINATE');
+  });
+});
+
+/* ================================================================== secrets */
+
+describe('the secrets scanner reports without disclosing', () => {
+  it('detects a private key and never echoes it', () => {
+    const findings = scanText('a.pem', '-----BEGIN RSA PRIVATE KEY-----\nMIIabcdefgh\n');
+    expect(findings[0]?.category).toBe('PRIVATE_KEY');
+    expect(findings[0]?.severity).toBe('HIGH');
+    expect(findings[0]?.matchDigest).toHaveLength(64);
+    expect(JSON.stringify(findings)).not.toContain('PRIVATE KEY-----');
+  });
+
+  it('detects vendor key shapes', () => {
+    expect(scanText('x', 'const k = "sk-ant-abcdefghijklmnop123"')[0]?.category).toBe(
+      'ANTHROPIC_KEY',
+    );
+    expect(scanText('x', 'AKIAIOSFODNN7XAMPLEQ')[0]?.category).toBe('AWS_ACCESS_KEY');
+    expect(scanText('x', 'ghp_abcdefghijklmnopqrstuvwxyz0123')[0]?.category).toBe('GITHUB_TOKEN');
+  });
+
+  it('a placeholder is downgraded but never suppressed', () => {
+    const f = scanText('x', 'const k = "sk-ant-abcdefghijklmnop123"; // placeholder');
+    expect(f).toHaveLength(1);
+    // Downgraded, because the scanner does not get to decide that a comment is telling
+    // the truth — and never dropped, because a real key labelled "placeholder" would
+    // then disappear entirely.
+    expect(f[0]?.severity).toBe('MEDIUM');
+  });
+
+  it('a high-confidence finding blocks, and the report withholds the value', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(
+      join(w.path, 'src', 'config.js'),
+      'module.exports = { key: "ghp_abcdefghijklmnopqrstuvwxyz0123" };\n',
+      'utf8',
+    );
+    const changeSet = await buildChangeSet(
+      { store: f.store, git: f.git, clock: f.deps.clock, ids: f.deps.ids },
+      w,
+    );
+    const ctx: ExecutorContext = {
+      deps: f.executorDeps,
+      recipes: f.recipes,
+      workspace: w,
+      changeSet,
+      projectRoot: f.repo,
+    };
+    const out = runSecretsScan(ctx);
+    expect(out.evidence.outcome).toBe('FAIL');
+    expect(out.evidence.detail).toContain('src/config.js');
+    expect(out.evidence.detail).toMatch(/withheld by design/);
+    // The value itself never enters the store.
+    expect(out.evidence.detail).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123');
+    expect(JSON.stringify(f.store.getCanon('engineeringEvidence', out.evidence.id))).not.toContain(
+      'ghp_abcdefghijklmnopqrstuvwxyz0123',
+    );
+  }, 60_000);
+
+  it('a clean scan says what it actually checked', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+    const changeSet = await buildChangeSet(
+      { store: f.store, git: f.git, clock: f.deps.clock, ids: f.deps.ids },
+      w,
+    );
+    const out = runSecretsScan({
+      deps: f.executorDeps,
+      recipes: f.recipes,
+      workspace: w,
+      changeSet,
+      projectRoot: f.repo,
+    });
+    expect(out.evidence.outcome).toBe('PASS');
+    // Not "the change is secure" — "nothing matched these rules".
+    expect(out.evidence.detail).toMatch(/it is not a security review/);
+  }, 60_000);
+});
+
+/* ==================================================== Producer capability */
+
+describe('a Producer is dispatched only when every condition is true', () => {
+  const producer = (): ReturnType<ContractRegistry['get']> => registry.get('SC-AGENT-150');
+
+  function gate(
+    f: Fixture,
+    o: Partial<Parameters<typeof producerRefusal>[0]> = {},
+  ): string | undefined {
+    return producerRefusal({
+      contract: producer(),
+      qualification: f.qualification,
+      enabledProducers: new Set(['SC-AGENT-150']),
+      projectRoot: f.repo,
+      reviewerAvailable: true,
+      executorsAvailable: true,
+      ...o,
+    });
+  }
+
+  it('a SOFT substrate refuses write authority', async () => {
+    const f = await setupFactory(true, 'SOFT');
+    expect(gate(f)).toMatch(/requires HARD/);
+  });
+
+  it('an agent outside the enabled set is refused', async () => {
+    const f = await setupFactory(true);
+    expect(gate(f, { enabledProducers: new Set() })).toMatch(/not in the enabled Producer set/);
+  });
+
+  it('a VERIFIER is refused write authority whatever the substrate can do', async () => {
+    const f = await setupFactory(true);
+    expect(
+      gate(f, {
+        contract: registry.get('SC-AGENT-200'),
+        enabledProducers: new Set(['SC-AGENT-200']),
+      }),
+    ).toMatch(/write authority belongs to a PRODUCER/);
+  });
+
+  it('no worktree means no dispatch', async () => {
+    const f = await setupFactory(true);
+    expect(gate(f)).toMatch(/never edits the primary checkout/);
+  });
+
+  it('a workspace that resolves to the primary checkout is refused', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    expect(gate(f, { workspace: { ...w, path: f.repo } })).toMatch(
+      /resolves to the primary checkout/,
+    );
+  }, 30_000);
+
+  it('no reviewer means no dispatch', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    expect(gate(f, { workspace: w, reviewerAvailable: false })).toMatch(
+      /never certifies its own work/,
+    );
+  }, 30_000);
+
+  it('no evidence executors means no dispatch', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    expect(gate(f, { workspace: w, executorsAvailable: false })).toMatch(
+      /a change nobody can measure cannot be accepted/,
+    );
+  }, 30_000);
+
+  it('a refused dispatch is an error, never a quiet downgrade to read-only', async () => {
+    const f = await setupFactory(true, 'SOFT');
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    expect(() =>
+      resolveProducerPolicy({
+        contract: producer(),
+        workspace: { workItemId: item.workItemId, path: join(f.repo, 'nope') } as never,
+        qualification: f.qualification,
+        enabledProducers: new Set(['SC-AGENT-150']),
+        projectRoot: f.repo,
+        reviewerAvailable: true,
+        executorsAvailable: true,
+      }),
+    ).toThrowError(/cannot be dispatched/);
+  });
+
+  it('the granted policy denies every publishing verb and writes only the worktree', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    const policy = resolveProducerPolicy({
+      contract: producer(),
+      workspace: w,
+      qualification: f.qualification,
+      enabledProducers: new Set(['SC-AGENT-150']),
+      projectRoot: f.repo,
+      reviewerAvailable: true,
+      executorsAvailable: true,
+    });
+    expect(policy.available).toContain('Edit');
+    expect(policy.available).toContain('Bash');
+    for (const d of PRODUCER_DENIED_COMMANDS) expect(policy.deny).toContain(d);
+    expect(policy.deny).toContain('Bash(git push*)');
+    expect(policy.deny).toContain('Bash(git merge*)');
+    expect(policy.deny).toContain('Bash(git rebase*)');
+    expect(policy.deny).toContain('Bash(git remote*)');
+    expect(policy.deny).toContain('Bash(git config*)');
+    // No subagent: a Producer that could spawn one would run an ungoverned run inside
+    // a governed one.
+    expect(policy.deny).toContain('Agent');
+    expect(policy.deny).toContain('Task');
+    expect(policy.network).toBe('NONE');
+    expect(policy.filesystem.write).toEqual([w.path]);
+    expect(policy.filesystem.write).not.toContain(f.repo);
+  }, 30_000);
+
+  it('the reviewer policy has no write tool at all', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    const policy = resolveReviewerPolicy(w, f.repo);
+    expect(policy.available).not.toContain('Edit');
+    expect(policy.available).not.toContain('Write');
+    expect(policy.available).not.toContain('Bash');
+    expect(policy.filesystem.write).toEqual([]);
+    // Read-only by construction, not by configuration: there is nothing to widen.
+    expect(policy.deny).toContain('Edit');
+    expect(policy.deny).toContain('Write');
+    expect(policy.deny).toContain('Bash');
+  }, 30_000);
+
+  it('a work item naming one agent for both roles is rejected at definition', async () => {
+    const f = await setupFactory(true);
+    expect(() =>
+      f.factory.recordWorkItem({
+        ...WORK_ITEM,
+        baseCommit: f.base,
+        reviewerAgentId: 'SC-AGENT-150',
+      }),
+    ).toThrowError();
+  });
+
+  it('a work item naming an unregistered recipe is refused before any worktree exists', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({
+      ...WORK_ITEM,
+      baseCommit: f.base,
+      recipes: ['SC-RECIPE-MADE-UP'],
+    });
+    expect(f.factory.refusal(item)).toMatch(/unregistered recipe/);
+  });
+});
+
+/* ================================================= rework and acceptance */
+
+describe('rework is bounded and acceptance is deterministic', () => {
+  it('a second attempt is permitted and a third is not', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base, maxAttempts: 2 });
+    expect(f.factory.canRework(item, 1).allowed).toBe(true);
+    const stop = f.factory.canRework(item, 2);
+    expect(stop.allowed).toBe(false);
+    expect(stop.reason).toMatch(/owner decision, not another retry/);
+  });
+
+  it('the rework context is built from evidence, not from the previous reasoning', async () => {
+    const f = await setupFactory(false);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 1;\n// x\n', 'utf8');
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    const ctx = f.factory.reworkContext(v);
+    expect(ctx).toContain('What was measured against ChangeSet ' + v.changeSet.changeSetId);
+    expect(ctx).toMatch(/nothing carries forward/);
+    expect(ctx).toContain('SC-RTC-012');
+  }, 60_000);
+
+  it('an unaccepted change cannot be integrated', async () => {
+    const f = await setupFactory(false);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 1;\n// x\n', 'utf8');
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(/is not accepted/);
+  }, 60_000);
+
+  it('an accepted change becomes a local commit carrying its provenance', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+
+    const v = await f.factory.verifyAttempt(item, w, {
+      required: {
+        scope: true,
+        build: false,
+        tests: true,
+        lint: false,
+        secrets: true,
+        codeReview: true,
+        qaVerification: false,
+      },
+      judged: [
+        {
+          criterionId: 'EC-REVIEW',
+          outcome: 'PASS',
+          detail: 'correct, in scope, and does what the work item asked',
+          runRef: 'SC-RUN-REVIEWER',
+          reviewerRole: 'CODE_REVIEW',
+        },
+      ],
+    });
+    /*
+     * PASS_WITH_QUALIFICATION, not PASS, and that is the correct answer.
+     *
+     * The reviewer's approval is JUDGED basis, so the caveat travels with the result
+     * (31 §4.1.2 branch 7): the change is accepted, and the record says out loud that
+     * one of the reasons was somebody's judgement rather than a measurement.
+     */
+    expect(v.gateResult.verdict).toBe(GateVerdict.PASS_WITH_QUALIFICATION);
+    expect(v.gateResult.qualifications.map((q) => q.kind)).toContain('JUDGED_BASIS');
+    expect(v.gateResult.qualifications.map((q) => q.criterionRef)).toContain('EC-REVIEW');
+    expect(v.attemptOutcome).toBe('ACCEPTED');
+
+    const { commit, branch } = await f.factory.acceptChange(item, w, v);
+    expect(commit).toMatch(/^[0-9a-f]{7,}$/);
+    expect(branch).toBe(w.branch);
+
+    const message = execFileSync('git', ['log', '-1', '--format=%B', commit], {
+      cwd: w.path,
+      encoding: 'utf8',
+    });
+    expect(message).toContain(item.workItemId);
+    expect(message).toContain(v.changeSet.changeSetId);
+    expect(message).toContain('SC-AGENT-150');
+    expect(message).toContain('SC-AGENT-200');
+    expect(message).toContain(v.gateResult.id);
+
+    // Phase 4 performs no remote write, and the owner's checkout learns nothing.
+    expect(f.git.invocations.some((a) => a[0] === 'push')).toBe(false);
+    expect(await f.git.isClean(f.repo)).toBe(true);
+    expect(await f.git.currentBranch(f.repo)).toBe('main');
+    expect(await f.git.headCommit(f.repo)).toBe(f.base);
+  }, 90_000);
+
+  it('routing follows the canonical verdict taxonomy', () => {
+    expect(routeVerdict(GateVerdict.PASS)).toBe('ACCEPTED');
+    expect(routeVerdict(GateVerdict.PASS_WITH_QUALIFICATION)).toBe('ACCEPTED');
+    expect(routeVerdict(GateVerdict.FAIL)).toBe('REWORK');
+    expect(routeVerdict(GateVerdict.NOT_VERIFIED)).toBe('REWORK');
+    expect(routeVerdict(GateVerdict.BLOCKED)).toBe('BLOCKED');
+    expect(routeVerdict(GateVerdict.ESCALATED)).toBe('ESCALATED');
+  });
+});
+
+/* ============================== an unqualified substrate blocks the factory */
+
+describe('an unqualified substrate blocks the factory entirely', () => {
+  it('no workspace can be opened', async () => {
+    const f = await setupFactory(true, 'NONE');
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    await expect(f.factory.openWorkspace(item, 1, 'd'.repeat(64))).rejects.toThrowError(
+      /requires HARD/,
+    );
+  });
+
+  it('the refusal names the substrate rather than blaming the work item', async () => {
+    const f = await setupFactory(true, 'SOFT');
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    expect(f.factory.refusal(item)).toMatch(/requires HARD/);
+  });
+
+  it('the enforcement class is reported, not assumed', async () => {
+    const hard = await setupFactory(true, 'HARD');
+    expect(hard.qualification.enforcementClass).toBe(EnforcementClass.HARD);
+    const soft = await setupFactory(true, 'SOFT');
+    expect(soft.qualification.enforcementClass).toBe(EnforcementClass.SOFT);
+    expect(soft.qualification.blockedBy).toBeDefined();
+  });
+});

@@ -9,6 +9,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/live/**/*.test.ts'],
+    // The engineering acceptance lives here too but costs something different, so it
+    // gets its own command rather than riding along with the model-call suite.
+    exclude: ['tests/live/engineering.live.test.ts'],
     environment: 'node',
     reporters: ['default'],
     sequence: { shuffle: false, concurrent: false },
