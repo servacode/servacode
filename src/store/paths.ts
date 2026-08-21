@@ -28,6 +28,8 @@ export interface StorePaths {
   readonly journal: string;
   readonly quarantine: string;
   readonly backups: string;
+  /** Short-lived files handed to a subprocess. Never authoritative; cleaned per use. */
+  readonly tmp: string;
   readonly schemaVersion: string;
 }
 
@@ -44,6 +46,7 @@ export function storePaths(root: string): StorePaths {
     journal: join(serva, 'journal'),
     quarantine: join(serva, 'quarantine'),
     backups: join(serva, 'backups'),
+    tmp: join(serva, 'tmp'),
     schemaVersion: join(serva, 'SCHEMA_VERSION'),
   };
 }

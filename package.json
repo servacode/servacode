@@ -24,7 +24,10 @@
     "format:check": "prettier --check \"{src,tests,scripts}/**/*.{ts,mjs}\"",
     "catalogues": "node scripts/generate-catalogues.mjs",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
-    "serva": "node dist/cli/main.js"
+    "serva": "node dist/cli/main.js",
+    "contracts": "node scripts/generate-agent-contracts.mjs",
+    "generate": "npm run catalogues && npm run contracts",
+    "test:claude": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
     "zod": "^3.23.8"

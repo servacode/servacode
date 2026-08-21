@@ -254,6 +254,123 @@ export const WaiverState = {
 } as const;
 export type WaiverState = (typeof WaiverState)[keyof typeof WaiverState];
 
+/** 19 §4.2, SC-POL-027 — every context element is either governed truth or data. */
+export const TrustLevel = {
+  TRUSTED: 'TRUSTED',
+  UNTRUSTED: 'UNTRUSTED',
+} as const;
+export type TrustLevel = (typeof TrustLevel)[keyof typeof TrustLevel];
+
+/**
+ * 33 §5 / SC-POL-035 — which route the provider would actually bill.
+ * UNKNOWN is a real value, not a placeholder: an undetectable route must be
+ * reported as undetected rather than assumed benign.
+ */
+export const BillingMode = {
+  SUBSCRIPTION: 'SUBSCRIPTION',
+  API_KEY: 'API_KEY',
+  THIRD_PARTY_CLOUD: 'THIRD_PARTY_CLOUD',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+export type BillingMode = (typeof BillingMode)[keyof typeof BillingMode];
+
+/** How the engine authenticated, as reported by a read-only provider query. */
+export const AuthenticationKind = {
+  SUBSCRIPTION_OAUTH: 'SUBSCRIPTION_OAUTH',
+  API_KEY: 'API_KEY',
+  THIRD_PARTY_CLOUD: 'THIRD_PARTY_CLOUD',
+  NONE: 'NONE',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+export type AuthenticationKind = (typeof AuthenticationKind)[keyof typeof AuthenticationKind];
+
+/** 04 §3.1 — request classes. RC-90/RC-91 are meta-classes, not lifecycle work. */
+export const RequestClass = {
+  NEW_PROJECT: 'NEW_PROJECT',
+  SMALL_CHANGE: 'SMALL_CHANGE',
+  BUG: 'BUG',
+  FEATURE: 'FEATURE',
+  MAJOR_FEATURE: 'MAJOR_FEATURE',
+  ARCHITECTURE_CHANGE: 'ARCHITECTURE_CHANGE',
+  SECURITY_ISSUE: 'SECURITY_ISSUE',
+  DESIGN_CHANGE: 'DESIGN_CHANGE',
+  RESEARCH: 'RESEARCH',
+  RELEASE: 'RELEASE',
+  INCIDENT: 'INCIDENT',
+  OPERATIONAL_CHANGE: 'OPERATIONAL_CHANGE',
+  DOCUMENTATION: 'DOCUMENTATION',
+  QUERY: 'QUERY',
+  GOVERNANCE: 'GOVERNANCE',
+} as const;
+export type RequestClass = (typeof RequestClass)[keyof typeof RequestClass];
+
+/** 04 §3.1 — the RC-nn identifier for each class, kept beside the name it labels. */
+export const REQUEST_CLASS_CODE: Readonly<Record<RequestClass, string>> = Object.freeze({
+  [RequestClass.NEW_PROJECT]: 'RC-01',
+  [RequestClass.SMALL_CHANGE]: 'RC-02',
+  [RequestClass.BUG]: 'RC-03',
+  [RequestClass.FEATURE]: 'RC-04',
+  [RequestClass.MAJOR_FEATURE]: 'RC-05',
+  [RequestClass.ARCHITECTURE_CHANGE]: 'RC-06',
+  [RequestClass.SECURITY_ISSUE]: 'RC-07',
+  [RequestClass.DESIGN_CHANGE]: 'RC-08',
+  [RequestClass.RESEARCH]: 'RC-09',
+  [RequestClass.RELEASE]: 'RC-10',
+  [RequestClass.INCIDENT]: 'RC-11',
+  [RequestClass.OPERATIONAL_CHANGE]: 'RC-12',
+  [RequestClass.DOCUMENTATION]: 'RC-13',
+  [RequestClass.QUERY]: 'RC-90',
+  [RequestClass.GOVERNANCE]: 'RC-91',
+});
+
+/** 04 §3.3 — magnitude, ordered. The order is load-bearing: CL-1 classifies upward. */
+export const Magnitude = {
+  M0: 'M0',
+  M1: 'M1',
+  M2: 'M2',
+  M3: 'M3',
+  M4: 'M4',
+} as const;
+export type Magnitude = (typeof Magnitude)[keyof typeof Magnitude];
+export const MAGNITUDE_ORDER: readonly Magnitude[] = Object.freeze([
+  Magnitude.M0,
+  Magnitude.M1,
+  Magnitude.M2,
+  Magnitude.M3,
+  Magnitude.M4,
+]);
+
+/** 05 §6 — the status field of the universal output envelope. */
+export const EnvelopeStatus = {
+  COMPLETED: 'COMPLETED',
+  PARTIAL: 'PARTIAL',
+  BLOCKED: 'BLOCKED',
+  ESCALATED: 'ESCALATED',
+  REFUSED: 'REFUSED',
+  FAILED: 'FAILED',
+} as const;
+export type EnvelopeStatus = (typeof EnvelopeStatus)[keyof typeof EnvelopeStatus];
+
+/** 32 §1.2 — budget profiles. The profile fixes the shape, not the numbers. */
+export const BudgetProfile = {
+  B_SMALL: 'B-SMALL',
+  B_STANDARD: 'B-STANDARD',
+  B_LARGE: 'B-LARGE',
+  B_RESEARCH: 'B-RESEARCH',
+} as const;
+export type BudgetProfile = (typeof BudgetProfile)[keyof typeof BudgetProfile];
+
+/**
+ * Why an evidence claim was or was not corroborated (19 SO-5, 04 §7.1 check 4).
+ * A claim is never evidence; this records what the runtime found when it looked.
+ */
+export const ClaimVerification = {
+  CORROBORATED: 'CORROBORATED',
+  UNVERIFIED: 'UNVERIFIED',
+  CONTRADICTED: 'CONTRADICTED',
+} as const;
+export type ClaimVerification = (typeof ClaimVerification)[keyof typeof ClaimVerification];
+
 /** 01 §1.3 — violation severity. */
 export const ViolationSeverity = { V1: 'V1', V2: 'V2', V3: 'V3' } as const;
 export type ViolationSeverity = (typeof ViolationSeverity)[keyof typeof ViolationSeverity];

@@ -6,6 +6,8 @@ import { cmdProject } from './commands/project.js';
 import { cmdDoctor } from './commands/doctor.js';
 import { cmdGates } from './commands/gates.js';
 import { cmdWorkflows } from './commands/workflows.js';
+import { cmdAi, cmdAgents } from './commands/ai.js';
+import { cmdRoute, cmdRuns, cmdRun, cmdContext } from './commands/route.js';
 import { SERVA_VERSION, SPEC_BASELINE } from '../app/runtime.js';
 
 /**
@@ -62,6 +64,16 @@ const USAGE = [
   '  doctor [--json]               Local prerequisites and store health',
   '  gates [--id <SC-GATE-...>]    Quality gate catalogue and recorded results',
   '  workflows [--runs]            Workflow catalogue and run states',
+  '',
+  'AI company runtime:',
+  '  ai status                     AI engine, authentication and billing route',
+  '  ai probe                      Re-probe the local engine capability',
+  '  ai doctor                     Full engine capability and billing-route report',
+  '  agents [--id <id>] [--enabled] Agent contract registry (all 55)',
+  '  route "<request>"             Classify, plan, validate and queue a request',
+  '  runs [--incomplete]           Governed AI runs recorded in this project',
+  '  run <SC-RUN-...>              One run event log',
+  '  context <SC-RUN-...>          Exactly what that run was shown',
   '  help                          This message',
   '',
   'Global options:',
@@ -69,7 +81,7 @@ const USAGE = [
   '  --json                        Machine-readable output where supported',
 ].join('\n');
 
-type Handler = (args: ParsedArgs) => number;
+type Handler = (args: ParsedArgs) => number | Promise<number>;
 
 const COMMANDS: Readonly<Record<string, Handler>> = {
   init: cmdInit,
@@ -78,6 +90,12 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   doctor: cmdDoctor,
   gates: cmdGates,
   workflows: cmdWorkflows,
+  ai: cmdAi,
+  agents: cmdAgents,
+  route: cmdRoute,
+  runs: cmdRuns,
+  run: cmdRun,
+  context: cmdContext,
   help: () => {
     console.log(USAGE);
     return 0;
@@ -88,7 +106,7 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   },
 };
 
-export function run(argv: readonly string[]): number {
+export async function run(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   const handler = COMMANDS[args.command];
   if (handler === undefined) {
@@ -98,7 +116,9 @@ export function run(argv: readonly string[]): number {
     return 2;
   }
   try {
-    return handler(args);
+    // AI commands are asynchronous; the deterministic Core commands are not. Awaiting
+    // a number is harmless, and it keeps one error boundary for both kinds.
+    return await handler(args);
   } catch (e) {
     if (isServaError(e)) {
       console.error(e.format());
@@ -114,5 +134,7 @@ const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 
 if (invokedDirectly || process.env['SERVA_CLI_FORCE'] === '1') {
-  process.exitCode = run(process.argv.slice(2));
+  void run(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
 }

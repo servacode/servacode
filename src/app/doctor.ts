@@ -5,6 +5,8 @@ import { findIncompleteRuns } from '../events/agentRun.js';
 import { SERVA_VERSION, SPEC_BASELINE, type ServaRuntime } from './runtime.js';
 import { SCHEMA_VERSION } from '../store/store.js';
 import { getCatalogues } from '../catalogue/index.js';
+import { ContractRegistry } from '../agents/registry.js';
+import { PHASE3_ENABLED_AGENTS } from './ai.js';
 
 /**
  * `serva doctor` — local prerequisites and store health.
@@ -93,6 +95,41 @@ export function runDoctor(rt: ServaRuntime | undefined, cwd: string): DoctorRepo
       cat.counts['policies'] +
       ' policies (generated from 30)',
   });
+
+  // The AgentContract registry is a build artifact generated from 32, and a stale one
+  // is a real failure mode: the spec moves and the runtime does not. Checked here so
+  // `serva doctor` catches it rather than a dispatch failing later.
+  try {
+    const registry = ContractRegistry.shared();
+    const problems = registry.validateAgainstCatalogue();
+    const enabled = registry.all().filter((c) => PHASE3_ENABLED_AGENTS.has(c.id)).length;
+    checks.push({
+      id: 'AGENT_CONTRACTS',
+      title: 'Agent contract registry (32, 30 §4)',
+      status: problems.length === 0 ? 'OK' : 'FAIL',
+      detail:
+        problems.length === 0
+          ? String(registry.all().length) +
+            ' contracts resolved, ' +
+            String(enabled) +
+            ' enabled for execution in this phase'
+          : problems
+              .slice(0, 5)
+              .map((p) => p.agentId + ': ' + p.problem)
+              .join('; '),
+      ...(problems.length === 0
+        ? {}
+        : { remedy: 'Run `npm run catalogues && npm run contracts` to regenerate.' }),
+    });
+  } catch (e) {
+    checks.push({
+      id: 'AGENT_CONTRACTS',
+      title: 'Agent contract registry (32, 30 §4)',
+      status: 'FAIL',
+      detail: e instanceof Error ? e.message : String(e),
+      remedy: 'Run `npm run contracts` to regenerate the registry from the specification.',
+    });
+  }
 
   const cov = enforcementCoverage();
   checks.push({

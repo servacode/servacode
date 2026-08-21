@@ -523,6 +523,21 @@ export class Store {
    * a tree rather than a flat directory. A non-recursive listing silently hides
    * whole classes of stream -- which is how an interrupted run could go unnoticed.
    */
+  /**
+   * A monotonic marker for "the state of the store at this moment".
+   *
+   * Stamps a ContextBundle (19 §4 step 8) and a GateResult, so a later reader can tell
+   * whether the store moved on since. Derived from the audit stream head because audit
+   * is append-only and every governed action appends to it — which makes the number
+   * monotonic without a separate counter that could drift away from reality.
+   *
+   * It is an ordering marker, not a content hash: equal versions mean no governed
+   * action was recorded in between, not that every byte is identical.
+   */
+  storeVersion(): number {
+    return this.trace('audit').head().seq;
+  }
+
   listTraceStreams(): string[] {
     if (!fileExists(this.paths.trace)) return [];
     const out: string[] = [];

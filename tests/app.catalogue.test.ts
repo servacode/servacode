@@ -199,28 +199,28 @@ describe('CLI foundation', () => {
     expect(a.flags['root']).toBe('/tmp/x');
   });
 
-  it('defaults to help with no arguments', () => {
+  it('defaults to help with no arguments', async () => {
     expect(parseArgs([]).command).toBe('help');
-    expect(run(['help'])).toBe(0);
+    expect(await run(['help'])).toBe(0);
   });
 
-  it('returns a non-zero code for an unknown command', () => {
-    expect(run(['nonsense-command'])).toBe(2);
+  it('returns a non-zero code for an unknown command', async () => {
+    expect(await run(['nonsense-command'])).toBe(2);
   });
 
-  it('status and project run against a real store', () => {
+  it('status and project run against a real store', async () => {
     const { root } = freshRuntime('CLI Project', 'cli idea');
     roots.push(root);
-    expect(run(['status', '--root', root, '--json'])).toBe(0);
-    expect(run(['project', '--root', root, '--json'])).toBe(0);
-    expect(run(['gates', '--root', root])).toBe(0);
-    expect(run(['workflows', '--root', root])).toBe(0);
-    expect(run(['doctor', '--root', root, '--json'])).toBe(0);
+    expect(await run(['status', '--root', root, '--json'])).toBe(0);
+    expect(await run(['project', '--root', root, '--json'])).toBe(0);
+    expect(await run(['gates', '--root', root])).toBe(0);
+    expect(await run(['workflows', '--root', root])).toBe(0);
+    expect(await run(['doctor', '--root', root, '--json'])).toBe(0);
   });
 
-  it('reports a missing project as an actionable error, not a crash', () => {
+  it('reports a missing project as an actionable error, not a crash', async () => {
     const bare = tempRoot();
     roots.push(bare);
-    expect(run(['status', '--root', bare])).toBe(1);
+    expect(await run(['status', '--root', bare])).toBe(1);
   });
 });

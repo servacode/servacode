@@ -14,6 +14,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const ASSETS = [
   ['src/catalogue/generated/catalogues.json', 'dist/catalogue/generated/catalogues.json'],
+  ['src/agents/generated/contracts.json', 'dist/agents/generated/contracts.json'],
 ];
 
 let copied = 0;
@@ -21,7 +22,7 @@ for (const [from, to] of ASSETS) {
   const src = join(repoRoot, from);
   const dest = join(repoRoot, to);
   if (!existsSync(src)) {
-    console.error('Missing build asset: ' + from + '\nRun `npm run catalogues` first.');
+    console.error('Missing build asset: ' + from + '\nRun `npm run generate` first.');
     process.exit(1);
   }
   mkdirSync(dirname(dest), { recursive: true });

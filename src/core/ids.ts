@@ -26,7 +26,13 @@ export type IdPrefix =
   | 'SC-RUN'
   | 'SC-RUNEV'
   | 'SC-WFR'
-  | 'SC-TX';
+  | 'SC-TX'
+  | 'SC-CTX'
+  | 'SC-CTXE'
+  | 'SC-REQST'
+  | 'SC-CLS'
+  | 'SC-PLAN'
+  | 'SC-STEP';
 
 const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 

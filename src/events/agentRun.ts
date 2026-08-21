@@ -17,6 +17,14 @@ import type { Store, Transaction } from '../store/store.js';
 export const AgentRunEventType = {
   RUN_CREATED: 'RUN_CREATED',
   CONTEXT_BOUND: 'CONTEXT_BOUND',
+  /**
+   * Added in Phase 3. R4's 05 §4.2 event list records what a run SAW (CONTEXT_BOUND)
+   * but not what it was ALLOWED TO DO. Both are runtime decisions taken before
+   * invocation, and "what capability did run X have?" needs to be answerable from the
+   * authoritative log for the same reason 19 CX-5 requires "what did run X see?".
+   * Raised as SPEC_IMPLEMENTATION_FINDING SF-4 for an R5 amendment.
+   */
+  CAPABILITY_BOUND: 'CAPABILITY_BOUND',
   RUN_STARTED: 'RUN_STARTED',
   TOOL_REQUESTED: 'TOOL_REQUESTED',
   TOOL_DECIDED: 'TOOL_DECIDED',
