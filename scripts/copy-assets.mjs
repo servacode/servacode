@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const ASSETS = [['src/catalogue/generated/catalogues.json', 'dist/catalogue/generated/catalogues.json']];
+const ASSETS = [
+  ['src/catalogue/generated/catalogues.json', 'dist/catalogue/generated/catalogues.json'],
+];
 
 let copied = 0;
 for (const [from, to] of ASSETS) {
