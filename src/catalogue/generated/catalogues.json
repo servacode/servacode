@@ -1,0 +1,1193 @@
+{
+  "$generated": {
+    "by": "scripts/generate-catalogues.mjs",
+    "from": "docs/serva-code/30_CANONICAL_CATALOGUES.md",
+    "specDigest": "32efd760689384d9e0827b8ed0d24c5bc0b178dd05511a894331342bfa580d9e",
+    "note": "GENERATED — do not edit. Regenerate with `npm run catalogues` when the R4 specification changes (30 CAT-2b)."
+  },
+  "departments": [
+    {
+      "id": "SC-DEPT-001",
+      "name": "Orchestration",
+      "tier": 1
+    },
+    {
+      "id": "SC-DEPT-002",
+      "name": "Governance & Compliance",
+      "tier": 1
+    },
+    {
+      "id": "SC-DEPT-010",
+      "name": "Product Management",
+      "tier": 2
+    },
+    {
+      "id": "SC-DEPT-011",
+      "name": "Discovery",
+      "tier": 2
+    },
+    {
+      "id": "SC-DEPT-012",
+      "name": "Business Analysis",
+      "tier": 2
+    },
+    {
+      "id": "SC-DEPT-013",
+      "name": "Requirements Engineering",
+      "tier": 2
+    },
+    {
+      "id": "SC-DEPT-014",
+      "name": "Market & Competitive Intelligence",
+      "tier": 2
+    },
+    {
+      "id": "SC-DEPT-020",
+      "name": "Software Architecture",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-021",
+      "name": "Data Architecture",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-022",
+      "name": "Security Architecture",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-023",
+      "name": "Infrastructure & DevOps",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-024",
+      "name": "Cost Engineering / FinOps",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-025",
+      "name": "UX",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-026",
+      "name": "UI & Design System",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-027",
+      "name": "Admin Experience & Operability",
+      "tier": 3
+    },
+    {
+      "id": "SC-DEPT-030",
+      "name": "Backend Engineering",
+      "tier": 4
+    },
+    {
+      "id": "SC-DEPT-031",
+      "name": "Frontend Engineering",
+      "tier": 4
+    },
+    {
+      "id": "SC-DEPT-032",
+      "name": "Mobile Engineering",
+      "tier": 4
+    },
+    {
+      "id": "SC-DEPT-033",
+      "name": "Database Engineering",
+      "tier": 4
+    },
+    {
+      "id": "SC-DEPT-034",
+      "name": "Integration Engineering",
+      "tier": 4
+    },
+    {
+      "id": "SC-DEPT-050",
+      "name": "Code Review",
+      "tier": 5
+    },
+    {
+      "id": "SC-DEPT-051",
+      "name": "QA & Test Engineering",
+      "tier": 5
+    },
+    {
+      "id": "SC-DEPT-052",
+      "name": "Security Testing",
+      "tier": 5
+    },
+    {
+      "id": "SC-DEPT-053",
+      "name": "Performance Engineering",
+      "tier": 5
+    },
+    {
+      "id": "SC-DEPT-054",
+      "name": "Acceptance",
+      "tier": 5
+    },
+    {
+      "id": "SC-DEPT-060",
+      "name": "Release Management",
+      "tier": 6
+    },
+    {
+      "id": "SC-DEPT-061",
+      "name": "Operations",
+      "tier": 6
+    },
+    {
+      "id": "SC-DEPT-062",
+      "name": "Incident Management",
+      "tier": 6
+    },
+    {
+      "id": "SC-DEPT-063",
+      "name": "Continuous Improvement",
+      "tier": 6
+    },
+    {
+      "id": "SC-DEPT-064",
+      "name": "Knowledge & Organizational Learning",
+      "tier": 6
+    }
+  ],
+  "agents": [
+    {
+      "id": "SC-AGENT-001",
+      "name": "Orchestrator",
+      "departmentId": "SC-DEPT-001",
+      "archetype": "GOVERNOR",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-002",
+      "name": "Planner",
+      "departmentId": "SC-DEPT-001",
+      "archetype": "GOVERNOR",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-003",
+      "name": "Request Classifier",
+      "departmentId": "SC-DEPT-001",
+      "archetype": "ANALYST",
+      "authority": "ADVISE",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-010",
+      "name": "Compliance Auditor",
+      "departmentId": "SC-DEPT-002",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-011",
+      "name": "Policy Interpreter",
+      "departmentId": "SC-DEPT-002",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-020",
+      "name": "Product Manager",
+      "departmentId": "SC-DEPT-010",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-030",
+      "name": "Discovery Analyst",
+      "departmentId": "SC-DEPT-011",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-040",
+      "name": "Business Analyst",
+      "departmentId": "SC-DEPT-012",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-050",
+      "name": "Requirements Engineer",
+      "departmentId": "SC-DEPT-013",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-051",
+      "name": "NFR Specialist",
+      "departmentId": "SC-DEPT-013",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-052",
+      "name": "Requirements Quality Verifier",
+      "departmentId": "SC-DEPT-013",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-060",
+      "name": "Market Researcher",
+      "departmentId": "SC-DEPT-014",
+      "archetype": "ANALYST",
+      "authority": "ADVISE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-061",
+      "name": "Competitive Analyst",
+      "departmentId": "SC-DEPT-014",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-062",
+      "name": "Innovation Strategist",
+      "departmentId": "SC-DEPT-014",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-063",
+      "name": "Source Verifier",
+      "departmentId": "SC-DEPT-014",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-070",
+      "name": "Software Architect",
+      "departmentId": "SC-DEPT-020",
+      "archetype": "ARCHITECT",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-071",
+      "name": "Technology Evaluator",
+      "departmentId": "SC-DEPT-020",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-072",
+      "name": "Architecture Reviewer",
+      "departmentId": "SC-DEPT-020",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-080",
+      "name": "Data Architect",
+      "departmentId": "SC-DEPT-021",
+      "archetype": "ARCHITECT",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-082",
+      "name": "Data Model Reviewer",
+      "departmentId": "SC-DEPT-021",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-090",
+      "name": "Security Architect",
+      "departmentId": "SC-DEPT-022",
+      "archetype": "ARCHITECT",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-100",
+      "name": "Infrastructure Architect",
+      "departmentId": "SC-DEPT-023",
+      "archetype": "ARCHITECT",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-101",
+      "name": "Infrastructure Engineer",
+      "departmentId": "SC-DEPT-023",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-110",
+      "name": "Cost Engineer",
+      "departmentId": "SC-DEPT-024",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-120",
+      "name": "UX Designer",
+      "departmentId": "SC-DEPT-025",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-123",
+      "name": "UX Reviewer",
+      "departmentId": "SC-DEPT-025",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-130",
+      "name": "Design System Owner",
+      "departmentId": "SC-DEPT-026",
+      "archetype": "ARCHITECT",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-131",
+      "name": "UI Designer",
+      "departmentId": "SC-DEPT-026",
+      "archetype": "DEFINER",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-133",
+      "name": "Design System Reviewer",
+      "departmentId": "SC-DEPT-026",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-140",
+      "name": "Operability Classifier",
+      "departmentId": "SC-DEPT-027",
+      "archetype": "ARCHITECT",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-141",
+      "name": "Admin Experience Designer",
+      "departmentId": "SC-DEPT-027",
+      "archetype": "DEFINER",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-150",
+      "name": "Backend Engineer",
+      "departmentId": "SC-DEPT-030",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-160",
+      "name": "Frontend Engineer",
+      "departmentId": "SC-DEPT-031",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-170",
+      "name": "Mobile Engineer",
+      "departmentId": "SC-DEPT-032",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-180",
+      "name": "Database Engineer",
+      "departmentId": "SC-DEPT-033",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-181",
+      "name": "Migration Executor",
+      "departmentId": "SC-DEPT-033",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M1"
+    },
+    {
+      "id": "SC-AGENT-190",
+      "name": "Integration Engineer",
+      "departmentId": "SC-DEPT-034",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-191",
+      "name": "External Contract Analyst",
+      "departmentId": "SC-DEPT-034",
+      "archetype": "ANALYST",
+      "authority": "ADVISE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-200",
+      "name": "Code Reviewer",
+      "departmentId": "SC-DEPT-050",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-210",
+      "name": "Test Strategist",
+      "departmentId": "SC-DEPT-051",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-211",
+      "name": "Test Case Designer",
+      "departmentId": "SC-DEPT-051",
+      "archetype": "DEFINER",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-213",
+      "name": "Accessibility Verifier",
+      "departmentId": "SC-DEPT-051",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-214",
+      "name": "QA Verifier",
+      "departmentId": "SC-DEPT-051",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-220",
+      "name": "Security Tester",
+      "departmentId": "SC-DEPT-052",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-230",
+      "name": "Performance Engineer",
+      "departmentId": "SC-DEPT-053",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-240",
+      "name": "Acceptance Verifier",
+      "departmentId": "SC-DEPT-054",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-250",
+      "name": "Release Manager",
+      "departmentId": "SC-DEPT-060",
+      "archetype": "GOVERNOR",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-251",
+      "name": "Handover Compiler",
+      "departmentId": "SC-DEPT-060",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-260",
+      "name": "Operations Engineer",
+      "departmentId": "SC-DEPT-061",
+      "archetype": "PRODUCER",
+      "authority": "EXECUTE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-262",
+      "name": "Operational Readiness Verifier",
+      "departmentId": "SC-DEPT-061",
+      "archetype": "VERIFIER",
+      "authority": "VERIFY",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-270",
+      "name": "Incident Commander",
+      "departmentId": "SC-DEPT-062",
+      "archetype": "GOVERNOR",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M4"
+    },
+    {
+      "id": "SC-AGENT-271",
+      "name": "Post-Incident Analyst",
+      "departmentId": "SC-DEPT-062",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M3"
+    },
+    {
+      "id": "SC-AGENT-280",
+      "name": "Improvement Analyst",
+      "departmentId": "SC-DEPT-063",
+      "archetype": "ANALYST",
+      "authority": "RECOMMEND",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-290",
+      "name": "Knowledge Curator",
+      "departmentId": "SC-DEPT-064",
+      "archetype": "DEFINER",
+      "authority": "DECIDE",
+      "magnitudeCeiling": "M2"
+    },
+    {
+      "id": "SC-AGENT-291",
+      "name": "Applicability Assessor",
+      "departmentId": "SC-DEPT-064",
+      "archetype": "ANALYST",
+      "authority": "ADVISE",
+      "magnitudeCeiling": "M2"
+    }
+  ],
+  "runtimeComponents": [
+    {
+      "id": "SC-RTC-001",
+      "name": "Store Integrity Checker",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-002",
+      "name": "Evidence Integrity Checker",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-003",
+      "name": "Workspace Reconciler",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-004",
+      "name": "Staleness Calculator",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-005",
+      "name": "Scope Conformance Checker",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-006",
+      "name": "Output Schema Validator",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-007",
+      "name": "Traceability & Orphan Checker",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-008",
+      "name": "Configuration Consistency Checker",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-009",
+      "name": "Consumption Meter",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-010",
+      "name": "Policy Enforcement Coverage Checker",
+      "kind": "CHECKER"
+    },
+    {
+      "id": "SC-RTC-011",
+      "name": "Build Executor",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-012",
+      "name": "Test Executor",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-013",
+      "name": "Standards & Lint Checker",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-014",
+      "name": "Design Conformance Scanner",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-015",
+      "name": "Secrets Scanner",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-016",
+      "name": "Dependency Vulnerability Scanner",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-017",
+      "name": "Accessibility Automated Checker",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-018",
+      "name": "Performance Measurement Harness",
+      "kind": "EXECUTOR"
+    },
+    {
+      "id": "SC-RTC-019",
+      "name": "Visual Regression Runner",
+      "kind": "EXECUTOR"
+    }
+  ],
+  "stages": [
+    {
+      "id": "SC-STAGE-002",
+      "name": "INTAKE",
+      "phase": "A",
+      "ownerDepartmentId": "SC-DEPT-010",
+      "gate": "SC-GATE-INTAKE"
+    },
+    {
+      "id": "SC-STAGE-003",
+      "name": "DISCOVERY",
+      "phase": "A",
+      "ownerDepartmentId": "SC-DEPT-011",
+      "gate": "SC-GATE-DISCOVERY"
+    },
+    {
+      "id": "SC-STAGE-004",
+      "name": "PRODUCT_VALIDATION",
+      "phase": "A",
+      "ownerDepartmentId": "SC-DEPT-010",
+      "gate": "SC-GATE-PRODUCT_VALIDATION"
+    },
+    {
+      "id": "SC-STAGE-010",
+      "name": "BUSINESS_ANALYSIS",
+      "phase": "B",
+      "ownerDepartmentId": "SC-DEPT-012",
+      "gate": "SC-GATE-REQUIREMENTS"
+    },
+    {
+      "id": "SC-STAGE-011",
+      "name": "REQUIREMENTS",
+      "phase": "B",
+      "ownerDepartmentId": "SC-DEPT-013",
+      "gate": "SC-GATE-REQUIREMENTS"
+    },
+    {
+      "id": "SC-STAGE-013",
+      "name": "MARKET_AND_COMPETITIVE_INTELLIGENCE",
+      "phase": "B",
+      "ownerDepartmentId": "SC-DEPT-014",
+      "gate": "SC-GATE-COMPETITIVE"
+    },
+    {
+      "id": "SC-STAGE-015",
+      "name": "FEASIBILITY",
+      "phase": "B",
+      "ownerDepartmentId": "SC-DEPT-020",
+      "gate": "SC-GATE-FEASIBILITY"
+    },
+    {
+      "id": "SC-STAGE-016",
+      "name": "RISK",
+      "phase": "B",
+      "ownerDepartmentId": "SC-DEPT-002",
+      "gate": "SC-GATE-FEASIBILITY"
+    },
+    {
+      "id": "SC-STAGE-020",
+      "name": "ARCHITECTURE",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-020",
+      "gate": "SC-GATE-ARCHITECTURE"
+    },
+    {
+      "id": "SC-STAGE-021",
+      "name": "DATA_ARCHITECTURE",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-021",
+      "gate": "SC-GATE-ARCHITECTURE"
+    },
+    {
+      "id": "SC-STAGE-022",
+      "name": "SECURITY_ARCHITECTURE",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-022",
+      "gate": "SC-GATE-SECURITY_DESIGN"
+    },
+    {
+      "id": "SC-STAGE-023",
+      "name": "TECHNOLOGY_SELECTION",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-020",
+      "gate": "SC-GATE-TECHNOLOGY"
+    },
+    {
+      "id": "SC-STAGE-024",
+      "name": "UX",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-025",
+      "gate": "SC-GATE-DESIGN"
+    },
+    {
+      "id": "SC-STAGE-025",
+      "name": "DESIGN_SYSTEM",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-026",
+      "gate": "SC-GATE-DESIGN"
+    },
+    {
+      "id": "SC-STAGE-026",
+      "name": "ADMIN_OPERABILITY",
+      "phase": "C",
+      "ownerDepartmentId": "SC-DEPT-027",
+      "gate": "SC-GATE-DESIGN"
+    },
+    {
+      "id": "SC-STAGE-030",
+      "name": "PLANNING",
+      "phase": "D",
+      "ownerDepartmentId": "SC-DEPT-001",
+      "gate": "SC-GATE-PLAN"
+    },
+    {
+      "id": "SC-STAGE-040",
+      "name": "IMPLEMENTATION",
+      "phase": "E",
+      "ownerDepartmentId": "Tier 4",
+      "gate": "SC-GATE-IMPLEMENTATION"
+    },
+    {
+      "id": "SC-STAGE-041",
+      "name": "CODE_REVIEW",
+      "phase": "E",
+      "ownerDepartmentId": "SC-DEPT-050",
+      "gate": "SC-GATE-CODE_REVIEW"
+    },
+    {
+      "id": "SC-STAGE-042",
+      "name": "QA",
+      "phase": "F",
+      "ownerDepartmentId": "SC-DEPT-051",
+      "gate": "SC-GATE-QA"
+    },
+    {
+      "id": "SC-STAGE-043",
+      "name": "SECURITY_TESTING",
+      "phase": "F",
+      "ownerDepartmentId": "SC-DEPT-052",
+      "gate": "SC-GATE-SECURITY"
+    },
+    {
+      "id": "SC-STAGE-044",
+      "name": "PERFORMANCE",
+      "phase": "F",
+      "ownerDepartmentId": "SC-DEPT-053",
+      "gate": "SC-GATE-PERFORMANCE"
+    },
+    {
+      "id": "SC-STAGE-045",
+      "name": "ACCEPTANCE",
+      "phase": "F",
+      "ownerDepartmentId": "SC-DEPT-054",
+      "gate": "SC-GATE-ACCEPTANCE"
+    },
+    {
+      "id": "SC-STAGE-050",
+      "name": "RELEASE",
+      "phase": "G",
+      "ownerDepartmentId": "SC-DEPT-060",
+      "gate": "SC-GATE-RELEASE"
+    },
+    {
+      "id": "SC-STAGE-052",
+      "name": "OPERATIONS",
+      "phase": "G",
+      "ownerDepartmentId": "SC-DEPT-061",
+      "gate": null
+    },
+    {
+      "id": "SC-STAGE-053",
+      "name": "CONTINUOUS_IMPROVEMENT",
+      "phase": "G",
+      "ownerDepartmentId": "SC-DEPT-063",
+      "gate": null
+    },
+    {
+      "id": "SC-STAGE-054",
+      "name": "INCIDENT",
+      "phase": "G",
+      "ownerDepartmentId": "SC-DEPT-062",
+      "gate": "SC-GATE-INCIDENT_CLOSURE"
+    }
+  ],
+  "gates": [
+    {
+      "id": "SC-GATE-INTAKE",
+      "afterStage": "002",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-DISCOVERY",
+      "afterStage": "003",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-PRODUCT_VALIDATION",
+      "afterStage": "004",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-REQUIREMENTS",
+      "afterStage": "010 + 011",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-COMPETITIVE",
+      "afterStage": "013",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-FEASIBILITY",
+      "afterStage": "015 + 016",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-ARCHITECTURE",
+      "afterStage": "020 + 021",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-SECURITY_DESIGN",
+      "afterStage": "022",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-TECHNOLOGY",
+      "afterStage": "023",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-DESIGN",
+      "afterStage": "024 + 025 + 026",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-PLAN",
+      "afterStage": "030",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-IMPLEMENTATION",
+      "afterStage": "040",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-CODE_REVIEW",
+      "afterStage": "041",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-QA",
+      "afterStage": "042",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-SECURITY",
+      "afterStage": "043",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-PERFORMANCE",
+      "afterStage": "044",
+      "blocking": false
+    },
+    {
+      "id": "SC-GATE-ACCEPTANCE",
+      "afterStage": "045",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-RELEASE",
+      "afterStage": "050",
+      "blocking": true
+    },
+    {
+      "id": "SC-GATE-INCIDENT_CLOSURE",
+      "afterStage": "054",
+      "blocking": true
+    }
+  ],
+  "workflows": [
+    {
+      "id": "SC-WF-001",
+      "name": "New Project Initiation"
+    },
+    {
+      "id": "SC-WF-002",
+      "name": "Requirements Definition"
+    },
+    {
+      "id": "SC-WF-003",
+      "name": "Architecture & Technology"
+    },
+    {
+      "id": "SC-WF-004",
+      "name": "Design Definition"
+    },
+    {
+      "id": "SC-WF-005",
+      "name": "Feature Implementation"
+    },
+    {
+      "id": "SC-WF-006",
+      "name": "Bug Fix"
+    },
+    {
+      "id": "SC-WF-007",
+      "name": "Security Fix (expedited)"
+    },
+    {
+      "id": "SC-WF-008",
+      "name": "Change Request"
+    },
+    {
+      "id": "SC-WF-009",
+      "name": "Proposal Lifecycle"
+    },
+    {
+      "id": "SC-WF-010",
+      "name": "Release & Handover"
+    },
+    {
+      "id": "SC-WF-011",
+      "name": "Incident Response"
+    },
+    {
+      "id": "SC-WF-012",
+      "name": "Research"
+    },
+    {
+      "id": "SC-WF-013",
+      "name": "Design System Change"
+    },
+    {
+      "id": "SC-WF-014",
+      "name": "Operational Change"
+    },
+    {
+      "id": "SC-WF-015",
+      "name": "Project Reconciliation"
+    }
+  ],
+  "policies": [
+    {
+      "id": "SC-POL-001",
+      "name": "Client Defines Problem, Serva Defines Engineering"
+    },
+    {
+      "id": "SC-POL-002",
+      "name": "No Arbitrary Engineering Decisions"
+    },
+    {
+      "id": "SC-POL-003",
+      "name": "No Arbitrary Design Decisions"
+    },
+    {
+      "id": "SC-POL-004",
+      "name": "Single Source of Truth"
+    },
+    {
+      "id": "SC-POL-005",
+      "name": "Evidence Before PASS"
+    },
+    {
+      "id": "SC-POL-006",
+      "name": "Executor Does Not Self-Certify"
+    },
+    {
+      "id": "SC-POL-007",
+      "name": "Execute → Review → Improve"
+    },
+    {
+      "id": "SC-POL-008",
+      "name": "Never Silently Discard an Improvement"
+    },
+    {
+      "id": "SC-POL-009",
+      "name": "Never Implement an Unapproved Major Change"
+    },
+    {
+      "id": "SC-POL-010",
+      "name": "Configuration Over Code"
+    },
+    {
+      "id": "SC-POL-011",
+      "name": "Every Product Must Have a Reason to Win"
+    },
+    {
+      "id": "SC-POL-012",
+      "name": "Serva Code Must Know What It Does Not Know"
+    },
+    {
+      "id": "SC-POL-013",
+      "name": "Impact Analysis Before Significant Change"
+    },
+    {
+      "id": "SC-POL-014",
+      "name": "Requirements Traceability"
+    },
+    {
+      "id": "SC-POL-015",
+      "name": "Decisions Must Be Remembered"
+    },
+    {
+      "id": "SC-POL-016",
+      "name": "Research Before Technology Selection"
+    },
+    {
+      "id": "SC-POL-017",
+      "name": "Simplicity Is a Professional Choice"
+    },
+    {
+      "id": "SC-POL-018",
+      "name": "Security From Design"
+    },
+    {
+      "id": "SC-POL-019",
+      "name": "Quality Includes Operations"
+    },
+    {
+      "id": "SC-POL-020",
+      "name": "Project Memory Must Not Depend on AI Chat History"
+    },
+    {
+      "id": "SC-POL-021",
+      "name": "Organizational Learning Without Blind Reuse"
+    },
+    {
+      "id": "SC-POL-022",
+      "name": "Truth Is Append-Only"
+    },
+    {
+      "id": "SC-POL-023",
+      "name": "Evidence Must Be Produced, Not Described"
+    },
+    {
+      "id": "SC-POL-024",
+      "name": "Tailoring Must Be Declared"
+    },
+    {
+      "id": "SC-POL-025",
+      "name": "One Authoritative Location Per Concept (Specification SSOT)"
+    },
+    {
+      "id": "SC-POL-026",
+      "name": "Capability Is Granted by the Runtime, Never by the Prompt"
+    },
+    {
+      "id": "SC-POL-027",
+      "name": "Untrusted Content Is Never Instruction"
+    },
+    {
+      "id": "SC-POL-028",
+      "name": "Cost and Consumption Are Governed Resources"
+    },
+    {
+      "id": "SC-POL-029",
+      "name": "The Audit Trail Is Not Writable by Agents"
+    },
+    {
+      "id": "SC-POL-030",
+      "name": "Human Authority Boundaries Are Absolute"
+    },
+    {
+      "id": "SC-POL-031",
+      "name": "Verdicts Have Freshness"
+    },
+    {
+      "id": "SC-POL-032",
+      "name": "Reality Is Re-Verified, Not Assumed"
+    },
+    {
+      "id": "SC-POL-033",
+      "name": "Every Work Item Reaches a Terminal State"
+    },
+    {
+      "id": "SC-POL-034",
+      "name": "Serva Code Governs Itself"
+    },
+    {
+      "id": "SC-POL-035",
+      "name": "Provider Capability Is Detected, Never Assumed"
+    }
+  ],
+  "counts": {
+    "departments": 30,
+    "agents": 55,
+    "runtimeComponents": 19,
+    "stages": 26,
+    "gates": 19,
+    "workflows": 15,
+    "policies": 35
+  }
+}

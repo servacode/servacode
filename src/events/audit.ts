@@ -1,0 +1,93 @@
+import type { ViolationSeverity } from '../vocab/index.js';
+import type { Store, Transaction } from '../store/store.js';
+import type { TraceRecord } from '../store/traceLog.js';
+
+/**
+ * Audit trail. SPEC: SC-POL-029 — Audit Events are written by the runtime only.
+ *
+ * This module is not reachable from any agent tool surface. Agents produce
+ * *content*; the runtime produces *records about what happened*.
+ */
+
+export const AUDIT_STREAM = 'audit';
+export const VIOLATION_STREAM = 'violations';
+
+export const AuditAction = {
+  PROJECT_INITIALIZED: 'PROJECT_INITIALIZED',
+  PROJECT_OPENED: 'PROJECT_OPENED',
+  STORE_RECOVERED: 'STORE_RECOVERED',
+  GATE_EVALUATED: 'GATE_EVALUATED',
+  STAGE_LEDGER_APPENDED: 'STAGE_LEDGER_APPENDED',
+  WORKFLOW_TRANSITION: 'WORKFLOW_TRANSITION',
+  WORK_ITEM_TRANSITION: 'WORK_ITEM_TRANSITION',
+  CANON_WRITTEN: 'CANON_WRITTEN',
+  VALIDITY_RECOMPUTED: 'VALIDITY_RECOMPUTED',
+  EVIDENCE_REVOKED: 'EVIDENCE_REVOKED',
+  EVIDENCE_DISPUTED: 'EVIDENCE_DISPUTED',
+  INTEGRITY_CHECK: 'INTEGRITY_CHECK',
+  POLICY_VIOLATION: 'POLICY_VIOLATION',
+} as const;
+export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
+
+export interface AuditInput {
+  readonly action: AuditAction;
+  readonly subject: string;
+  readonly outcome: 'OK' | 'REFUSED' | 'FAILED';
+  readonly policyRef?: string;
+  readonly detail?: Record<string, unknown>;
+  readonly correlationId?: string;
+  readonly causationId?: string;
+}
+
+export function audit(tx: Transaction, input: AuditInput): void {
+  tx.appendTrace(AUDIT_STREAM, {
+    type: input.action,
+    payload: {
+      subject: input.subject,
+      outcome: input.outcome,
+      ...(input.policyRef === undefined ? {} : { policyRef: input.policyRef }),
+      ...(input.detail === undefined ? {} : { detail: input.detail }),
+    },
+    ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
+    ...(input.causationId === undefined ? {} : { causationId: input.causationId }),
+  });
+}
+
+export interface ViolationInput {
+  readonly policyRef: string;
+  readonly severity: ViolationSeverity;
+  readonly subject: string;
+  readonly statement: string;
+  readonly response: string;
+  readonly detail?: Record<string, unknown>;
+}
+
+/** 01 §1.3 — every violation produces an append-only record. */
+export function recordViolation(tx: Transaction, input: ViolationInput): void {
+  tx.appendTrace(VIOLATION_STREAM, {
+    type: 'VIOLATION',
+    payload: {
+      policyRef: input.policyRef,
+      severity: input.severity,
+      subject: input.subject,
+      statement: input.statement,
+      response: input.response,
+      ...(input.detail === undefined ? {} : { detail: input.detail }),
+    },
+  });
+  audit(tx, {
+    action: AuditAction.POLICY_VIOLATION,
+    subject: input.subject,
+    outcome: 'REFUSED',
+    policyRef: input.policyRef,
+    detail: { severity: input.severity },
+  });
+}
+
+export function readAudit(store: Store): TraceRecord[] {
+  return store.readTrace(AUDIT_STREAM);
+}
+
+export function readViolations(store: Store): TraceRecord[] {
+  return store.readTrace(VIOLATION_STREAM);
+}
