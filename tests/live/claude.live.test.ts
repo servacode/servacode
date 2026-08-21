@@ -14,6 +14,7 @@ import {
   RequestClassificationSchema,
 } from '../../src/orchestration/schemas.js';
 import { getCatalogues } from '../../src/catalogue/index.js';
+import { readTerminalSnapshot, runStream } from '../../src/events/agentRun.js';
 import { cleanup, freshStore } from '../helpers.js';
 
 /**
@@ -355,7 +356,7 @@ describe('D. the real CLI permission grant behaves as Serva recorded it', () => 
       console.log('[live] SKIPPED (' + reason + ')');
       return;
     }
-    const { runtime, root } = setup();
+    const { runtime, root, store } = setup();
 
     // An approved fixture inside the granted read scope, with a token the model could
     // not otherwise produce: if it comes back, the read really happened.
@@ -423,5 +424,62 @@ describe('D. the real CLI permission grant behaves as Serva recorded it', () => 
     expect(everything, 'a denied file must never reach the output').not.toContain(
       'DENIED-SECRET-99',
     );
+
+    /*
+     * The authoritative trace must tell ONE story about the refusal.
+     *
+     * The defect this closes: a decision was written the moment a `tool_use` appeared,
+     * so a refusal arriving later inside the tool_result produced a trace asserting
+     * both that the call was permitted and that it was denied. T-TRACE is append-only,
+     * so that contradiction could never have been withdrawn.
+     */
+    const events = store.readTrace(runStream(result.runId));
+    const decisions = events
+      .filter((e) => e.type === 'TOOL_DECIDED')
+      .map((e) => e.payload as Record<string, unknown>);
+    const results = events
+      .filter((e) => e.type === 'TOOL_RESULT_CAPTURED')
+      .map((e) => e.payload as Record<string, unknown>);
+
+    console.log(
+      '[live] trace decisions: ' +
+        JSON.stringify(decisions.map((d) => String(d['tool']) + ':' + String(d['allowed']))),
+    );
+    console.log(
+      '[live] trace results:   ' +
+        JSON.stringify(results.map((x) => String(x['tool']) + ':' + String(x['outcome']))),
+    );
+
+    // At most one decision per call, and no call both permitted and denied.
+    const byUseId = new Map<string, unknown[]>();
+    for (const d of decisions) {
+      const key = String(d['useId']);
+      byUseId.set(key, [...(byUseId.get(key) ?? []), d['allowed']]);
+    }
+    for (const [useId, values] of byUseId) {
+      expect(values, 'exactly one decision per call (' + useId + ')').toHaveLength(1);
+    }
+
+    for (const denied of results.filter((x) => x['outcome'] === 'DENIED')) {
+      const decision = decisions.find((d) => d['useId'] === denied['useId']);
+      expect(decision, 'a denied result must carry a decision').toBeDefined();
+      expect(decision?.['allowed'], 'a denied call must not be recorded as allowed').toBe(false);
+    }
+
+    // A denied call can never corroborate anything.
+    for (const a of result.claimAssessments) {
+      if (a.verification === 'CORROBORATED') {
+        expect(
+          results.some((x) => x['outcome'] === 'SUCCEEDED'),
+          'only a completed call corroborates',
+        ).toBe(true);
+      }
+    }
+
+    // And the run finalized: a terminal record exists and binds to the trace head.
+    const snapshot = readTerminalSnapshot(store, result.runId) as
+      Record<string, unknown> | undefined;
+    expect(snapshot, 'a terminal run must have its immutable record').toBeDefined();
+    expect(snapshot?.['eventLogDigest']).toBe(store.trace(runStream(result.runId)).head().digest);
   }, 360_000);
 });

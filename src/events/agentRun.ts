@@ -237,15 +237,32 @@ export function refreshProjection(
  * second finalization — a crash-recovery retry, a double call — must not create a
  * second, possibly conflicting, terminal truth in an append-only system.
  */
-export function emitTerminalSnapshot(
-  tx: Transaction,
-  store: Store,
-  runId: string,
-  extra: Record<string, unknown> = {},
-): AgentRunProjection {
+/**
+ * Build the terminal record for a run from the TRACE alone.
+ *
+ * SPEC: 05 §4.3.
+ *
+ * This is the heart of the crash fix. Finalization used to be two commits — the
+ * terminal event, then the snapshot — with a real window between them. A crash there
+ * left a run that projects as terminal and has no record, forever: the early-return
+ * guard treated "already terminal" as "already finalized", and the incomplete-run
+ * check only asked whether a terminal event existed.
+ *
+ * The repair is not a try/catch. It is to make the second write DERIVABLE from the
+ * first. The terminal event now carries every part of the record that the projection
+ * cannot reproduce — self-review, observations, escalations, claim adjudications,
+ * attempt count, session reference — so the record is a pure function of the event
+ * log. Recovery re-derives it byte for byte, and re-deriving it twice yields the same
+ * bytes, because nothing outside the log is consulted.
+ *
+ * `eventLogDigest` is the run stream's head. The snapshot is written to T-CANON, not
+ * to the run stream, so emitting it does not move the head: the digest a recovered
+ * record computes is the same one the original would have.
+ */
+export function terminalRecordFrom(store: Store, runId: string): Record<string, unknown> {
   const projection = projectAgentRun(store, runId);
   if (!projection.terminal) {
-    fail({
+    return fail({
       code: 'E_INVALID_TRANSITION',
       message: 'Run ' + runId + ' has no terminal event',
       remedy: 'Append RUN_TERMINATED, RUN_ABORTED or RUN_TIMEOUT before snapshotting.',
@@ -253,15 +270,96 @@ export function emitTerminalSnapshot(
       specRef: '05 §4.3',
     });
   }
-  if (tx.getCanon('agentRunRecord', runId) !== undefined) return projection;
 
-  const head = store.trace(runStream(runId)).head();
-  tx.putCanon('agentRunRecord', runId, {
+  const events = store.readTrace(runStream(runId));
+  const terminal = [...events].reverse().find((e) => TERMINAL.has(e.type));
+  const payload = (terminal?.payload ?? {}) as Record<string, unknown>;
+
+  // Everything the projection cannot derive travels on the terminal event itself.
+  const carried: Record<string, unknown> = {};
+  for (const key of TERMINAL_RECORD_FIELDS) {
+    if (payload[key] !== undefined) carried[key] = payload[key];
+  }
+
+  return {
     ...projection,
-    ...extra,
-    eventLogDigest: head.digest,
-  });
-  return projection;
+    ...carried,
+    eventLogDigest: store.trace(runStream(runId)).head().digest,
+  };
+}
+
+/**
+ * Fields the terminal event must carry for the record to be reconstructible.
+ *
+ * Named explicitly rather than spread wholesale: a field that belongs in the record
+ * has to be a field finalization deliberately put on the event, and a reader can see
+ * at a glance what survives a crash.
+ */
+export const TERMINAL_RECORD_FIELDS: readonly string[] = Object.freeze([
+  'selfReview',
+  'observations',
+  'escalations',
+  'claimAssessments',
+  'attempts',
+  'engineSessionRef',
+  'diagnostics',
+]);
+
+/**
+ * Emit the immutable terminal snapshot. Idempotent, and safe to call during recovery.
+ *
+ * Three outcomes:
+ *   - no record yet          -> write the reconstructed one
+ *   - record already present -> verify it still matches, then no-op
+ *   - record disagrees       -> E_STORE_CORRUPT, never silently accepted
+ */
+export function emitTerminalSnapshot(
+  tx: Transaction,
+  store: Store,
+  runId: string,
+): Record<string, unknown> {
+  const rebuilt = terminalRecordFrom(store, runId);
+  const existing = tx.getCanon<Record<string, unknown>>('agentRunRecord', runId);
+
+  if (existing !== undefined) {
+    const problem = snapshotDisagreement(existing.body, rebuilt);
+    if (problem !== undefined) {
+      return fail({
+        code: 'E_STORE_CORRUPT',
+        message: 'Terminal record for ' + runId + ' disagrees with its event log: ' + problem,
+        remedy:
+          'The immutable record and the trace it summarises are no longer the same story. One of them was altered out of band; quarantine and restore from a verified backup (22 §5.1).',
+        details: { runId, problem },
+        specRef: '05 §4.3, 08 KI-1',
+      });
+    }
+    return existing.body;
+  }
+
+  tx.putCanon('agentRunRecord', runId, rebuilt);
+  return rebuilt;
+}
+
+/**
+ * Does a stored record still say what the log says?
+ *
+ * Compared on the fields that carry terminal truth. `eventLogDigest` is the strongest
+ * of them: it binds the summary to the exact chain it summarises, so an appended or
+ * edited event shows up here even when every other field still matches.
+ */
+export function snapshotDisagreement(
+  stored: Record<string, unknown>,
+  rebuilt: Record<string, unknown>,
+): string | undefined {
+  for (const key of ['outcome', 'agentId', 'runId', 'eventLogDigest', 'eventCount']) {
+    const a = stored[key];
+    const b = rebuilt[key];
+    if (a === undefined && b === undefined) continue;
+    if (JSON.stringify(a) !== JSON.stringify(b)) {
+      return key + ': record has ' + JSON.stringify(a) + ', log implies ' + JSON.stringify(b);
+    }
+  }
+  return undefined;
 }
 
 /** Read the immutable terminal record for a run, if it has one. */
@@ -270,14 +368,91 @@ export function readTerminalSnapshot(store: Store, runId: string): unknown | und
 }
 
 /** Runs with no terminal event. 22 §4.2 — detectable, not silent. */
+/** Every run this project holds a trace stream for. */
+export function listRunIds(store: Store): string[] {
+  return store
+    .listTraceStreams()
+    .filter((s) => s.startsWith('agentrun/'))
+    .map((s) => s.slice('agentrun/'.length));
+}
+
+/** A run with no terminal event: it was interrupted before it could finish (05 RI-1). */
 export function findIncompleteRuns(store: Store): string[] {
   const out: string[] = [];
-  for (const stream of store.listTraceStreams()) {
-    if (!stream.startsWith('agentrun/')) continue;
-    const runId = stream.slice('agentrun/'.length);
-    const events = store.readTrace(stream);
+  for (const runId of listRunIds(store)) {
+    const events = store.readTrace(runStream(runId));
     const last = events[events.length - 1];
     if (last === undefined || !TERMINAL.has(last.type)) out.push(runId);
   }
   return out;
+}
+
+/**
+ * A run that ENDED but has no immutable record: finalization was interrupted between
+ * its two commits.
+ *
+ * A distinct condition from an incomplete run, and reported as one. An incomplete run
+ * needs re-dispatching; this one needs nothing re-run at all, because every fact it
+ * requires is already in the log — it needs the record written. Conflating them would
+ * send a finished run back through an engine it never needs to touch again.
+ */
+export function findUnfinalizedRuns(store: Store): string[] {
+  const out: string[] = [];
+  for (const runId of listRunIds(store)) {
+    const events = store.readTrace(runStream(runId));
+    const last = events[events.length - 1];
+    if (last === undefined || !TERMINAL.has(last.type)) continue;
+    if (store.getCanon('agentRunRecord', runId) === undefined) out.push(runId);
+  }
+  return out;
+}
+
+/**
+ * Write the missing terminal record for every run that ended without one.
+ *
+ * Deterministic and idempotent: the record is derived from the log, so running
+ * recovery twice produces the same bytes and the second pass is a no-op. Called at
+ * startup, so a crash during finalization is repaired before anything reads the store.
+ */
+export function recoverTerminalSnapshots(store: Store): { repaired: string[] } {
+  const repaired: string[] = [];
+  for (const runId of findUnfinalizedRuns(store)) {
+    const tx = store.begin();
+    emitTerminalSnapshot(tx, store, runId);
+    tx.commit();
+    repaired.push(runId);
+  }
+  return { repaired };
+}
+
+/**
+ * Non-throwing integrity sweep: does every terminal run have exactly one record that
+ * still agrees with its log? Used by `serva doctor`.
+ */
+export function verifyTerminalRecords(store: Store): {
+  checked: number;
+  missing: string[];
+  problems: { runId: string; problem: string }[];
+} {
+  const missing: string[] = [];
+  const problems: { runId: string; problem: string }[] = [];
+  let checked = 0;
+  for (const runId of listRunIds(store)) {
+    const events = store.readTrace(runStream(runId));
+    const last = events[events.length - 1];
+    if (last === undefined || !TERMINAL.has(last.type)) continue;
+    checked += 1;
+    const stored = store.getCanon<Record<string, unknown>>('agentRunRecord', runId);
+    if (stored === undefined) {
+      missing.push(runId);
+      continue;
+    }
+    try {
+      const problem = snapshotDisagreement(stored.body, terminalRecordFrom(store, runId));
+      if (problem !== undefined) problems.push({ runId, problem });
+    } catch (e) {
+      problems.push({ runId, problem: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { checked, missing, problems };
 }

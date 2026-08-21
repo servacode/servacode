@@ -397,12 +397,21 @@ class ToolTracker {
       }
       case 'tool_use': {
         if (PROVIDER_INTERNAL_TOOLS.has(ev.name)) break;
-        // Recorded as ALLOWED, not SUCCEEDED: admitted by the permission layer, with
-        // no result yet. If the process dies here, that is exactly what happened.
+        /*
+         * REQUESTED, not ALLOWED.
+         *
+         * A `tool_use` block means the model ASKED. This stream carries no separate
+         * permission-decision event, and the live suite proved a refusal arrives only
+         * later, inside the tool_result. Recording ALLOWED here therefore invented a
+         * decision the provider had not made, and a subsequent refusal produced a
+         * self-contradicting trace: DECIDED allowed=true followed by RESULT DENIED.
+         *
+         * A process that dies at this point leaves REQUESTED, which is the truth.
+         */
         const call: ObservedToolCall = {
           tool: ev.name,
           useId: ev.id,
-          outcome: ToolCallOutcome.ALLOWED,
+          outcome: ToolCallOutcome.REQUESTED,
           at: this.clock.now(),
           ...(ev.subject === undefined ? {} : { subject: ev.subject }),
         };

@@ -7,6 +7,7 @@ import { TimeOrderedIdSource, type IdSource } from '../core/ids.js';
 import { systemClock, type Clock } from '../core/clock.js';
 import { fail } from '../core/errors.js';
 import { AuditAction, audit } from '../events/audit.js';
+import { recoverTerminalSnapshots } from '../events/agentRun.js';
 import { getCatalogues } from '../catalogue/index.js';
 import { ProjectSchema, parseOrThrow, type Project } from '../domain/schemas.js';
 
@@ -152,6 +153,29 @@ export class ServaRuntime {
   private validateStartup(): void {
     const recovered = this.store.recover();
     const degraded: string[] = [];
+
+    /*
+     * 05 §4.3 — repair any run that ENDED but never got its immutable record.
+     *
+     * Finalization commits the terminal event and the record separately, and a crash
+     * in between leaves a run that projects as terminal with no record at all. The
+     * record is derived from the event log, so recovery re-derives it here, before
+     * anything reads the store. Idempotent: a run that already has one is untouched.
+     */
+    const finalized = recoverTerminalSnapshots(this.store);
+    if (finalized.repaired.length > 0) {
+      const tx = this.store.begin();
+      audit(tx, {
+        action: AuditAction.STORE_RECOVERED,
+        subject: 'agentRunRecord',
+        outcome: 'OK',
+        detail: {
+          repairedTerminalRecords: finalized.repaired.length,
+          runs: finalized.repaired.slice(0, 20),
+        },
+      });
+      tx.commit();
+    }
 
     for (const stream of this.store.listTraceStreams()) {
       const v = this.store.trace(stream).verify();

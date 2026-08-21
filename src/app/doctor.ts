@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { GovernanceState } from '../vocab/index.js';
 import { enforcementCoverage } from '../policy/registry.js';
-import { findIncompleteRuns } from '../events/agentRun.js';
+import { findIncompleteRuns, verifyTerminalRecords } from '../events/agentRun.js';
 import { SERVA_VERSION, SPEC_BASELINE, type ServaRuntime } from './runtime.js';
 import { SCHEMA_VERSION } from '../store/store.js';
 import { getCatalogues } from '../catalogue/index.js';
@@ -196,6 +196,38 @@ export function runDoctor(rt: ServaRuntime | undefined, cwd: string): DoctorRepo
       : {
           remedy:
             'A trace stream was modified outside the append-only API. Quarantine and restore from a verified backup (22 §5.1).',
+        }),
+  });
+
+  /*
+   * 05 §4.3 -- a run that ENDED must have exactly one immutable record that still
+   * agrees with its log.
+   *
+   * Reported separately from an incomplete run because the two need different things:
+   * an incomplete run needs re-dispatching, whereas this one needs nothing re-run at
+   * all -- every fact is already in the log and only the record is missing. Startup
+   * recovery repairs it, so a FAIL here means the repair itself did not hold.
+   */
+  const records = verifyTerminalRecords(rt.store);
+  checks.push({
+    id: 'RUN_FINALIZATION',
+    title: 'Terminal run records (05 §4.3)',
+    status: records.problems.length > 0 ? 'FAIL' : records.missing.length > 0 ? 'WARN' : 'OK',
+    detail:
+      records.problems.length > 0
+        ? records.problems.map((p) => p.runId + ': ' + p.problem).join('; ')
+        : records.missing.length > 0
+          ? String(records.missing.length) +
+            ' terminal run(s) have no record: ' +
+            records.missing.slice(0, 5).join(', ')
+          : String(records.checked) + ' terminal run(s) have a record matching their trace',
+    ...(records.problems.length === 0 && records.missing.length === 0
+      ? {}
+      : {
+          remedy:
+            records.problems.length > 0
+              ? 'A terminal record and its event log tell different stories. One was altered out of band; quarantine and restore from a verified backup (22 §5.1).'
+              : 'Reopen the project to run startup recovery, which re-derives the missing record from the event log.',
         }),
   });
 

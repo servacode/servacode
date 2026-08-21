@@ -5,6 +5,7 @@ import {
   appendRunEvent,
   emitTerminalSnapshot,
   projectAgentRun,
+  type RunEventInput,
 } from '../events/agentRun.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { buildStandardBundle, CONTEXT_BUDGET_CHARS } from '../context/bundle.js';
@@ -141,6 +142,46 @@ export const DEFAULT_BUDGET: RunBudget = Object.freeze({
   maxContextChars: 80_000,
   maxRetries: 1, // 19 SO-2: exactly one repair attempt, then INVALID_OUTPUT
 });
+
+/** What the recorder has already written for one tool call. */
+interface ToolRecordState {
+  requested: boolean;
+  decidedAllowed?: boolean;
+  resultCaptured?: boolean;
+}
+type RecordedTool = Map<string, ToolRecordState>;
+
+/**
+ * What does an observed outcome say about the PERMISSION decision?
+ *
+ * REQUESTED says nothing: the model asked and the provider has not yet ruled.
+ * Anything that produced a result implies the call was permitted to run; a refusal
+ * implies it was not. Returning undefined for REQUESTED is what keeps the runtime from
+ * inventing a decision it never saw.
+ */
+export function decisionFrom(outcome: ToolCallOutcome): boolean | undefined {
+  switch (outcome) {
+    case ToolCallOutcome.REQUESTED:
+      return undefined;
+    case ToolCallOutcome.DENIED:
+      return false;
+    case ToolCallOutcome.ALLOWED:
+    case ToolCallOutcome.SUCCEEDED:
+    case ToolCallOutcome.FAILED:
+      return true;
+    default:
+      return undefined;
+  }
+}
+
+/** Did this outcome come with a result, of either kind? */
+export function isResult(outcome: ToolCallOutcome): boolean {
+  return (
+    outcome === ToolCallOutcome.SUCCEEDED ||
+    outcome === ToolCallOutcome.FAILED ||
+    outcome === ToolCallOutcome.DENIED
+  );
+}
 
 export class AgentRuntime {
   constructor(private readonly deps: AgentRuntimeDeps) {}
@@ -318,7 +359,7 @@ export class AgentRuntime {
        * none of them. The engine hands facts out through a provider-neutral observer,
        * and each one is appended immediately.
        */
-      const recorded = new Map<string, ToolCallOutcome>();
+      const recorded: RecordedTool = new Map();
       /** Latest known state of each call, by useId. The result may refine what streamed. */
       const observedByUseId = new Map<string, ObservedToolCall>();
       const observe = (o: EngineObservation): void => {
@@ -533,19 +574,56 @@ export class AgentRuntime {
 
     const projection = projectAgentRun(this.deps.store, runId);
     if (projection.terminal) {
-      // Already finalized. A second attempt -- a retry after a crash, a double call --
-      // must not append a second terminal event or a second snapshot: the log is
-      // append-only, so a conflicting terminal fact could never be withdrawn.
+      /*
+       * Already terminal. Do NOT append a second terminal event -- the log is
+       * append-only, so a conflicting terminal fact could never be withdrawn.
+       *
+       * But "terminal" is not the same as "finalized": a crash between the two
+       * commits below leaves exactly this state with no record. So the snapshot is
+       * re-emitted here rather than skipped. It is derived from the log, so this is a
+       * no-op when the record already exists and a repair when it does not.
+       */
+      this.tx((tx) => {
+        emitTerminalSnapshot(tx, this.deps.store, runId);
+      });
       return this.assemble(runId, projection.outcome ?? outcome, diagnostics, extra);
     }
 
+    /*
+     * 05 §4.3 -- finalization in two commits, made crash-recoverable by making the
+     * SECOND derivable from the FIRST.
+     *
+     * The terminal event carries every part of the record the projection cannot
+     * reproduce: self-review, observations, escalations, claim adjudications, attempt
+     * count, session reference. The snapshot is then a pure function of the event log,
+     * so a crash in the window between these commits is repaired at startup by
+     * re-deriving it -- byte for byte, because nothing outside the log is consulted.
+     *
+     * Catching an exception around the second write would not have helped: power loss
+     * throws nothing.
+     */
     this.tx((tx) => {
       appendRunEvent(tx, runId, {
         type: terminalType,
         payload: {
           outcome,
           diagnostics: diagnostics.slice(0, 20),
-          ...(extra.sessionRef === undefined ? {} : { sessionRef: extra.sessionRef }),
+          attempts: extra.attempts,
+          ...(extra.sessionRef === undefined
+            ? {}
+            : { sessionRef: extra.sessionRef, engineSessionRef: extra.sessionRef }),
+          ...(extra.envelope === undefined
+            ? {}
+            : {
+                selfReview: extra.envelope.selfReview,
+                observations: extra.envelope.observations,
+                escalations: extra.envelope.escalations,
+              }),
+          claimAssessments: (extra.claimAssessments ?? []).map((a) => ({
+            kind: a.claim.kind,
+            statement: a.claim.statement,
+            verification: a.verification,
+          })),
         },
       });
       audit(tx, {
@@ -556,32 +634,10 @@ export class AgentRuntime {
       });
     });
 
-    /*
-     * 05 §4.3 -- the immutable terminal snapshot, emitted once, bound to the final
-     * digest of the event chain it summarises. Phase 2 built this and Phase 3 was
-     * appending the terminal EVENT without ever emitting the RECORD, so every governed
-     * AI run ended without the artifact the model exists to produce.
-     *
-     * It is emitted after the terminal event so `event_log_digest` covers that event
-     * too; a summary that did not include its own terminator could drift from the log.
-     */
+    // The record. If the process dies before this commit, startup recovery writes the
+    // identical bytes from the event above.
     this.tx((tx) => {
-      emitTerminalSnapshot(tx, this.deps.store, runId, {
-        ...(extra.envelope === undefined
-          ? {}
-          : {
-              selfReview: extra.envelope.selfReview,
-              observations: extra.envelope.observations,
-              escalations: extra.envelope.escalations,
-            }),
-        ...(extra.sessionRef === undefined ? {} : { engineSessionRef: extra.sessionRef }),
-        claimAssessments: (extra.claimAssessments ?? []).map((a) => ({
-          kind: a.claim.kind,
-          statement: a.claim.statement,
-          verification: a.verification,
-        })),
-        attempts: extra.attempts,
-      });
+      emitTerminalSnapshot(tx, this.deps.store, runId);
     });
 
     return this.assemble(runId, outcome, diagnostics, extra);
@@ -629,62 +685,105 @@ export class AgentRuntime {
    *   TOOL_DECIDED         the permission layer ruled
    *   TOOL_RESULT_CAPTURED a result came back, or an error did
    */
-  private recordToolFact(
-    runId: string,
-    call: ObservedToolCall,
-    recorded: Map<string, ToolCallOutcome>,
-  ): void {
-    const already = recorded.get(call.useId);
-    if (already === call.outcome) return;
+  /**
+   * Append the trace events one observed fact newly justifies, and nothing more.
+   *
+   * The three canonical events (05 §4.2) correspond to three separate claims about
+   * reality, and the recorder emits each one only when the provider has actually
+   * shown it:
+   *
+   *   TOOL_REQUESTED        the model asked
+   *   TOOL_DECIDED          the permission layer ruled, one way or the other
+   *   TOOL_RESULT_CAPTURED  a result came back, or an error did
+   *
+   * The defect this replaces: the recorder emitted REQUESTED and DECIDED(allowed=true)
+   * together the first time it saw a call, so a refusal arriving later produced a
+   * trace that contradicted itself — an authoritative record asserting both that a
+   * call was permitted and that it was denied. Since T-TRACE is append-only, such a
+   * statement can never be withdrawn.
+   *
+   * Idempotent per `useId`, so the live observer and the post-hoc sweep can both feed
+   * it without duplicating history.
+   */
+  private recordToolFact(runId: string, call: ObservedToolCall, recorded: RecordedTool): void {
+    const state = recorded.get(call.useId) ?? { requested: false };
+    const events: RunEventInput[] = [];
 
-    this.tx((tx) => {
-      if (already === undefined) {
-        appendRunEvent(tx, runId, {
-          type: AgentRunEventType.TOOL_REQUESTED,
-          payload: {
-            tool: call.tool,
-            useId: call.useId,
-            at: call.at,
-            ...(call.subject === undefined ? {} : { subject: call.subject }),
-          },
-        });
-        appendRunEvent(tx, runId, {
+    if (!state.requested) {
+      events.push({
+        type: AgentRunEventType.TOOL_REQUESTED,
+        payload: {
+          tool: call.tool,
+          useId: call.useId,
+          at: call.at,
+          ...(call.subject === undefined ? {} : { subject: call.subject }),
+        },
+      });
+      state.requested = true;
+    }
+
+    // What, if anything, does this observation say about the permission decision?
+    const decision = decisionFrom(call.outcome);
+    if (decision !== undefined) {
+      if (state.decidedAllowed === undefined) {
+        events.push({
           type: AgentRunEventType.TOOL_DECIDED,
           payload: {
             tool: call.tool,
             useId: call.useId,
-            allowed: call.outcome !== ToolCallOutcome.DENIED,
-            outcome: call.outcome,
+            allowed: decision,
             at: call.at,
           },
         });
-      }
-
-      // A result, success or failure, is a separate fact from the decision to allow.
-      if (
-        call.outcome === ToolCallOutcome.SUCCEEDED ||
-        call.outcome === ToolCallOutcome.FAILED ||
-        call.outcome === ToolCallOutcome.DENIED
-      ) {
-        appendRunEvent(tx, runId, {
+        state.decidedAllowed = decision;
+      } else if (state.decidedAllowed !== decision) {
+        /*
+         * The adapter has contradicted itself about a decision already written. The
+         * record cannot be retracted, so the contradiction is recorded as an integrity
+         * observation rather than papered over with a second DECIDED event — which
+         * would leave the trace asserting both answers.
+         */
+        events.push({
           type: AgentRunEventType.TOOL_RESULT_CAPTURED,
           payload: {
             tool: call.tool,
             useId: call.useId,
             outcome: call.outcome,
             at: call.at,
-            ...(call.subject === undefined ? {} : { subject: call.subject }),
-            // A digest and a bounded excerpt, never the whole result: T-TRACE is
-            // permanent, and tool output is unbounded and may carry secrets.
-            ...(call.resultDigest === undefined ? {} : { resultDigest: call.resultDigest }),
-            ...(call.excerpt === undefined ? {} : { excerpt: call.excerpt.slice(0, 240) }),
-            ...(call.errorClass === undefined ? {} : { errorClass: call.errorClass }),
+            integrity:
+              'CONTRADICTORY_DECISION: already recorded allowed=' +
+              String(state.decidedAllowed) +
+              ', later observation implies allowed=' +
+              String(decision),
           },
         });
       }
-    });
+    }
 
-    recorded.set(call.useId, call.outcome);
+    if (isResult(call.outcome) && !state.resultCaptured) {
+      events.push({
+        type: AgentRunEventType.TOOL_RESULT_CAPTURED,
+        payload: {
+          tool: call.tool,
+          useId: call.useId,
+          outcome: call.outcome,
+          at: call.at,
+          ...(call.subject === undefined ? {} : { subject: call.subject }),
+          // A digest and a bounded excerpt, never the whole result: T-TRACE is
+          // permanent, and tool output is unbounded and may carry secrets.
+          ...(call.resultDigest === undefined ? {} : { resultDigest: call.resultDigest }),
+          ...(call.excerpt === undefined ? {} : { excerpt: call.excerpt.slice(0, 240) }),
+          ...(call.errorClass === undefined ? {} : { errorClass: call.errorClass }),
+        },
+      });
+      state.resultCaptured = true;
+    }
+
+    recorded.set(call.useId, state);
+    if (events.length === 0) return;
+    this.tx((tx) => {
+      for (const ev of events) appendRunEvent(tx, runId, ev);
+    });
   }
 
   private tx(f: (tx: Transaction) => void): void {

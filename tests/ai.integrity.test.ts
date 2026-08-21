@@ -491,7 +491,7 @@ describe('B3A — every terminal run has an immutable AgentRunRecord', () => {
     // Simulate a crash-recovery retry finalizing the same run again.
     const { emitTerminalSnapshot } = await import('../src/events/agentRun.js');
     const tx = store.begin();
-    emitTerminalSnapshot(tx, store, r.runId, { attempts: 99 });
+    emitTerminalSnapshot(tx, store, r.runId);
     tx.commit();
 
     expect(store.readTrace(runStream(r.runId))).toHaveLength(eventsBefore);
