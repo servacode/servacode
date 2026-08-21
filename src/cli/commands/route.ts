@@ -2,6 +2,7 @@ import { emitJson, openRuntime, wantsJson } from './_shared.js';
 import { buildAiLayer } from '../../app/ai.js';
 import { EngineHealthState } from '../../engine/types.js';
 import { projectAgentRun, findIncompleteRuns } from '../../events/agentRun.js';
+import { readContextBundle } from '../../context/store.js';
 import { runStream } from '../../events/agentRun.js';
 import type { ParsedArgs } from '../main.js';
 
@@ -231,7 +232,12 @@ export function cmdRun(args: ParsedArgs): number {
   }
 }
 
-/** `serva context <run-id>` — exactly what that run was shown (19 CX-5, 08 Q12). */
+/**
+ * `serva context <run-id>` — exactly what that run was shown (19 CX-5, 08 Q12).
+ *
+ * Reconstructs the persisted bundle rather than reporting counts. "Six elements, two
+ * untrusted" does not answer the question; the elements do.
+ */
 export function cmdContext(args: ParsedArgs): number {
   const id = args.positionals[0];
   if (id === undefined) {
@@ -241,35 +247,93 @@ export function cmdContext(args: ParsedArgs): number {
   const rt = openRuntime(args);
   try {
     const events = rt.store.readTrace(runStream(id));
+    if (events.length === 0) {
+      console.error('No run ' + id + ' in this project.');
+      return 1;
+    }
     const bound = events.find((e) => e.type === 'CONTEXT_BOUND');
     const cap = events.find((e) => e.type === 'CAPABILITY_BOUND');
     if (bound === undefined) {
       console.error('Run ' + id + ' has no CONTEXT_BOUND event: it never received a bundle.');
       return 1;
     }
+    const meta = bound.payload as Record<string, unknown>;
+    const bundleRef = String(meta['contextBundleRef']);
+
+    // A referenced bundle that is missing or altered is an integrity failure, not a
+    // blank line. readContextBundle raises; the CLI error handler prints the remedy.
+    const bundle = readContextBundle(rt.store, bundleRef);
+
     if (wantsJson(args)) {
-      emitJson({ runId: id, context: bound.payload, capability: cap?.payload });
+      emitJson({
+        runId: id,
+        // The whole reconstructible bundle, not a summary of it.
+        bundle,
+        recordedDigest: meta['digest'],
+        digestMatches: meta['digest'] === bundle.digest,
+        capability: cap?.payload,
+      });
       return 0;
     }
-    const p = bound.payload as Record<string, unknown>;
-    console.log('Run ' + id + ' saw context bundle ' + String(p['contextBundleRef']));
-    console.log('  store version:  ' + String(p['storeVersion']));
-    console.log('  digest:         ' + String(p['digest']));
+
+    console.log('Run ' + id + ' was given context bundle ' + bundle.id);
+    console.log('  built at:      ' + bundle.builtAt);
+    console.log('  store version: ' + String(bundle.storeVersion));
+    console.log('  digest:        ' + bundle.digest + ' (verified)');
     console.log(
-      '  elements:       ' + String(p['elements']) + '  (' + String(p['untrusted']) + ' untrusted)',
+      '  budget:        ' +
+        String(bundle.budget.usedChars) +
+        ' of ' +
+        String(bundle.budget.maxChars) +
+        ' characters',
     );
-    console.log('  exclusions:     ' + String(p['exclusions']));
-    console.log('  characters:     ' + String(p['usedChars']));
+    console.log('');
+    console.log('Elements (' + String(bundle.elements.length) + '), highest relevance first:');
+    for (const e of [...bundle.elements].sort((a, b) => b.relevance - a.relevance)) {
+      console.log('');
+      console.log(
+        '  [' +
+          e.trust +
+          '] ' +
+          e.kind +
+          '  source=' +
+          e.source +
+          '  v' +
+          e.version +
+          '  relevance=' +
+          String(e.relevance),
+      );
+      console.log('    included because: ' + e.reasonIncluded);
+      console.log(
+        '    digest: ' + e.digest.slice(0, 16) + '  (' + String(e.content.length) + ' chars)',
+      );
+      if (args.flags['full'] === true) {
+        for (const line of e.content.split('\n')) console.log('    | ' + line);
+      } else {
+        const preview = e.content.slice(0, 200).split('\n').slice(0, 4);
+        for (const line of preview) console.log('    | ' + line);
+        if (e.content.length > 200) console.log('    | ... (--full for the whole element)');
+      }
+    }
+
+    console.log('');
+    console.log('Deliberately withheld (' + String(bundle.exclusions.length) + '):');
+    for (const x of bundle.exclusions) {
+      console.log('  [' + x.kind + '] ' + x.subject);
+      console.log('    ' + x.reason);
+    }
+
     if (cap !== undefined) {
       const c = cap.payload as Record<string, unknown>;
+      const fs = c['filesystem'] as Record<string, unknown> | undefined;
       console.log('');
-      console.log('  capability granted:');
-      console.log('    tools allowed: ' + (JSON.stringify(c['allow']) ?? '[]'));
-      console.log('    network:       ' + JSON.stringify(c['network']));
-      console.log(
-        '    fs write:      ' +
-          JSON.stringify((c['filesystem'] as Record<string, unknown>)?.['write']),
-      );
+      console.log('Capability granted to this run:');
+      console.log('  tools available: ' + JSON.stringify(c['available'] ?? []));
+      console.log('  pre-approved:    ' + JSON.stringify(c['approve'] ?? []));
+      console.log('  read scope:      ' + JSON.stringify(fs?.['read'] ?? []));
+      console.log('  read refused:    ' + JSON.stringify(fs?.['readDenied'] ?? []));
+      console.log('  write scope:     ' + JSON.stringify(fs?.['write'] ?? []));
+      console.log('  network:         ' + JSON.stringify(c['network']));
     }
     return 0;
   } finally {

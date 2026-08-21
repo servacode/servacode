@@ -62,13 +62,36 @@ export interface EngineStatus {
   readonly remedy?: string;
 }
 
-/** 19 §5 — a resolved capability grant. Computed by Serva, never requested by an agent. */
+/**
+ * 19 §5 — a resolved capability grant. Computed by Serva, never requested by an agent.
+ *
+ * **Availability and approval are different facts**, and collapsing them was a real
+ * defect: a tool can be present in the model's toolset and still be refused at call
+ * time by the permission layer. A policy that recorded "allowed" while the provider
+ * would have denied the call is a governance record that does not describe reality.
+ *
+ *   available  the tool exists in the model's toolset at all
+ *   approve    rules that PRE-APPROVE matching calls, so they execute without a prompt
+ *   deny       rules that REFUSE matching calls; deny outranks approve in every mode
+ *   filesystem the concrete paths those rules were derived from
+ *
+ * `approve` and `deny` hold provider-neutral rule strings in the form
+ * `Tool(path-pattern)`; the adapter is responsible for emitting them in whatever
+ * syntax its provider accepts.
+ */
 export interface ToolPolicy {
-  /** Tools the engine may call. Empty is valid and means "no tools" (19 IV-5). */
-  readonly allow: readonly string[];
-  /** Explicit denials, applied in addition to the allowlist. */
+  /** Tools present in the model's toolset. Empty is valid and means none (19 IV-5). */
+  readonly available: readonly string[];
+  /** Pre-approval rules. A tool that is available but unapproved will be refused. */
+  readonly approve: readonly string[];
+  /** Refusal rules, applied on top of everything else. */
   readonly deny: readonly string[];
-  readonly filesystem: { readonly read: readonly string[]; readonly write: readonly string[] };
+  readonly filesystem: {
+    readonly read: readonly string[];
+    readonly write: readonly string[];
+    /** Paths inside the read roots that are nonetheless refused (Serva internals). */
+    readonly readDenied: readonly string[];
+  };
   readonly network: 'NONE' | { readonly hosts: readonly string[] };
   readonly maxToolCalls: number;
   /** Why this policy is what it is, for the audit trail and for the owner. */
@@ -149,12 +172,82 @@ export const TerminationReason = {
 } as const;
 export type TerminationReason = (typeof TerminationReason)[keyof typeof TerminationReason];
 
-/** One observed tool interaction. `allowed: false` is as important as `true` (19 TR-2). */
+/**
+ * How far one tool interaction actually got.
+ *
+ * The states are distinct because collapsing them is how a system starts believing
+ * things that did not happen. "The model asked to read a file" and "the file was read"
+ * are different facts, and only the second can corroborate a claim about its contents.
+ * A run that dies between the two leaves REQUESTED, which is the truth.
+ */
+export const ToolCallOutcome = {
+  /** The model asked. Nothing has happened yet. */
+  REQUESTED: 'REQUESTED',
+  /** The permission layer permitted it. Still no result. */
+  ALLOWED: 'ALLOWED',
+  /** The permission layer refused it. There will be no result. */
+  DENIED: 'DENIED',
+  /** It ran and returned a result. This is the only state that corroborates anything. */
+  SUCCEEDED: 'SUCCEEDED',
+  /** It ran and returned an error: file not found, bad pattern, timeout. */
+  FAILED: 'FAILED',
+} as const;
+export type ToolCallOutcome = (typeof ToolCallOutcome)[keyof typeof ToolCallOutcome];
+
+/**
+ * One observed tool interaction (19 TR-2 — denials are recorded, not discarded).
+ *
+ * `subject` is what the call was aimed at: the path for a read, the pattern for a
+ * search. Evidence corroboration binds on it, because matching by tool NAME alone
+ * would let a successful read of one file corroborate a claim about another.
+ *
+ * Deliberately absent: full tool output. A digest and a bounded excerpt go into the
+ * trace; the whole result does not, because T-TRACE is permanent and tool output is
+ * unbounded and may carry secrets.
+ */
 export interface ObservedToolCall {
   readonly tool: string;
-  readonly allowed: boolean;
+  /** Provider-assigned id linking a request to its decision and its result. */
+  readonly useId: string;
+  readonly outcome: ToolCallOutcome;
   readonly at: string;
-  readonly detail?: string;
+  /** The target of the call: a path, a glob, a search pattern. */
+  readonly subject?: string;
+  /** Digest of the result, so a later claim can be bound to what was actually seen. */
+  readonly resultDigest?: string;
+  /** Bounded, safe excerpt. Never the whole result. */
+  readonly excerpt?: string;
+  /** For FAILED and DENIED: the class of failure, not a stack trace. */
+  readonly errorClass?: string;
+}
+
+/** True only for a call that ran to completion and returned a result. */
+export function corroborates(call: ObservedToolCall): boolean {
+  return call.outcome === ToolCallOutcome.SUCCEEDED;
+}
+
+/**
+ * A provider-neutral fact observed while an invocation is still in flight.
+ *
+ * The four-method adapter interface is unchanged; `invoke` simply accepts an optional
+ * sink. This exists because an invocation that dies never returns an
+ * `InvocationResult`, and everything the stream had already revealed would die with
+ * it. A crashed engine must not mean Serva forgets what it watched happen.
+ */
+export type EngineObservation =
+  | { readonly kind: 'TOOL'; readonly call: ObservedToolCall }
+  | { readonly kind: 'SESSION'; readonly sessionRef: string }
+  | { readonly kind: 'DIAGNOSTIC'; readonly message: string };
+
+export type EngineObserver = (observation: EngineObservation) => void;
+
+export interface InvokeOptions {
+  readonly signal?: AbortSignal;
+  /**
+   * Called as facts arrive, before the invocation completes. Must not throw: an
+   * observer that fails is an observer defect, and it may not take the run down.
+   */
+  readonly observe?: EngineObserver;
 }
 
 /**
@@ -212,5 +305,9 @@ export interface EngineAdapter {
   health(): Promise<EngineStatus>;
   capabilities(): Promise<EngineCapabilities>;
   estimate(request: InvocationRequest): Promise<Estimate>;
-  invoke(request: InvocationRequest, signal?: AbortSignal): Promise<InvocationResult>;
+  /**
+   * Still four methods. `opts.observe` carries provider-neutral facts out as they
+   * happen, so an invocation that never returns still leaves a record of what it did.
+   */
+  invoke(request: InvocationRequest, opts?: InvokeOptions): Promise<InvocationResult>;
 }

@@ -1,5 +1,6 @@
 import { TrustLevel } from '../vocab/index.js';
 import { canonicalJson, digestOf } from '../core/hash.js';
+import { computeBundleDigest } from './store.js';
 import { fail } from '../core/errors.js';
 import type { ContextBundle, ContextElement, ContextExclusion } from '../engine/types.js';
 import type { AgentContract } from '../agents/schema.js';
@@ -195,13 +196,6 @@ export class ContextBundleBuilder {
     }
 
     const id = this.deps.ids.next('SC-CTX');
-    const body = {
-      agentId: this.opts.contract.id,
-      taskId: this.opts.taskId,
-      workItemId: this.opts.workItemId,
-      elements: kept.map((e) => ({ source: e.source, digest: e.digest, trust: e.trust })),
-      exclusions,
-    };
 
     return {
       id,
@@ -213,7 +207,15 @@ export class ContextBundleBuilder {
       storeVersion: this.deps.store.storeVersion(),
       budget: { maxChars: this.opts.maxChars, usedChars: used },
       builtAt: this.deps.clock.now(),
-      digest: digestOf(canonicalJson(body)),
+      // Computed by the SAME function that verifies it on read. Two copies of this
+      // formula would drift, and every reconstruction would then report tampering.
+      digest: computeBundleDigest({
+        agentId: this.opts.contract.id,
+        taskId: this.opts.taskId,
+        workItemId: this.opts.workItemId,
+        elements: kept,
+        exclusions,
+      }),
     };
   }
 }

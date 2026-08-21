@@ -22,6 +22,14 @@ export interface StreamToolUse {
   readonly kind: 'tool_use';
   readonly name: string;
   readonly id: string;
+  /**
+   * What the call was aimed at: the path for a read, the pattern for a search.
+   *
+   * Evidence corroboration binds on this. Matching by tool NAME alone would let a
+   * successful read of one file corroborate a claim about a different one, which is
+   * precisely the kind of near-miss a fabrication check exists to catch.
+   */
+  readonly subject?: string;
 }
 export interface StreamToolResult {
   readonly kind: 'tool_result';
@@ -92,6 +100,23 @@ function namesOf(v: unknown): string[] {
   return v
     .map((e) => (typeof e === 'string' ? e : str(obj(e)?.['name'])))
     .filter((n): n is string => n !== undefined);
+}
+
+/**
+ * The target of a tool call, from whichever input field carries it.
+ *
+ * Provider tools name their target differently -- `file_path` for a read, `pattern`
+ * for a search -- so the extraction is a small ordered list rather than one key. An
+ * input shape this does not recognise yields undefined, which downstream treats as
+ * "unbindable" rather than as a match.
+ */
+function subjectOf(input: Record<string, unknown> | undefined): string | undefined {
+  if (input === undefined) return undefined;
+  for (const key of ['file_path', 'path', 'notebook_path', 'pattern', 'query', 'url', 'command']) {
+    const v = str(input[key]);
+    if (v !== undefined && v.length > 0) return v;
+  }
+  return undefined;
 }
 
 export class StreamParser {
@@ -230,7 +255,13 @@ export function interpret(o: Record<string, unknown>): StreamEvent[] {
     if (b === undefined) continue;
     const bt = str(b['type']);
     if (bt === 'tool_use') {
-      out.push({ kind: 'tool_use', name: str(b['name']) ?? 'UNKNOWN', id: str(b['id']) ?? '' });
+      const subject = subjectOf(obj(b['input']));
+      out.push({
+        kind: 'tool_use',
+        name: str(b['name']) ?? 'UNKNOWN',
+        id: str(b['id']) ?? '',
+        ...(subject === undefined ? {} : { subject }),
+      });
     } else if (bt === 'tool_result') {
       const c = b['content'];
       const excerpt =

@@ -222,10 +222,26 @@ export function refreshProjection(
  * 05 §4.3 — the immutable terminal snapshot.
  * Emitted once, at the terminal event, and bound to the event log by its digest.
  */
+/**
+ * 05 §4.3 — the immutable terminal snapshot.
+ *
+ * Emitted once, at the terminal event, and bound to the final digest of the event
+ * chain it summarises, so the summary cannot drift from the log.
+ *
+ * `extra` carries the parts of the record that live outside the projection: the
+ * agent's self-review, its observations and escalations, and how its evidence claims
+ * were adjudicated. They are inputs to the snapshot, never to the projection, because
+ * the projection is derived purely from events.
+ *
+ * Idempotent by construction: a run already holding a snapshot is left alone. A
+ * second finalization — a crash-recovery retry, a double call — must not create a
+ * second, possibly conflicting, terminal truth in an append-only system.
+ */
 export function emitTerminalSnapshot(
   tx: Transaction,
   store: Store,
   runId: string,
+  extra: Record<string, unknown> = {},
 ): AgentRunProjection {
   const projection = projectAgentRun(store, runId);
   if (!projection.terminal) {
@@ -237,9 +253,20 @@ export function emitTerminalSnapshot(
       specRef: '05 §4.3',
     });
   }
+  if (tx.getCanon('agentRunRecord', runId) !== undefined) return projection;
+
   const head = store.trace(runStream(runId)).head();
-  tx.putCanon('agentRunRecord', runId, { ...projection, eventLogDigest: head.digest });
+  tx.putCanon('agentRunRecord', runId, {
+    ...projection,
+    ...extra,
+    eventLogDigest: head.digest,
+  });
   return projection;
+}
+
+/** Read the immutable terminal record for a run, if it has one. */
+export function readTerminalSnapshot(store: Store, runId: string): unknown | undefined {
+  return store.getCanon('agentRunRecord', runId)?.body;
 }
 
 /** Runs with no terminal event. 22 §4.2 — detectable, not silent. */

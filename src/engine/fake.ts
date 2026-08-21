@@ -8,6 +8,7 @@ import {
   type Estimate,
   type InvocationRequest,
   type InvocationResult,
+  type InvokeOptions,
   type ObservedToolCall,
 } from './types.js';
 import type { Clock } from '../core/clock.js';
@@ -114,7 +115,7 @@ export class FakeEngineAdapter implements EngineAdapter {
     };
   }
 
-  async invoke(request: InvocationRequest, signal?: AbortSignal): Promise<InvocationResult> {
+  async invoke(request: InvocationRequest, opts: InvokeOptions = {}): Promise<InvocationResult> {
     this.seen.push(request);
     const startedAt = this.opts.clock.now();
     const queued = this.byAgent.get(request.agentId);
@@ -131,7 +132,7 @@ export class FakeEngineAdapter implements EngineAdapter {
     if (response.delayMs !== undefined && response.delayMs > 0) {
       const aborted = await new Promise<boolean>((resolve) => {
         const t = setTimeout(() => resolve(false), response.delayMs);
-        signal?.addEventListener(
+        opts.signal?.addEventListener(
           'abort',
           () => {
             clearTimeout(t);
@@ -162,6 +163,9 @@ export class FakeEngineAdapter implements EngineAdapter {
 
     const terminatedBy = response.terminatedBy ?? TerminationReason.COMPLETED;
     const toolCalls = response.toolCalls ?? [];
+    // Scripted tool facts go to the observer as well as into the result, so a test can
+    // exercise the live-observation path without a real subprocess.
+    for (const call of toolCalls) opts.observe?.({ kind: 'TOOL', call });
     return {
       runId: request.runId,
       ok: terminatedBy === TerminationReason.COMPLETED,

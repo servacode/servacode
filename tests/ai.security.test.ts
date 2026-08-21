@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { ContractRegistry } from '../src/agents/registry.js';
@@ -78,6 +79,9 @@ const RUN = {
   taskDefinition: 'Classify.',
   scopeBoundary: 'classification only',
   resultSchema: { type: 'object' },
+  // Blocker 4: Serva validates the role payload itself. `z.unknown()` is the
+  // honest validator for a test whose payload shape is not the subject.
+  resultValidator: z.unknown(),
 };
 
 /* ============================================= command injection */
@@ -156,10 +160,10 @@ describe('an agent cannot obtain capability it was not granted', () => {
     }
     for (const seen of engine.seen) {
       for (const forbidden of PHASE3_FORBIDDEN_TOOLS) {
-        expect(seen.tools.allow, seen.agentId + '/' + forbidden).not.toContain(forbidden);
+        expect(seen.tools.available, seen.agentId + '/' + forbidden).not.toContain(forbidden);
       }
       expect(seen.tools.deny).toContain('mcp__*');
-      expect(seen.tools.allow.some((t) => t.startsWith('mcp__'))).toBe(false);
+      expect(seen.tools.available.some((t: string) => t.startsWith('mcp__'))).toBe(false);
       expect(seen.tools.filesystem.write).toEqual([]);
       expect(seen.tools.network).toBe('NONE');
     }

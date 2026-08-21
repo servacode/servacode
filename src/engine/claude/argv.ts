@@ -92,8 +92,23 @@ export function buildArgv(request: InvocationRequest, opts: ArgvOptions): string
   // 19 §15 / ADR-002 F-5: fail closed, and never wait for a prompt that cannot come.
   argv.push('--permission-mode', 'dontAsk');
 
-  // 19 IV-5 / TR-1: an empty allowlist is valid and means no tools at all.
-  argv.push('--tools', request.tools.allow.join(','));
+  /*
+   * Availability and permission are TWO flags, and emitting only the first was a real
+   * governance defect.
+   *
+   *   --tools           which tools exist in the model's toolset
+   *   --allowedTools    which calls are PRE-APPROVED to execute
+   *   --disallowedTools which calls are refused; deny outranks approve in every mode
+   *
+   * Under `dontAsk` every call that would otherwise prompt is auto-denied, so a tool
+   * that is available but unapproved is a tool the model can see and cannot use.
+   * Serva was recording those as granted. Now the argv carries the same grant Serva
+   * recorded, which is the only way the trace can be true.
+   *
+   * 19 IV-5: an empty toolset is valid and means no tools at all.
+   */
+  argv.push('--tools', request.tools.available.join(','));
+  if (request.tools.approve.length > 0) argv.push('--allowedTools', ...request.tools.approve);
   if (request.tools.deny.length > 0) argv.push('--disallowedTools', ...request.tools.deny);
 
   if (opts.supportsTurnLimit) argv.push('--max-turns', String(request.budget.maxTurns));

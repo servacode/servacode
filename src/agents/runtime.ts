@@ -1,8 +1,14 @@
 import { EnvelopeStatus, RunOutcome } from '../vocab/index.js';
 import { fail, isServaError } from '../core/errors.js';
-import { AgentRunEventType, appendRunEvent, projectAgentRun } from '../events/agentRun.js';
+import {
+  AgentRunEventType,
+  appendRunEvent,
+  emitTerminalSnapshot,
+  projectAgentRun,
+} from '../events/agentRun.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { buildStandardBundle, CONTEXT_BUDGET_CHARS } from '../context/bundle.js';
+import { persistContextBundle } from '../context/store.js';
 import { composeSystemPrompt, composeUserPrompt } from '../context/prompt.js';
 import {
   OutputEnvelopeSchema,
@@ -15,8 +21,11 @@ import {
 import { assertPolicyNotWidened, resolveToolPolicy } from './toolPolicy.js';
 import {
   TerminationReason,
+  ToolCallOutcome,
   type EngineAdapter,
+  type EngineObservation,
   type InvocationRequest,
+  type ObservedToolCall,
   type RunBudget,
 } from '../engine/types.js';
 import type { ContractRegistry } from './registry.js';
@@ -61,7 +70,19 @@ export interface AgentRunRequest {
   readonly taskDefinition: string;
   readonly scopeBoundary: string;
   readonly ownerRequest?: string;
+  /**
+   * The role-specific result shape, in TWO forms, and both are required.
+   *
+   *   resultSchema     JSON Schema, sent to the provider so it can shape its output
+   *   resultValidator  Serva's OWN validator, applied to whatever comes back
+   *
+   * "The provider says it is valid" and "Serva accepts it" are different claims
+   * (19 SO-2). Validating only the envelope left `result` as `unknown`, so a
+   * structurally perfect envelope carrying a nonsense payload reached COMPLETED and
+   * the orchestrator had to catch it later. AgentRuntime must be correct by itself.
+   */
   readonly resultSchema: Record<string, unknown>;
+  readonly resultValidator: ResultValidator;
   readonly canon?: readonly {
     source: string;
     kind: string;
@@ -77,6 +98,29 @@ export interface AgentRunRequest {
   }[];
   readonly budget?: Partial<RunBudget>;
   readonly maxContextChars?: number;
+}
+
+/**
+ * A deterministic local check of the role-specific payload.
+ *
+ * A Zod schema satisfies this shape directly, so callers normally pass one; anything
+ * with `safeParse` works. Deliberately not "parse the prose": the input is already a
+ * structured object, and this decides whether Serva believes it is the right one.
+ */
+export interface ResultValidator {
+  safeParse(value: unknown): { success: true } | { success: false; error: { issues: unknown[] } };
+}
+
+/** Render a validator's complaint into one actionable line for the repair attempt. */
+export function describeResultIssues(error: { issues: unknown[] }): string {
+  return error.issues
+    .slice(0, 8)
+    .map((raw) => {
+      const i = raw as { path?: unknown[]; message?: string };
+      const path = Array.isArray(i.path) && i.path.length > 0 ? i.path.join('.') : '(root)';
+      return path + ': ' + (i.message ?? 'invalid');
+    })
+    .join('; ');
 }
 
 export interface AgentRunResult {
@@ -171,6 +215,13 @@ export class AgentRuntime {
     }
 
     this.tx((tx) => {
+      /*
+       * 19 CX-5 — persisted BEFORE invocation, so a run that dies mid-flight still
+       * leaves behind exactly what it was given. The event below records the reference
+       * and the digest; the bundle itself is the thing that makes "what did this run
+       * see?" answerable, and counts alone never did.
+       */
+      persistContextBundle(tx, bundle);
       appendRunEvent(tx, runId, {
         type: AgentRunEventType.CONTEXT_BOUND,
         payload: {
@@ -188,7 +239,8 @@ export class AgentRuntime {
       appendRunEvent(tx, runId, {
         type: AgentRunEventType.CAPABILITY_BOUND,
         payload: {
-          allow: policy.allow,
+          available: policy.available,
+          approve: policy.approve,
           deny: policy.deny,
           filesystem: policy.filesystem,
           network: policy.network,
@@ -212,7 +264,7 @@ export class AgentRuntime {
       determinismHint: 'LOW_VARIANCE',
     };
 
-    return this.invokeWithRepair(runId, bundle, request, policy, budget);
+    return this.invokeWithRepair(runId, bundle, request, policy, budget, req.resultValidator);
   }
 
   private async invokeWithRepair(
@@ -221,6 +273,7 @@ export class AgentRuntime {
     baseRequest: InvocationRequest,
     policy: InvocationRequest['tools'],
     budget: RunBudget,
+    resultValidator: ResultValidator,
   ): Promise<AgentRunResult> {
     const diagnostics: string[] = [];
     let attempts = 0;
@@ -257,26 +310,46 @@ export class AgentRuntime {
         });
       });
 
-      const result = await this.deps.engine.invoke(request);
+      /*
+       * Tool facts are written to T-TRACE AS THEY HAPPEN, not after invoke() returns.
+       *
+       * An invocation that is killed never returns an InvocationResult, and recording
+       * from the result meant a run that died after reading three files remembered
+       * none of them. The engine hands facts out through a provider-neutral observer,
+       * and each one is appended immediately.
+       */
+      const recorded = new Map<string, ToolCallOutcome>();
+      /** Latest known state of each call, by useId. The result may refine what streamed. */
+      const observedByUseId = new Map<string, ObservedToolCall>();
+      const observe = (o: EngineObservation): void => {
+        if (o.kind === 'DIAGNOSTIC') {
+          diagnostics.push(o.message);
+          return;
+        }
+        if (o.kind === 'SESSION') {
+          sessionRef = o.sessionRef;
+          return;
+        }
+        observedByUseId.set(o.call.useId, o.call);
+        this.recordToolFact(runId, o.call, recorded);
+      };
+
+      const result = await this.deps.engine.invoke(request, { observe });
       sessionRef = result.sessionRef ?? sessionRef;
-      diagnostics.push(...result.diagnostics);
+      for (const d of result.diagnostics) {
+        if (!diagnostics.includes(d)) diagnostics.push(d);
+      }
+
+      // Anything the observer missed -- an adapter that does not stream at all -- is
+      // caught here, so the trace is complete either way. `recorded` makes the second
+      // pass idempotent: a fact already written is not written twice.
+      for (const call of result.toolCalls) {
+        observedByUseId.set(call.useId, call);
+        this.recordToolFact(runId, call, recorded);
+      }
+      const observedCalls = [...observedByUseId.values()];
 
       this.tx((tx) => {
-        for (const call of result.toolCalls) {
-          appendRunEvent(tx, runId, {
-            type: AgentRunEventType.TOOL_REQUESTED,
-            payload: { tool: call.tool, at: call.at },
-          });
-          appendRunEvent(tx, runId, {
-            type: AgentRunEventType.TOOL_DECIDED,
-            payload: {
-              tool: call.tool,
-              allowed: call.allowed,
-              at: call.at,
-              ...(call.detail === undefined ? {} : { detail: call.detail }),
-            },
-          });
-        }
         appendRunEvent(tx, runId, {
           type: AgentRunEventType.CONSUMPTION_SAMPLED,
           payload: {
@@ -323,7 +396,7 @@ export class AgentRuntime {
         this.tx((tx) => {
           appendRunEvent(tx, runId, {
             type: AgentRunEventType.VALIDATION_RESULT,
-            payload: { valid: false, attempt: attempts, error: parsed.message },
+            payload: { valid: false, attempt: attempts, stage: 'ENVELOPE', error: parsed.message },
           });
         });
         diagnostics.push('attempt ' + String(attempts) + ' invalid: ' + parsed.message);
@@ -331,10 +404,37 @@ export class AgentRuntime {
       }
 
       const envelope = parsed.value;
+
+      /*
+       * BLOCKER 4. The envelope being well-formed says nothing about `result`, which
+       * the envelope schema types as `unknown`. Serva validates the role-specific
+       * payload with its OWN validator before it will call the run valid -- the
+       * provider having accepted its own JSON Schema is not Serva accepting it.
+       */
+      const roleResult = resultValidator.safeParse(envelope.result);
+      if (!roleResult.success) {
+        const message =
+          'role-specific result did not validate: ' + describeResultIssues(roleResult.error);
+        validationError = message;
+        this.tx((tx) => {
+          appendRunEvent(tx, runId, {
+            type: AgentRunEventType.VALIDATION_RESULT,
+            payload: { valid: false, attempt: attempts, stage: 'RESULT', error: message },
+          });
+        });
+        diagnostics.push('attempt ' + String(attempts) + ' invalid: ' + message);
+        continue;
+      }
+
       this.tx((tx) => {
         appendRunEvent(tx, runId, {
           type: AgentRunEventType.VALIDATION_RESULT,
-          payload: { valid: true, attempt: attempts, status: envelope.status },
+          payload: {
+            valid: true,
+            attempt: attempts,
+            stage: 'ENVELOPE+RESULT',
+            status: envelope.status,
+          },
         });
       });
 
@@ -342,8 +442,11 @@ export class AgentRuntime {
       // Both lists: a name Serva GRANTED and a name Serva DENIED are equally real
       // tool identifiers, and a claim to have used a denied one is exactly the
       // fabrication this check exists for. Only a name in neither list is prose.
-      const assessments = verifyEvidenceClaims(envelope.evidenceClaims, result.toolCalls, [
-        ...policy.allow,
+      // Both lists: a name Serva made AVAILABLE and a name Serva DENIED are equally
+      // real tool identifiers, and a claim to have used a denied one is exactly the
+      // fabrication this check exists for. Only a name in neither list is prose.
+      const assessments = verifyEvidenceClaims(envelope.evidenceClaims, observedCalls, [
+        ...policy.available,
         ...policy.deny,
       ]);
       this.tx((tx) => {
@@ -428,6 +531,14 @@ export class AgentRuntime {
   ): AgentRunResult {
     const terminalType = extra.terminalEvent ?? AgentRunEventType.RUN_TERMINATED;
 
+    const projection = projectAgentRun(this.deps.store, runId);
+    if (projection.terminal) {
+      // Already finalized. A second attempt -- a retry after a crash, a double call --
+      // must not append a second terminal event or a second snapshot: the log is
+      // append-only, so a conflicting terminal fact could never be withdrawn.
+      return this.assemble(runId, projection.outcome ?? outcome, diagnostics, extra);
+    }
+
     this.tx((tx) => {
       appendRunEvent(tx, runId, {
         type: terminalType,
@@ -445,6 +556,49 @@ export class AgentRuntime {
       });
     });
 
+    /*
+     * 05 §4.3 -- the immutable terminal snapshot, emitted once, bound to the final
+     * digest of the event chain it summarises. Phase 2 built this and Phase 3 was
+     * appending the terminal EVENT without ever emitting the RECORD, so every governed
+     * AI run ended without the artifact the model exists to produce.
+     *
+     * It is emitted after the terminal event so `event_log_digest` covers that event
+     * too; a summary that did not include its own terminator could drift from the log.
+     */
+    this.tx((tx) => {
+      emitTerminalSnapshot(tx, this.deps.store, runId, {
+        ...(extra.envelope === undefined
+          ? {}
+          : {
+              selfReview: extra.envelope.selfReview,
+              observations: extra.envelope.observations,
+              escalations: extra.envelope.escalations,
+            }),
+        ...(extra.sessionRef === undefined ? {} : { engineSessionRef: extra.sessionRef }),
+        claimAssessments: (extra.claimAssessments ?? []).map((a) => ({
+          kind: a.claim.kind,
+          statement: a.claim.statement,
+          verification: a.verification,
+        })),
+        attempts: extra.attempts,
+      });
+    });
+
+    return this.assemble(runId, outcome, diagnostics, extra);
+  }
+
+  private assemble(
+    runId: string,
+    outcome: RunOutcome,
+    diagnostics: readonly string[],
+    extra: {
+      bundle: ContextBundle | undefined;
+      envelope?: OutputEnvelope;
+      claimAssessments?: readonly ClaimAssessment[];
+      attempts: number;
+      sessionRef?: string;
+    },
+  ): AgentRunResult {
     return {
       runId,
       outcome,
@@ -460,6 +614,77 @@ export class AgentRuntime {
   /** Read the authoritative projection of a run from its event log. */
   projection(runId: string): ReturnType<typeof projectAgentRun> {
     return projectAgentRun(this.deps.store, runId);
+  }
+
+  /**
+   * Append the trace events for one observed tool fact, exactly once per state.
+   *
+   * The provider reports the same call twice -- once when it is issued, once when it
+   * returns -- so the recorder tracks what it has already written per `useId`. That
+   * makes it safe to call from the live observer AND from the post-hoc sweep without
+   * duplicating history in an append-only log.
+   *
+   * The three canonical events (05 §4.2) map to the three real transitions:
+   *   TOOL_REQUESTED       the model asked
+   *   TOOL_DECIDED         the permission layer ruled
+   *   TOOL_RESULT_CAPTURED a result came back, or an error did
+   */
+  private recordToolFact(
+    runId: string,
+    call: ObservedToolCall,
+    recorded: Map<string, ToolCallOutcome>,
+  ): void {
+    const already = recorded.get(call.useId);
+    if (already === call.outcome) return;
+
+    this.tx((tx) => {
+      if (already === undefined) {
+        appendRunEvent(tx, runId, {
+          type: AgentRunEventType.TOOL_REQUESTED,
+          payload: {
+            tool: call.tool,
+            useId: call.useId,
+            at: call.at,
+            ...(call.subject === undefined ? {} : { subject: call.subject }),
+          },
+        });
+        appendRunEvent(tx, runId, {
+          type: AgentRunEventType.TOOL_DECIDED,
+          payload: {
+            tool: call.tool,
+            useId: call.useId,
+            allowed: call.outcome !== ToolCallOutcome.DENIED,
+            outcome: call.outcome,
+            at: call.at,
+          },
+        });
+      }
+
+      // A result, success or failure, is a separate fact from the decision to allow.
+      if (
+        call.outcome === ToolCallOutcome.SUCCEEDED ||
+        call.outcome === ToolCallOutcome.FAILED ||
+        call.outcome === ToolCallOutcome.DENIED
+      ) {
+        appendRunEvent(tx, runId, {
+          type: AgentRunEventType.TOOL_RESULT_CAPTURED,
+          payload: {
+            tool: call.tool,
+            useId: call.useId,
+            outcome: call.outcome,
+            at: call.at,
+            ...(call.subject === undefined ? {} : { subject: call.subject }),
+            // A digest and a bounded excerpt, never the whole result: T-TRACE is
+            // permanent, and tool output is unbounded and may carry secrets.
+            ...(call.resultDigest === undefined ? {} : { resultDigest: call.resultDigest }),
+            ...(call.excerpt === undefined ? {} : { excerpt: call.excerpt.slice(0, 240) }),
+            ...(call.errorClass === undefined ? {} : { errorClass: call.errorClass }),
+          },
+        });
+      }
+    });
+
+    recorded.set(call.useId, call.outcome);
   }
 
   private tx(f: (tx: Transaction) => void): void {

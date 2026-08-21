@@ -132,6 +132,9 @@ export class Orchestrator {
       scopeBoundary: 'classification only; propose nothing and change nothing',
       ownerRequest: request.text,
       resultSchema: REQUEST_CLASSIFICATION_JSON_SCHEMA,
+      // Serva's own check of the payload, applied by AgentRuntime before the run is
+      // called valid. The JSON Schema above shapes the request; this decides the answer.
+      resultValidator: RequestClassificationSchema,
       canon: [
         ...this.projectStateContext(),
         // 04 §3.1 asks the classifier to recommend DEPARTMENTS. Without the catalogue
@@ -216,6 +219,7 @@ export class Orchestrator {
       scopeBoundary: 'plan proposal only; dispatch nothing',
       ownerRequest: request.text,
       resultSchema: EXECUTION_PLAN_JSON_SCHEMA,
+      resultValidator: ExecutionPlanSchema,
       canon: [
         ...this.projectStateContext(),
         {

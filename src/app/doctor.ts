@@ -7,6 +7,7 @@ import { SCHEMA_VERSION } from '../store/store.js';
 import { getCatalogues } from '../catalogue/index.js';
 import { ContractRegistry } from '../agents/registry.js';
 import { PHASE3_ENABLED_AGENTS } from './ai.js';
+import { verifyContextBundles } from '../context/store.js';
 
 /**
  * `serva doctor` — local prerequisites and store health.
@@ -195,6 +196,25 @@ export function runDoctor(rt: ServaRuntime | undefined, cwd: string): DoctorRepo
       : {
           remedy:
             'A trace stream was modified outside the append-only API. Quarantine and restore from a verified backup (22 §5.1).',
+        }),
+  });
+
+  // 19 CX-5 -- every persisted bundle must still reconstruct. A run whose context can
+  // no longer be reproduced has lost the answer to "what did it see?".
+  const bundles = verifyContextBundles(rt.store);
+  checks.push({
+    id: 'CONTEXT_BUNDLES',
+    title: 'Context bundle reconstructibility (19 CX-5)',
+    status: bundles.problems.length === 0 ? 'OK' : 'FAIL',
+    detail:
+      bundles.problems.length === 0
+        ? String(bundles.checked) + ' bundle(s) verified and reconstructible'
+        : bundles.problems.map((p) => p.bundleId + ': ' + p.problem).join('; '),
+    ...(bundles.problems.length === 0
+      ? {}
+      : {
+          remedy:
+            'A stored context bundle no longer matches its digest. What those runs were shown can no longer be established; restore from a verified backup (22 §5.1).',
         }),
   });
 

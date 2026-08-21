@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
 import { FakeEngineAdapter } from '../src/engine/fake.js';
-import { TerminationReason } from '../src/engine/types.js';
+import { TerminationReason, ToolCallOutcome } from '../src/engine/types.js';
 import { EnvelopeStatus, RunOutcome, TrustLevel } from '../src/vocab/index.js';
 import { PHASE3_ENABLED_AGENTS } from '../src/app/ai.js';
 import {
-  ALWAYS_DENY,
+  ALWAYS_DENY_TOOLS,
   CapabilityLevel,
   assertPolicyNotWidened,
   capabilityLevelFor,
@@ -54,6 +55,8 @@ function setup(enabled: ReadonlySet<string> = PHASE3_ENABLED_AGENTS): {
 }
 
 const RESULT_SCHEMA = { type: 'object', properties: { answer: { type: 'string' } } };
+/** The matching Serva-local validator (Blocker 4). */
+const RESULT_VALIDATOR = z.object({ answer: z.string() });
 
 function envelope(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -80,6 +83,7 @@ const RUN = {
   taskDefinition: 'Classify the request.',
   scopeBoundary: 'classification only',
   resultSchema: RESULT_SCHEMA,
+  resultValidator: RESULT_VALIDATOR,
 };
 
 /* ================================================== contract registry (55/55) */
@@ -142,10 +146,10 @@ describe('ToolPolicy is derived by Serva from the contract', () => {
       enabled: PHASE3_ENABLED_AGENTS,
       projectRoot: 'D:\\p',
     });
-    expect(p.allow).toEqual([]);
+    expect(p.available).toEqual([]);
     expect(p.network).toBe('NONE');
     expect(p.filesystem.write).toEqual([]);
-    expect(p.rationale.join(' ')).toMatch(/empty allowlist is a valid grant/);
+    expect(p.rationale.join(' ')).toMatch(/empty toolset is a valid grant/);
   });
 
   it('grants read-only tools where the contract declares fs read', () => {
@@ -153,7 +157,7 @@ describe('ToolPolicy is derived by Serva from the contract', () => {
       enabled: PHASE3_ENABLED_AGENTS,
       projectRoot: 'D:\\p',
     });
-    expect(p.allow).toEqual(['Read', 'Glob', 'Grep']);
+    expect(p.available).toEqual(['Read', 'Glob', 'Grep']);
     expect(p.filesystem.write).toEqual([]);
   });
 
@@ -162,7 +166,7 @@ describe('ToolPolicy is derived by Serva from the contract', () => {
       enabled: PHASE3_ENABLED_AGENTS,
       projectRoot: 'D:\\p',
     });
-    for (const d of ALWAYS_DENY) expect(p.deny).toContain(d);
+    for (const d of ALWAYS_DENY_TOOLS) expect(p.deny).toContain(d);
     expect(p.deny).toContain('mcp__*');
     expect(p.deny).toContain('Bash');
     expect(p.deny).toContain('Write');
@@ -177,7 +181,7 @@ describe('ToolPolicy is derived by Serva from the contract', () => {
       });
       expect(p.filesystem.write, id).toEqual([]);
       expect(p.network, id).toBe('NONE');
-      for (const t of p.allow) expect(['Read', 'Glob', 'Grep'], id + ' ' + t).toContain(t);
+      for (const t of p.available) expect(['Read', 'Glob', 'Grep'], id + ' ' + t).toContain(t);
     }
   });
 
@@ -207,16 +211,16 @@ describe('ToolPolicy is derived by Serva from the contract', () => {
       enabled: PHASE3_ENABLED_AGENTS,
       projectRoot: 'D:\\p',
     });
-    expect(() => assertPolicyNotWidened(computed, { ...computed, allow: ['Bash'] })).toThrowError(
-      /widened after resolution/,
-    );
+    expect(() =>
+      assertPolicyNotWidened(computed, { ...computed, available: ['Bash'] }),
+    ).toThrowError(/widened after resolution/);
     expect(() =>
       assertPolicyNotWidened(computed, { ...computed, network: { hosts: ['evil.example'] } }),
     ).toThrowError(/Network access was added/);
     expect(() =>
       assertPolicyNotWidened(computed, {
         ...computed,
-        filesystem: { read: [], write: ['D:\\p'] },
+        filesystem: { read: [], write: ['D:\\p'], readDenied: [] },
       }),
     ).toThrowError(/write scope was widened/);
   });
@@ -536,22 +540,73 @@ describe('evidence claims are claims until the runtime corroborates them', () =>
       ['Read', 'Bash'],
     );
     expect(a?.verification).toBe('CONTRADICTED');
-    expect(a?.reason).toMatch(/observed no successful Bash call/);
+    expect(a?.reason).toMatch(/observed no Bash call at all/);
   });
 
-  it('a claim matching an observed call is CORROBORATED', () => {
+  it('a claim bound to a successful call on the same subject is CORROBORATED', () => {
     const [a] = verifyEvidenceClaims(
-      [{ kind: 'FILE_READ', statement: 'I read the file', tool: 'Read' }],
-      [{ tool: 'Read', allowed: true, at: 'now' }],
+      [{ kind: 'FILE_READ', statement: 'I read the file', tool: 'Read', reference: 'a.txt' }],
+      [
+        {
+          tool: 'Read',
+          useId: 't1',
+          outcome: ToolCallOutcome.SUCCEEDED,
+          at: 'now',
+          subject: '/project/a.txt',
+          resultDigest: 'a'.repeat(64),
+        },
+      ],
       ['Read'],
     );
     expect(a?.verification).toBe('CORROBORATED');
+    expect(a?.reason).toMatch(/targeting "\/project\/a.txt"/);
+  });
+
+  it('a successful call on a DIFFERENT subject does not corroborate the claim', () => {
+    // The failure this catches: matching by tool name alone would let a successful
+    // read of config.json vouch for a claim about README.md.
+    const [a] = verifyEvidenceClaims(
+      [{ kind: 'FILE_READ', statement: 'I read the README', tool: 'Read', reference: 'README.md' }],
+      [
+        {
+          tool: 'Read',
+          useId: 't1',
+          outcome: ToolCallOutcome.SUCCEEDED,
+          at: 'now',
+          subject: '/project/config.json',
+        },
+      ],
+      ['Read'],
+    );
+    // NOT corroborated, which is what the rule requires. Not CONTRADICTED either:
+    // the tool did run, so Serva lacks a binding, not evidence of a lie.
+    expect(a?.verification).toBe('UNVERIFIED');
+    expect(a?.verification).not.toBe('CORROBORATED');
+    expect(a?.reason).toMatch(/none of them can be bound to "README.md"/);
+  });
+
+  it('a claim with a successful call but no reference to bind on is UNVERIFIED', () => {
+    const [a] = verifyEvidenceClaims(
+      [{ kind: 'FILE_READ', statement: 'I read a file', tool: 'Read' }],
+      [
+        {
+          tool: 'Read',
+          useId: 't1',
+          outcome: ToolCallOutcome.SUCCEEDED,
+          at: 'now',
+          subject: 'a.txt',
+        },
+      ],
+      ['Read'],
+    );
+    expect(a?.verification).toBe('UNVERIFIED');
+    expect(a?.reason).toMatch(/names no reference to bind it to/);
   });
 
   it('a claim about a DENIED tool is CONTRADICTED', () => {
     const [a] = verifyEvidenceClaims(
       [{ kind: 'COMMAND_RUN', statement: 'I ran it', tool: 'Bash' }],
-      [{ tool: 'Bash', allowed: false, at: 'now' }],
+      [{ tool: 'Bash', useId: 't1', outcome: ToolCallOutcome.DENIED, at: 'now' }],
     );
     expect(a?.verification).toBe('CONTRADICTED');
     expect(a?.reason).toMatch(/DENIED/);
@@ -563,13 +618,21 @@ describe('evidence claims are claims until the runtime corroborates them', () =>
       [],
     );
     expect(a?.verification).toBe('CONTRADICTED');
-    expect(a?.reason).toMatch(/no tool call at all/);
+    expect(a?.reason).toMatch(/no completed tool call/);
   });
 
   it('a claim with no capture channel is UNVERIFIED, never assumed true', () => {
     const [a] = verifyEvidenceClaims(
       [{ kind: 'EXTERNAL_SOURCE', statement: 'the docs say X' }],
-      [{ tool: 'Read', allowed: true, at: 'now' }],
+      [
+        {
+          tool: 'Read',
+          useId: 't1',
+          outcome: ToolCallOutcome.SUCCEEDED,
+          at: 'now',
+          subject: 'a.txt',
+        },
+      ],
     );
     expect(a?.verification).toBe('UNVERIFIED');
     expect(a?.reason).toMatch(/no runtime capture channel/);

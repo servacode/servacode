@@ -14,6 +14,9 @@ import {
   type Estimate,
   type InvocationRequest,
   type InvocationResult,
+  ToolCallOutcome,
+  type EngineObserver,
+  type InvokeOptions,
   type ObservedToolCall,
 } from '../types.js';
 import { CLAUDE_BIN, buildArgv, sessionUuidFor } from './argv.js';
@@ -141,7 +144,7 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
     };
   }
 
-  async invoke(request: InvocationRequest, signal?: AbortSignal): Promise<InvocationResult> {
+  async invoke(request: InvocationRequest, opts: InvokeOptions = {}): Promise<InvocationResult> {
     const startedAt = this.opts.clock.now();
     const status = await this.health();
 
@@ -161,11 +164,18 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
 
     const sessionId = sessionUuidFor(request.runId, digestOf);
 
-    // The composed prompt goes to a file inside the project's own store rather than
-    // to the OS temp directory: it carries repository excerpts and the owner's
-    // request, and a project's content should not leave the project (21 §8).
-    const promptDir = join(request.cwd, '.serva', 'tmp');
-    const promptFile = join(promptDir, 'prompt-' + sessionId + '.txt');
+    /*
+     * The composed prompt goes to a file inside the project's own store rather than to
+     * the OS temp directory: it carries repository excerpts and the owner's request,
+     * and a project's content should not leave the project (21 §8).
+     *
+     * Each run gets its OWN directory, and `.serva` is refused to every governed run by
+     * a deny rule, so a read-capable agent cannot open its own prompt or — the case
+     * that matters — a concurrently running agent's. Two runs in flight at once must
+     * not be able to read each other's instructions.
+     */
+    const promptDir = join(request.cwd, '.serva', 'tmp', 'run-' + sessionId);
+    const promptFile = join(promptDir, 'system-prompt.txt');
     mkdirSync(promptDir, { recursive: true });
     writeFileSync(promptFile, request.systemPrompt, 'utf8');
 
@@ -177,11 +187,11 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
     });
 
     try {
-      return await this.spawnAndCollect(request, argv, startedAt, signal);
+      return await this.spawnAndCollect(request, argv, startedAt, opts);
     } finally {
       // Transient by contract. Removed whether the run succeeded, failed or threw, so
       // a crashed run cannot leave project content lying in a scratch file.
-      rmSync(promptFile, { force: true });
+      rmSync(promptDir, { recursive: true, force: true });
     }
   }
 
@@ -189,14 +199,16 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
     request: InvocationRequest,
     argv: readonly string[],
     startedAt: string,
-    signal?: AbortSignal,
+    opts: InvokeOptions,
   ): Promise<InvocationResult> {
     return new Promise<InvocationResult>((resolve) => {
       const parser = new StreamParser();
       const events: StreamEvent[] = [];
       const diagnostics: string[] = [];
-      const toolCalls: ObservedToolCall[] = [];
-      const toolNameById = new Map<string, string>();
+      // Facts are absorbed AS THEY ARRIVE and pushed to the observer immediately. An
+      // invocation that dies never returns an InvocationResult, and everything the
+      // stream had already revealed would die with it (19 §8, 22 §4).
+      const tracker = new ToolTracker(this.opts.clock, opts.observe, (d) => diagnostics.push(d));
       let stderr = '';
       let settled = false;
       let killedBy: TerminationReason | undefined;
@@ -214,13 +226,15 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
         if (settled) return;
         settled = true;
         clearTimeout(deadline);
-        for (const ev of parser.end()) events.push(ev);
-        absorb(events, toolCalls, toolNameById, diagnostics, this.opts.clock);
+        for (const ev of parser.end()) {
+          events.push(ev);
+          tracker.absorb(ev);
+        }
         resolve(
           buildResult(
             request,
             events,
-            toolCalls,
+            tracker.calls(),
             [
               ...diagnostics,
               ...extra,
@@ -245,10 +259,13 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
         killedBy = TerminationReason.INTERRUPTED;
         child.kill('SIGTERM');
       };
-      signal?.addEventListener('abort', onAbort, { once: true });
+      opts.signal?.addEventListener('abort', onAbort, { once: true });
 
       child.stdout?.on('data', (d: Buffer) => {
-        for (const ev of parser.push(d.toString('utf8'))) events.push(ev);
+        for (const ev of parser.push(d.toString('utf8'))) {
+          events.push(ev);
+          tracker.absorb(ev);
+        }
       });
       child.stderr?.on('data', (d: Buffer) => {
         stderr += d.toString('utf8');
@@ -259,7 +276,7 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
       });
 
       child.on('close', (code: number | null) => {
-        signal?.removeEventListener('abort', onAbort);
+        opts.signal?.removeEventListener('abort', onAbort);
         if (killedBy !== undefined) return finish(killedBy);
         if (code === 0) return finish(TerminationReason.COMPLETED);
         // 143 = SIGTERM.
@@ -339,60 +356,132 @@ function classifyFailure(events: readonly StreamEvent[], stderr: string): Termin
   return TerminationReason.ENGINE_ERROR;
 }
 
-function absorb(
-  events: readonly StreamEvent[],
-  toolCalls: ObservedToolCall[],
-  toolNameById: Map<string, string>,
-  diagnostics: string[],
-  clock: Clock,
-): void {
-  toolCalls.length = 0;
-  toolNameById.clear();
-  for (const ev of events) {
+/**
+ * Turns a provider stream into governed tool facts, incrementally.
+ *
+ * The three states matter and were previously collapsed into one boolean:
+ *
+ *   tool_use  arrives            -> REQUESTED, then ALLOWED (the provider only emits a
+ *                                   tool_use for a call its permission layer admitted)
+ *   tool_result ok               -> SUCCEEDED, with a digest of what came back
+ *   tool_result error            -> DENIED if the error is a permission refusal,
+ *                                   otherwise FAILED with an error class
+ *
+ * Only SUCCEEDED can corroborate an evidence claim. "The model asked to read a file"
+ * and "the file was read" are different facts, and a run that dies between them
+ * leaves REQUESTED, which is the truth.
+ */
+class ToolTracker {
+  private readonly byUseId = new Map<string, ObservedToolCall>();
+  private readonly ordered: ObservedToolCall[] = [];
+
+  constructor(
+    private readonly clock: Clock,
+    private readonly observe: EngineObserver | undefined,
+    private readonly diagnostic: (message: string) => void,
+  ) {}
+
+  calls(): ObservedToolCall[] {
+    return [...this.ordered];
+  }
+
+  absorb(ev: StreamEvent): void {
     switch (ev.kind) {
-      case 'init':
+      case 'init': {
+        if (ev.sessionId !== undefined) this.emit({ kind: 'SESSION', sessionRef: ev.sessionId });
         if (ev.mcpServers.length > 0) {
-          // Isolation failure: a governed run must see no MCP server (19 §4, ADR-002 F-4).
-          diagnostics.push('ISOLATION: engine reported MCP servers: ' + ev.mcpServers.join(', '));
+          // Isolation failure: a governed run must see no MCP server (19 §4).
+          this.note('ISOLATION: engine reported MCP servers: ' + ev.mcpServers.join(', '));
         }
         break;
-      case 'tool_use':
-        toolNameById.set(ev.id, ev.name);
-        // The provider's own structured-output mechanism surfaces as a tool call. It
-        // is not a capability Serva granted, so recording it as one would misreport
-        // every structured run as having used a tool -- and would then contradict an
-        // agent that truthfully said it used none.
-        if (!PROVIDER_INTERNAL_TOOLS.has(ev.name)) {
-          toolCalls.push({ tool: ev.name, allowed: true, at: clock.now() });
-        }
+      }
+      case 'tool_use': {
+        if (PROVIDER_INTERNAL_TOOLS.has(ev.name)) break;
+        // Recorded as ALLOWED, not SUCCEEDED: admitted by the permission layer, with
+        // no result yet. If the process dies here, that is exactly what happened.
+        const call: ObservedToolCall = {
+          tool: ev.name,
+          useId: ev.id,
+          outcome: ToolCallOutcome.ALLOWED,
+          at: this.clock.now(),
+          ...(ev.subject === undefined ? {} : { subject: ev.subject }),
+        };
+        this.byUseId.set(ev.id, call);
+        this.ordered.push(call);
+        this.emit({ kind: 'TOOL', call });
         break;
+      }
       case 'tool_result': {
-        if (!ev.isError) break;
-        const name = toolNameById.get(ev.forId) ?? 'UNKNOWN';
-        // A denial surfaces as an error result. It is recorded as a denied call
-        // rather than discarded: 19 TR-2 calls denials diagnostic gold.
-        const denied = /permission|denied|not allowed|disallow/i.test(ev.excerpt);
-        if (denied)
-          toolCalls.push({ tool: name, allowed: false, at: clock.now(), detail: ev.excerpt });
+        const prior = this.byUseId.get(ev.forId);
+        if (prior === undefined) break;
+        const denied = /permission|denied|not allowed|disallow|blocked by/i.test(ev.excerpt);
+        const updated: ObservedToolCall = {
+          ...prior,
+          outcome: ev.isError
+            ? denied
+              ? ToolCallOutcome.DENIED
+              : ToolCallOutcome.FAILED
+            : ToolCallOutcome.SUCCEEDED,
+          at: this.clock.now(),
+          resultDigest: digestOf(ev.excerpt),
+          excerpt: ev.excerpt.slice(0, 240),
+          ...(ev.isError ? { errorClass: classifyToolError(ev.excerpt, denied) } : {}),
+        };
+        this.replace(updated);
+        this.emit({ kind: 'TOOL', call: updated });
         break;
       }
       case 'retry':
-        diagnostics.push('engine retry ' + String(ev.attempt) + ': ' + ev.error);
+        this.note('engine retry ' + String(ev.attempt) + ': ' + ev.error);
         break;
       case 'result':
+        if (ev.sessionId !== undefined) this.emit({ kind: 'SESSION', sessionRef: ev.sessionId });
         if (ev.isError) {
-          diagnostics.push(
-            'engine result error' + (ev.subtype === undefined ? '' : ': ' + ev.subtype),
-          );
+          this.note('engine result error' + (ev.subtype === undefined ? '' : ': ' + ev.subtype));
         }
         break;
       case 'unparseable':
-        diagnostics.push('unparseable stream line (' + ev.reason + '): ' + ev.line.slice(0, 200));
+        this.note('unparseable stream line (' + ev.reason + '): ' + ev.line.slice(0, 200));
         break;
       default:
         break;
     }
   }
+
+  private replace(call: ObservedToolCall): void {
+    this.byUseId.set(call.useId, call);
+    const i = this.ordered.findIndex((c) => c.useId === call.useId);
+    if (i >= 0) this.ordered[i] = call;
+    else this.ordered.push(call);
+  }
+
+  private note(message: string): void {
+    this.diagnostic(message);
+    this.emit({ kind: 'DIAGNOSTIC', message });
+  }
+
+  /** An observer defect must never take the run down (19 §7). */
+  private emit(observation: Parameters<EngineObserver>[0]): void {
+    if (this.observe === undefined) return;
+    try {
+      this.observe(observation);
+    } catch {
+      this.diagnostic('engine observer threw and was ignored');
+    }
+  }
+}
+
+/** Name the failure class without storing a stack trace or unbounded output. */
+function classifyToolError(excerpt: string, denied: boolean): string {
+  if (denied) return 'PERMISSION_DENIED';
+  const t = excerpt.toLowerCase();
+  if (t.includes('enoent') || t.includes('no such file') || t.includes('not found')) {
+    return 'NOT_FOUND';
+  }
+  if (t.includes('eacces') || t.includes('permission')) return 'ACCESS_DENIED';
+  if (t.includes('timeout') || t.includes('timed out')) return 'TIMEOUT';
+  if (t.includes('too large') || t.includes('exceeds')) return 'TOO_LARGE';
+  return 'TOOL_ERROR';
 }
 
 function buildResult(

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ClaimVerification, EnvelopeStatus } from '../vocab/index.js';
-import type { ObservedToolCall } from '../engine/types.js';
+import { ToolCallOutcome, type ObservedToolCall } from '../engine/types.js';
 
 /**
  * The universal Agent Output Envelope. SPEC: 05 §6, 19 SO-4.
@@ -268,23 +268,29 @@ export function verifyEvidenceClaims(
   observed: readonly ObservedToolCall[],
   grantedTools: readonly string[] = [],
 ): ClaimAssessment[] {
-  const succeeded = new Set(observed.filter((t) => t.allowed).map((t) => t.tool));
-  const denied = new Set(observed.filter((t) => !t.allowed).map((t) => t.tool));
+  // ONLY a call that ran to completion can corroborate anything. A tool_use event
+  // means the model asked and was permitted; it does not mean a result came back, and
+  // treating the two as one is how a system starts believing work that never happened.
+  const succeeded = observed.filter((c) => c.outcome === ToolCallOutcome.SUCCEEDED);
+  const attempted = observed.filter((c) => c.outcome !== ToolCallOutcome.SUCCEEDED);
+
+  const succeededTools = new Set(succeeded.map((c) => c.tool));
+  const attemptedTools = new Set(attempted.map((c) => c.tool));
   // A name only counts as a tool reference if it names a tool this run could have
   // called. Anything else in that field is prose, and prose is not a capability claim.
-  const knownTools = new Set([...grantedTools, ...succeeded, ...denied]);
+  const knownTools = new Set([...grantedTools, ...succeededTools, ...attemptedTools]);
 
-  return claims.map((claim) => {
+  return claims.map((claim): ClaimAssessment => {
     // A model asked for an optional tool name often answers "none" rather than
     // omitting the field. That is a statement that NO tool was used, not a claim about
     // a tool called "none", and reading it the second way turns an honest answer into
     // a fabrication finding.
     const named = normalizeToolName(claim.tool);
+    const subject = normalizeSubject(claim.reference);
 
-    // A name that does not correspond to any tool this run could have called is not a
-    // capability claim at all -- it is a description written into the wrong field.
-    // Treating it as a fabricated tool call would be the most damaging false positive
-    // this system can produce, so it is reported as unverified with the reason stated.
+    // A name that corresponds to no tool this run could have called is a description
+    // written into the wrong field, not a capability claim. Treating it as a fabricated
+    // call would be the most damaging false positive this system can produce.
     if (named !== undefined && !knownTools.has(named)) {
       return {
         claim,
@@ -296,44 +302,92 @@ export function verifyEvidenceClaims(
       };
     }
 
-    // A claim naming a real tool is checkable now: either the runtime saw that call or
-    // it did not, and "did not" is decisive rather than merely unproven.
     if (named !== undefined) {
       const claimTool = named;
-      if (denied.has(claimTool) && !succeeded.has(claimTool)) {
+      const successesWithTool = succeeded.filter((c) => c.tool === claimTool);
+      const attemptsWithTool = attempted.filter((c) => c.tool === claimTool);
+
+      if (successesWithTool.length === 0) {
+        // The tool never returned a result. Say WHY, because "denied", "failed" and
+        // "never finished" are three different facts about the same claim.
+        const worst = attemptsWithTool[attemptsWithTool.length - 1];
         return {
           claim,
           verification: ClaimVerification.CONTRADICTED,
-          reason:
-            'the runtime observed ' + claimTool + ' being DENIED and never succeeding in this run',
+          reason: explainNoSuccess(claimTool, worst, succeededTools),
         };
       }
-      if (!succeeded.has(claimTool)) {
+
+      // A successful call to the right tool is not automatically the right call. Bind
+      // on the SUBJECT: reading config.json does not corroborate a claim about
+      // README.md, and matching on tool name alone would say it does.
+      if (subject !== undefined) {
+        const match = successesWithTool.find((c) => subjectsMatch(c.subject, subject));
+        if (match === undefined) {
+          const seen = successesWithTool
+            .map((c) => c.subject ?? '(no recorded subject)')
+            .join(', ');
+          /*
+           * UNVERIFIED, not CONTRADICTED, and the distinction is the whole discipline.
+           *
+           * CONTRADICTED means the runtime holds positive evidence the claim is false:
+           * the tool was denied, or it failed, or it never ran at all. A subject that
+           * will not bind is absence of BINDING, not evidence of falsehood — the tool
+           * did run, and Serva simply cannot tie this claim to a specific call.
+           *
+           * A live run proved why this matters. An agent that had honestly run a glob
+           * wrote its reference as `pattern=<the glob>`, and calling that fabrication
+           * accused a truthful agent of the gravest thing this system can allege.
+           * Absence of proof is not proof of absence, here as everywhere else.
+           */
+          return {
+            claim,
+            verification: ClaimVerification.UNVERIFIED,
+            reason:
+              'a successful ' +
+              claimTool +
+              ' call was observed, but none of them can be bound to "' +
+              subject +
+              '"; observed targets: ' +
+              (seen.length === 0 ? '(none recorded)' : seen),
+          };
+        }
         return {
           claim,
-          verification: ClaimVerification.CONTRADICTED,
+          verification: ClaimVerification.CORROBORATED,
           reason:
-            'the runtime observed no successful ' +
+            'a successful ' +
             claimTool +
-            ' call in this run; observed tools: ' +
-            (succeeded.size === 0 ? '(none)' : [...succeeded].join(', ')),
+            ' call targeting "' +
+            (match.subject ?? subject) +
+            '" was observed by the runtime' +
+            (match.resultDigest === undefined
+              ? ''
+              : ' (result digest ' + match.resultDigest.slice(0, 12) + ')'),
         };
       }
+
+      // No reference to bind on. The tool ran, but Serva cannot tell whether it ran
+      // against what the claim is about, so this is recorded rather than believed.
       return {
         claim,
-        verification: ClaimVerification.CORROBORATED,
-        reason: 'a successful ' + claimTool + ' call was observed by the runtime',
+        verification: ClaimVerification.UNVERIFIED,
+        reason:
+          'a successful ' +
+          claimTool +
+          ' call was observed, but the claim names no reference to bind it to; supply the path or target so the claim can be checked against what was actually done',
       };
     }
 
-    // Claims about execution without naming a tool cannot be true if the run made no
-    // tool calls at all — a no-tool agent cannot have run a command.
+    // Claims about execution without naming a tool cannot be true if the run completed
+    // no tool call at all -- a no-tool agent cannot have run a command.
     if (
-      observed.length === 0 &&
+      succeeded.length === 0 &&
       (claim.kind === 'TOOL_EXECUTION' ||
         claim.kind === 'COMMAND_RUN' ||
         claim.kind === 'TEST_RESULT' ||
-        claim.kind === 'FILE_WRITTEN')
+        claim.kind === 'FILE_WRITTEN' ||
+        claim.kind === 'FILE_READ')
     ) {
       return {
         claim,
@@ -341,7 +395,12 @@ export function verifyEvidenceClaims(
         reason:
           'the claim asserts ' +
           claim.kind +
-          ' but the runtime observed no tool call at all in this run',
+          ' but the runtime observed no completed tool call in this run' +
+          (attempted.length === 0
+            ? ''
+            : ' (' +
+              String(attempted.length) +
+              ' call(s) were attempted but none returned a result)'),
       };
     }
 
@@ -354,6 +413,81 @@ export function verifyEvidenceClaims(
         ' claim yet, so it is recorded as a claim and not treated as evidence (SC-POL-023)',
     };
   });
+}
+
+/** Say precisely why a tool produced nothing, rather than just that it did not. */
+function explainNoSuccess(
+  tool: string,
+  worst: ObservedToolCall | undefined,
+  succeededTools: ReadonlySet<string>,
+): string {
+  const observed = succeededTools.size === 0 ? '(none)' : [...succeededTools].join(', ');
+  if (worst === undefined) {
+    return (
+      'the runtime observed no ' +
+      tool +
+      ' call at all in this run; tools that did complete: ' +
+      observed
+    );
+  }
+  switch (worst.outcome) {
+    case ToolCallOutcome.DENIED:
+      return 'the runtime observed ' + tool + ' being DENIED; it never executed';
+    case ToolCallOutcome.FAILED:
+      return (
+        'the runtime observed ' +
+        tool +
+        ' being attempted and FAILING (' +
+        (worst.errorClass ?? 'TOOL_ERROR') +
+        ')' +
+        (worst.subject === undefined ? '' : ' on "' + worst.subject + '"') +
+        '; a failed call proves nothing about its target'
+      );
+    default:
+      return (
+        'the runtime observed ' +
+        tool +
+        ' being requested but never completing; the run ended before a result was captured'
+      );
+  }
+}
+
+/** Empty and placeholder references are absent, not targets. */
+function normalizeSubject(reference: string | undefined): string | undefined {
+  if (reference === undefined) return undefined;
+  const r = reference.trim();
+  if (r.length === 0) return undefined;
+  if (NO_TOOL_SENTINELS.has(r.toLowerCase())) return undefined;
+  return r;
+}
+
+/**
+ * Do a claimed reference and an observed target denote the same thing?
+ *
+ * Compared on normalised separators and on the tail of the path, because a model
+ * writes "README.md" for what the runtime recorded as an absolute path. Deliberately
+ * NOT a fuzzy match: one must be a path-segment suffix of the other, so "config.json"
+ * never matches "other-config.json".
+ */
+export function subjectsMatch(observedSubject: string | undefined, claimed: string): boolean {
+  if (observedSubject === undefined) return false;
+  // A model often labels the reference rather than writing it bare: `pattern=**/x`,
+  // `file: src/a.ts`, `path = ./b`. The label is stripped before comparison, because
+  // the alternative is failing to bind a reference that is plainly the same thing.
+  const norm = (v: string): string =>
+    v
+      .replace(/^\s*(?:pattern|path|file|file_path|query|glob|target)\s*[:=]\s*/i, '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.\//, '')
+      .toLowerCase();
+  const a = norm(observedSubject);
+  const b = norm(claimed);
+  // One must be a whole-segment suffix of the other. `endsWith` alone would let
+  // "other-config.json" match a claim about "config.json".
+  const isSegmentSuffix = (long: string, short: string): boolean =>
+    long === short || long.endsWith('/' + short);
+  return isSegmentSuffix(a, b) || isSegmentSuffix(b, a);
 }
 
 /** Any contradicted claim is a governance violation, not a quality problem (05 §7). */

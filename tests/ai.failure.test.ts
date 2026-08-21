@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { ContractRegistry } from '../src/agents/registry.js';
@@ -6,7 +7,7 @@ import { AgentRuntime } from '../src/agents/runtime.js';
 import { FakeEngineAdapter } from '../src/engine/fake.js';
 import { ClaudeCliEngineAdapter } from '../src/engine/claude/adapter.js';
 import { PHASE3_ENABLED_AGENTS } from '../src/app/ai.js';
-import { EngineHealthState, TerminationReason } from '../src/engine/types.js';
+import { EngineHealthState, TerminationReason, ToolCallOutcome } from '../src/engine/types.js';
 import { EnvelopeStatus, RunOutcome } from '../src/vocab/index.js';
 import { findIncompleteRuns, projectAgentRun, runStream } from '../src/events/agentRun.js';
 import { FixedClock } from '../src/core/clock.js';
@@ -56,6 +57,9 @@ const RUN = {
   taskDefinition: 'Classify.',
   scopeBoundary: 'classification only',
   resultSchema: { type: 'object' },
+  // Blocker 4: Serva validates the role payload itself. `z.unknown()` is the
+  // honest validator for a test whose payload shape is not the subject.
+  resultValidator: z.unknown(),
 };
 
 function envelope(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -236,9 +240,10 @@ describe('an interrupted run is detectable and re-dispatchable', () => {
       prompt: 'P',
       outputSchema: {},
       tools: {
-        allow: [],
+        available: [],
+        approve: [],
         deny: [],
-        filesystem: { read: [], write: [] },
+        filesystem: { read: [], write: [], readDenied: [] },
         network: 'NONE',
         maxToolCalls: 0,
         rationale: [],
@@ -253,7 +258,7 @@ describe('an interrupted run is detectable and re-dispatchable', () => {
       },
       cwd: 'D:/p',
     };
-    const p = engine.invoke(req, ac.signal);
+    const p = engine.invoke(req, { signal: ac.signal });
     ac.abort();
     expect((await p).terminatedBy).toBe(TerminationReason.INTERRUPTED);
   });
@@ -306,9 +311,10 @@ function invocation(root: string): InvocationRequest {
     prompt: 'USER',
     outputSchema: { type: 'object' },
     tools: {
-      allow: [],
+      available: [],
+      approve: [],
       deny: [],
-      filesystem: { read: [], write: [] },
+      filesystem: { read: [], write: [], readDenied: [] },
       network: 'NONE',
       maxToolCalls: 0,
       rationale: [],
@@ -491,7 +497,9 @@ describe('the Claude transport handles a hostile stream', () => {
       child.emit('close', 0);
     }, 5);
     const r = await p;
-    expect(r.toolCalls.some((t) => t.tool === 'Bash' && !t.allowed)).toBe(true);
+    expect(r.toolCalls.some((t) => t.tool === 'Bash' && t.outcome === ToolCallOutcome.DENIED)).toBe(
+      true,
+    );
   });
 
   it('reports cost basis honestly on a subscription route', async () => {

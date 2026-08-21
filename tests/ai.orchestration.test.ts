@@ -357,14 +357,33 @@ describe('owner request to dispatch queue', () => {
     expect(r.queue).toEqual([]);
   });
 
-  it('halts when the classification payload fails Serva validation', async () => {
+  it('AgentRuntime itself rejects a bad classification payload, before the orchestrator sees it', async () => {
+    // Blocker 4: the envelope can be perfectly well formed and still carry a payload
+    // that is not a RequestClassification. AgentRuntime validates the role-specific
+    // result locally, so the run never reaches COMPLETED and the orchestrator is not
+    // the thing rescuing it.
     const { engine, orchestrator } = setup();
     engine.script('SC-AGENT-003', {
       structuredOutput: envelope({ requestClass: 'NOT_A_REAL_CLASS' }),
     });
+    engine.script('SC-AGENT-003', {
+      structuredOutput: envelope({ requestClass: 'STILL_NOT_REAL' }),
+    });
     const r = await orchestrator.route('anything', 'SC-WI-000001');
     expect(r.stage).toBe('HALTED');
-    expect(r.haltReason).toMatch(/did not satisfy Serva validation/);
+    expect(r.classificationRun?.outcome).toBe(RunOutcome.INVALID_OUTPUT);
+    expect(r.classificationRun?.attempts).toBe(2);
+    expect(r.classificationRun?.diagnostics.join(' ')).toMatch(
+      /role-specific result did not validate/,
+    );
+    expect(r.queue).toEqual([]);
+  });
+
+  it('the orchestrator keeps its own defensive parse', () => {
+    // AgentRuntime is correct on its own; this layer is defence in depth, not the
+    // mechanism. Asserted directly rather than through a run that can no longer
+    // produce an invalid payload.
+    expect(RequestClassificationSchema.safeParse({ requestClass: 'NOPE' }).success).toBe(false);
   });
 
   it('rejects an invalid plan and does not repair it', async () => {
@@ -437,7 +456,7 @@ describe('owner request to dispatch queue', () => {
     for (const s of engine.seen) {
       expect(s.tools.filesystem.write).toEqual([]);
       expect(s.tools.network).toBe('NONE');
-      for (const t of s.tools.allow) expect(['Read', 'Glob', 'Grep']).toContain(t);
+      for (const t of s.tools.available) expect(['Read', 'Glob', 'Grep']).toContain(t);
       expect(s.tools.deny).toContain('Bash');
       expect(s.tools.deny).toContain('mcp__*');
     }
