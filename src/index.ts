@@ -44,9 +44,26 @@ export {
   type EvidenceView,
 } from './gates/evaluate.js';
 export {
+  ConditionRegistry,
+  StoreWaiverAuthority,
+  WAIVER_CANON_TYPE,
+  WAIVER_REQUIRED_AUTHORITY,
+  WaiverRecordSchema,
+  waiverProblem,
+} from './gates/authority.js';
+export type {
+  ApplicabilityAuthority,
+  ApplicabilityCondition,
+  ApplicabilityDetermination,
+  WaiverAuthority,
+  WaiverRecord,
+} from './gates/authority.js';
+export {
   evaluateGate,
   validateGate,
   assertKnownGate,
+  assertEvaluationsComplete,
+  bindEvaluationsToGate,
   readGateResults,
   readCriterionEvaluations,
   GATE_STREAM,
@@ -93,6 +110,8 @@ export {
   WorkflowEngine,
   WorkflowEventType,
   assertTransition,
+  assertRunCoherent,
+  validateWorkflowDefinition,
   isTerminal,
   WORKFLOW_STREAM,
   type WorkflowDefinition,

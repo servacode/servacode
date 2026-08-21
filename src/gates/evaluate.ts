@@ -8,6 +8,7 @@ import {
 import { fail } from '../core/errors.js';
 import type { IdSource } from '../core/ids.js';
 import type { Clock } from '../core/clock.js';
+import type { ApplicabilityDetermination } from './authority.js';
 import type { Criterion, CriterionEvaluation, EvidenceRequirement } from './types.js';
 
 /**
@@ -121,11 +122,30 @@ export function evaluateToolUnavailable(
   };
 }
 
-/** A criterion that does not apply in this scope. Inert in composition. */
+/**
+ * A criterion that does not apply in this scope. Inert in composition.
+ *
+ * The determination is a REQUIRED argument, not an assumption: 31 §2 defines
+ * NOT_APPLICABLE as "does not apply, with a recorded reason", and this producer
+ * must not be a way to mint one without it. The caller obtains the determination
+ * from an ApplicabilityAuthority; the gate engine re-resolves it independently at
+ * the boundary, so this is a convenience, never the proof.
+ */
 export function evaluateNotApplicable(
   criterion: Criterion,
+  determination: ApplicabilityDetermination,
   deps: EvaluateDeps,
 ): CriterionEvaluation {
+  if (determination.applies) {
+    fail({
+      code: 'E_GATE_AUTHORITY',
+      message: 'Criterion ' + criterion.id + ' cannot be NOT_APPLICABLE: its condition holds',
+      remedy: 'Evaluate the criterion rather than exempting it.',
+      details: { criterionId: criterion.id, condition: determination.condition },
+      specRef: '31 §2',
+    });
+  }
+  const now = deps.clock.now();
   return {
     id: deps.ids.next('SC-CE'),
     criterionRef: criterion.id,
@@ -133,8 +153,13 @@ export function evaluateNotApplicable(
     basis: CriterionBasis.DERIVED,
     severity: criterion.severity,
     evidenceRefs: [],
+    applicabilityBasis: {
+      condition: determination.condition,
+      resolvedBy: determination.resolvedBy,
+      resolvedAt: now,
+    },
     qualifications: [],
     artifactVersionsEvaluated: [],
-    evaluatedAt: deps.clock.now(),
+    evaluatedAt: now,
   };
 }

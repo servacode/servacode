@@ -118,20 +118,19 @@ describe('B1 — a gate cannot PASS with missing criterion evaluations', () => {
     ).toThrowError(/more than one evaluation for: C1/);
   });
 
-  it('5. explicit NOT_APPLICABLE -> allowed', () => {
-    const { store } = setup();
-    const tx = store.begin();
-    const r = evaluateGate(tx, engineDeps(), {
-      gate: gateWith3(),
-      scope: 'SC-WI-000001',
-      evaluations: [
+  it('5. explicit NOT_APPLICABLE satisfies completeness (applicability itself is checked separately)', () => {
+    // Completeness is about cardinality: NOT_APPLICABLE is a real answer, so the
+    // set is complete. Whether the criterion may be NOT_APPLICABLE at all is a
+    // separate authority question, covered in gates.authority.test.ts. Revised
+    // from the earlier version of this test, which asserted that an unconditional
+    // criterion could be exempted -- that was the bypass, not the contract.
+    expect(() =>
+      assertEvaluationsComplete(gateWith3(), [
         ce({ value: CriterionResult.MET, severity: Severity.BLOCKING, criterionRef: 'C1' }),
         ce({ value: CriterionResult.NOT_APPLICABLE, severity: Severity.MAJOR, criterionRef: 'C2' }),
         ce({ value: CriterionResult.MET, severity: Severity.ADVISORY, criterionRef: 'C3' }),
-      ],
-    });
-    tx.commit();
-    expect(r.verdict).toBe(GateVerdict.PASS);
+      ]),
+    ).not.toThrow();
   });
 
   it('6. explicit INDETERMINATE -> composed normally, not silently dropped', () => {

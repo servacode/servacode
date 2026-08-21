@@ -100,6 +100,63 @@ const TRANSITIONS: Readonly<Record<WorkflowRunState, readonly WorkflowRunState[]
   [WorkflowRunState.SUPERSEDED]: [],
 });
 
+/**
+ * Structural invariants of a WorkflowRun projection.
+ *
+ * These are properties no legal sequence of events can violate, which is exactly
+ * why they are worth asserting: a violation means a code path built the state
+ * directly rather than deriving it, and the cheapest place to catch that is the
+ * moment before it reaches the store. This is a guard against defects in this
+ * engine, not against a hostile caller -- the run is runtime-owned state.
+ */
+export function assertRunCoherent(def: WorkflowDefinition, run: WorkflowRun): void {
+  const known = new Set(def.steps.map((s) => s.id));
+  const bad = (problem: string, details: Record<string, unknown>): void => {
+    fail({
+      code: 'E_INTERNAL',
+      message: 'Workflow run ' + run.id + ' projection is incoherent: ' + problem,
+      remedy:
+        'This is an engine defect, not a caller error. The run was not written. Report the failing transition.',
+      details: { runId: run.id, workflowRef: run.workflowRef, ...details },
+      specRef: '07 §6',
+    });
+  };
+
+  for (const [label, list] of [
+    ['completedSteps', run.completedSteps],
+    ['failedSteps', run.failedSteps],
+    ['currentSteps', run.currentSteps],
+  ] as const) {
+    for (const id of list) {
+      if (!known.has(id)) bad(label + ' names unknown step ' + id, { [label]: list });
+    }
+    if (new Set(list).size !== list.length) {
+      bad(label + ' contains a duplicate', { [label]: list });
+    }
+  }
+
+  // The defect this invariant exists for.
+  const bothDoneAndFailed = run.completedSteps.filter((s) => run.failedSteps.includes(s));
+  if (bothDoneAndFailed.length > 0) {
+    bad('step(s) both completed and failed: ' + bothDoneAndFailed.join(', '), {
+      completedSteps: run.completedSteps,
+      failedSteps: run.failedSteps,
+    });
+  }
+
+  const activeButDone = run.currentSteps.filter((s) => run.completedSteps.includes(s));
+  if (activeButDone.length > 0) {
+    bad('step(s) active despite being complete: ' + activeButDone.join(', '), {
+      currentSteps: run.currentSteps,
+      completedSteps: run.completedSteps,
+    });
+  }
+
+  if (run.state === WorkflowRunState.COMPLETED && run.currentSteps.length > 0) {
+    bad('a COMPLETED run still has active steps', { currentSteps: run.currentSteps });
+  }
+}
+
 export function assertTransition(from: WorkflowRunState, to: WorkflowRunState): void {
   if (from === to) return;
   const allowed = TRANSITIONS[from];
@@ -284,6 +341,9 @@ export class WorkflowEngine {
     detail?: Record<string, unknown>,
   ): WorkflowRun {
     const next: WorkflowRun = { ...run, updatedAt: this.deps.clock.now() };
+    // Every write goes through here, so this is the one place that can guarantee
+    // no code path -- present or future -- persists an impossible projection.
+    assertRunCoherent(this.definition(next.workflowRef), next);
     tx.putWorking('workflowRun', next.id, next);
     tx.appendTrace(WORKFLOW_STREAM, {
       type: event,
@@ -408,10 +468,63 @@ export class WorkflowEngine {
     );
   }
 
+  /**
+   * Fail a step and put the run into REWORK.
+   *
+   * Failing is a state transition, not a note, so it is guarded exactly as
+   * completion is. Previously only membership and the run-level transition were
+   * checked, which let a step that had already completed be failed afterwards.
+   * That produced a run holding the same step in both `completedSteps` and
+   * `failedSteps`, and pointed `currentSteps` at work that was already done -- a
+   * projection no legal sequence of events could ever produce.
+   */
   failStep(tx: Transaction, runId: string, stepId: string, reason: string): WorkflowRun {
     const run = this.require(runId, tx);
-    this.requireStep(this.definition(run.workflowRef), stepId, runId);
+    const def = this.definition(run.workflowRef);
+    const step = this.requireStep(def, stepId, runId);
+
+    // Terminal runs are refused here: no terminal state permits a move to REWORK
+    // (31 V5b), so the transition table is the authority rather than a duplicate
+    // list of terminal states that could drift away from it.
     assertTransition(run.state, WorkflowRunState.REWORK);
+
+    if (run.completedSteps.includes(stepId)) {
+      fail({
+        code: 'E_INVALID_TRANSITION',
+        message: 'Step ' + stepId + ' has already completed and cannot be failed',
+        remedy:
+          'A completed step is failed by producing a new finding against the work, which reopens it through rework -- not by retroactively marking the completed step as failed.',
+        details: { runId, stepId, completedSteps: run.completedSteps },
+        specRef: '07 §2.1, 31 V5b',
+      });
+    }
+
+    // A step that was never eligible to run cannot have failed at running it.
+    const unmet = step.dependsOn.filter((d) => !run.completedSteps.includes(d));
+    if (unmet.length > 0) {
+      fail({
+        code: 'E_INVALID_TRANSITION',
+        message: 'Step ' + stepId + ' has unmet dependencies: ' + unmet.join(', '),
+        remedy:
+          'A step whose prerequisites are incomplete has not been attempted, so it cannot have failed.',
+        details: { runId, stepId, unmet, completed: run.completedSteps },
+        specRef: '07 §2.1',
+      });
+    }
+
+    if (!run.currentSteps.includes(stepId)) {
+      fail({
+        code: 'E_INVALID_TRANSITION',
+        message: 'Step ' + stepId + ' is not currently active for run ' + runId,
+        remedy:
+          'Active steps are ' +
+          (run.currentSteps.length === 0 ? '(none)' : run.currentSteps.join(', ')) +
+          '. Only an active step can fail.',
+        details: { runId, stepId, currentSteps: run.currentSteps, state: run.state },
+        specRef: '07 §2.1',
+      });
+    }
+
     const next: WorkflowRun = {
       ...run,
       state: WorkflowRunState.REWORK,

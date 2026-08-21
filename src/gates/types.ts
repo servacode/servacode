@@ -45,8 +45,24 @@ export interface CriterionEvaluation {
   readonly reason?: IndeterminateReason;
   readonly severity: Severity;
   readonly evidenceRefs: readonly string[];
-  /** Required iff value === WAIVED. */
+  /**
+   * Required iff value === WAIVED. A reference is NOT authority: the gate engine
+   * resolves it and validates target, scope, state, expiry and authority before
+   * the value is accepted (09 §9, 18 GW-1..GW-5).
+   */
   readonly waiverRef?: string;
+  /**
+   * Required iff value === NOT_APPLICABLE (31 §2 — "with a recorded reason").
+   *
+   * RUNTIME-WRITTEN. The gate engine resolves applicability through an authority
+   * and stamps this field itself, replacing any caller-supplied value. A caller
+   * cannot assert that a criterion does not apply.
+   */
+  readonly applicabilityBasis?: {
+    readonly condition: string;
+    readonly resolvedBy: string;
+    readonly resolvedAt: string;
+  };
   /** Required iff basis === JUDGED. */
   readonly judgedBy?: JudgedBy;
   readonly qualifications: readonly Qualification[];
@@ -129,6 +145,12 @@ export interface Criterion {
   readonly onMissingEvidence: OnMissingEvidence;
   readonly policyRefs: readonly string[];
   readonly applicability: 'ALWAYS' | { readonly condition: string };
+  /**
+   * 18 GW-3 — criterion-level narrowing of the gate's waivability. Absent means
+   * the criterion inherits `QualityGate.waivable`; false makes it unwaivable even
+   * on a waivable gate, which is how the never-waivable list is expressed.
+   */
+  readonly waivable?: boolean;
 }
 
 /** 18 §2 — a gate definition. Note: no on_not_verified. Removed in R4. */

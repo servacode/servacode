@@ -59,6 +59,14 @@ export function storePaths(root: string): StorePaths {
  */
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/**
+ * Non-throwing form of the segment rule. Used where an unusable value must read
+ * as "no such record" rather than as a store fault.
+ */
+export function isSafeSegment(value: string): boolean {
+  return SAFE_SEGMENT.test(value) && value !== '.' && value !== '..';
+}
+
 export function assertSafeSegment(value: string, what: string): void {
   if (
     value.length === 0 ||

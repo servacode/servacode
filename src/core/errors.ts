@@ -15,6 +15,7 @@ export type ServaErrorCode =
   | 'E_CONFLICT'
   | 'E_INVALID_TRANSITION'
   | 'E_GATE_DEFINITION'
+  | 'E_GATE_AUTHORITY'
   | 'E_MAPPING'
   | 'E_ISOLATION'
   | 'E_CONFIG'

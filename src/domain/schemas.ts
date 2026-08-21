@@ -230,6 +230,13 @@ export const CriterionEvaluationSchema = z
     severity: enumOf(Severity),
     evidenceRefs: z.array(z.string()).default([]),
     waiverRef: z.string().optional(),
+    applicabilityBasis: z
+      .object({
+        condition: z.string().min(1),
+        resolvedBy: z.string().min(1),
+        resolvedAt: IsoSchema,
+      })
+      .optional(),
     judgedBy: z
       .object({
         role: z.string(),
@@ -251,6 +258,9 @@ export const CriterionEvaluationSchema = z
   })
   .refine((v) => v.basis !== CriterionBasis.JUDGED || v.judgedBy !== undefined, {
     message: 'JUDGED basis requires judgedBy (08 KI-2b)',
+  })
+  .refine((v) => v.value !== CriterionResult.NOT_APPLICABLE || v.applicabilityBasis !== undefined, {
+    message: 'NOT_APPLICABLE requires a recorded applicability basis (31 §2)',
   });
 
 /**

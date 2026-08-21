@@ -242,6 +242,18 @@ export const Tier = {
 } as const;
 export type Tier = (typeof Tier)[keyof typeof Tier];
 
+/**
+ * 09 §9 — PolicyWaiver state. A waiver authorises a gate only while ACTIVE and
+ * unexpired; W-4/GW-5 make an expired waiver re-block automatically.
+ */
+export const WaiverState = {
+  ACTIVE: 'ACTIVE',
+  EXPIRED: 'EXPIRED',
+  REMEDIATED: 'REMEDIATED',
+  REVOKED: 'REVOKED',
+} as const;
+export type WaiverState = (typeof WaiverState)[keyof typeof WaiverState];
+
 /** 01 §1.3 — violation severity. */
 export const ViolationSeverity = { V1: 'V1', V2: 'V2', V3: 'V3' } as const;
 export type ViolationSeverity = (typeof ViolationSeverity)[keyof typeof ViolationSeverity];
