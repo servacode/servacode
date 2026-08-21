@@ -38,8 +38,50 @@ export interface SandboxProfileInput {
 export interface GeneratedSandboxProfile {
   readonly settings: Record<string, unknown>;
   readonly digest: string;
+  /**
+   * The POLICY, with paths replaced by the role they play.
+   *
+   * `digest` covers the concrete settings and therefore differs for every attempt,
+   * because every attempt has its own worktree. That makes it useless as a boundary
+   * identity: comparing it would refuse every dispatch while looking rigorous.
+   *
+   * This digest answers the question that actually matters — is the POLICY the same one
+   * that was measured? Change a path and it holds; change the write scope shape, the
+   * denied reads, the network stance, or either of the two settings that decide whether
+   * the sandbox can be got out of the way, and it moves.
+   */
+  readonly policyDigest: string;
   /** Written to disk only when a run needs it; the caller owns the lifetime. */
   readonly path?: string;
+}
+
+/** Replace concrete paths with the role they play, so the digest describes the policy. */
+function policyShape(
+  settings: Record<string, unknown>,
+  worktree: string,
+  project: string,
+): unknown {
+  const label = (p: string): string => {
+    const n = resolve(p);
+    if (n === worktree) return '<WORKTREE>';
+    if (n === project) return '<PROJECT>';
+    if (n.startsWith(worktree))
+      return '<WORKTREE>' + n.slice(worktree.length).split(String.fromCharCode(92)).join('/');
+    if (n.startsWith(project))
+      return '<PROJECT>' + n.slice(project.length).split(String.fromCharCode(92)).join('/');
+    return p;
+  };
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') return label(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (v !== null && typeof v === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = walk(x);
+      return out;
+    }
+    return v;
+  };
+  return walk(settings);
 }
 
 /** Credential locations denied to every engineering run, on every platform. */
@@ -82,7 +124,11 @@ export function buildSandboxProfile(input: SandboxProfileInput): GeneratedSandbo
     },
   };
 
-  return { settings, digest: digestOf(canonicalJson(settings)) };
+  return {
+    settings,
+    digest: digestOf(canonicalJson(settings)),
+    policyDigest: digestOf(canonicalJson(policyShape(settings, worktree, project))),
+  };
 }
 
 /**

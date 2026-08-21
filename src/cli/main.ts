@@ -15,6 +15,7 @@ import {
   cmdEvidence,
   cmdQualificationCatalogue,
 } from './commands/engineering.js';
+import { cmdImplement } from './commands/implement.js';
 import { SERVA_VERSION, SPEC_BASELINE } from '../app/runtime.js';
 
 /**
@@ -83,6 +84,7 @@ const USAGE = [
   '  context <SC-RUN-...>          Exactly what that run was shown',
   '',
   'Engineering factory:',
+  '  implement <work-item-id>      Build a work item: producer, checks, review, commit',
   '  engineering status            Substrate class, governance state, enabled producers',
   '  engineering qualify           Run the adversarial substrate qualification',
   '  engineering doctor            Full substrate report with prerequisites',
@@ -114,6 +116,7 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   run: cmdRun,
   context: cmdContext,
   engineering: cmdEngineering,
+  implement: cmdImplement,
   worktrees: cmdWorktrees,
   worktree: cmdWorktrees,
   changes: cmdChanges,

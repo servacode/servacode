@@ -1,3 +1,4 @@
+import { GUEST_PATH } from './transport.js';
 import type { ExecTransport, TransportCommand } from './transport.js';
 
 /**
@@ -38,6 +39,8 @@ export interface LauncherDetection {
   readonly version?: string;
   /** What was actually observed. Never "should be present". */
   readonly detail: string;
+  /** The exact step that would make it available. A refusal without one is a dead end. */
+  readonly remedy?: string;
   /** Extra facts for the fingerprint: a launcher upgrade invalidates a qualification. */
   readonly observations: Readonly<Record<string, string>>;
 }
@@ -116,7 +119,7 @@ export class BubblewrapLauncher implements SandboxLauncher {
       executable: this.binary,
       args: ['--version'],
       cwd: '/',
-      env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
+      env: { PATH: GUEST_PATH },
       timeoutMs: 20_000,
       maxOutputBytes: 20_000,
     });
@@ -128,6 +131,7 @@ export class BubblewrapLauncher implements SandboxLauncher {
           this.binary +
           ' --version` did not succeed in the guest: ' +
           (r.stderr.trim() || 'no output').slice(0, 200),
+        remedy: 'sudo apt-get install bubblewrap (inside the execution environment)',
         observations: {},
       };
     }

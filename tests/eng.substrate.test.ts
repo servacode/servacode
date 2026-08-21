@@ -12,7 +12,13 @@ import {
 } from '../src/substrate/types.js';
 import { BLOCKING_CASE_IDS, QUALIFICATION_CASES } from '../src/substrate/qualification.js';
 import { compareVersions, selectExecutionSubstrate } from '../src/substrate/host.js';
-import { SandboxedExecutionSubstrate } from '../src/substrate/sandboxed.js';
+import {
+  PRODUCER_REQUIRED_BINARIES,
+  RECIPE_REQUIRED_BINARIES,
+  SandboxedExecutionSubstrate,
+} from '../src/substrate/sandboxed.js';
+import { ClaudeSandboxLauncher } from '../src/substrate/claudeSandbox.js';
+import { BoundaryPurpose, boundaryMismatch, executionBoundary } from '../src/substrate/boundary.js';
 import {
   BubblewrapLauncher,
   UnimplementedLauncher,
@@ -36,7 +42,7 @@ import {
   withinAny,
 } from '../src/substrate/fake.js';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 /**
  * EXECUTION SUBSTRATE.
@@ -239,12 +245,23 @@ class StubTransport implements ExecTransport {
   async run(command: TransportCommand): Promise<TransportResult> {
     this.seen.push(command);
 
-    // A wrapped command: everything after `--` is the program actually being run.
-    let exe = command.executable;
+    /*
+     * Serva now resolves an executable to an absolute guest path before running it, and
+     * probes with `sh -c 'command -v <bin>'` rather than `which`. The fixture keys stay
+     * readable by normalising both back to the short form.
+     */
+    let exe = basename(command.executable);
     let args = [...command.args];
-    const sep = exe === 'bwrap' ? args.indexOf('--') : -1;
+    if (exe === 'sh' && args[0] === '-c' && args[1]?.startsWith('command -v ')) {
+      const bin = args[1].slice('command -v '.length);
+      const hit = this.answers['which ' + bin];
+      return hit === undefined
+        ? { ...blank(1), spawnFailed: true }
+        : blank(hit.code, hit.stdout ?? '');
+    }
+    const sep = exe === 'bwrap' || exe === 'srt' ? args.indexOf('--') : -1;
     if (sep >= 0) {
-      exe = args[sep + 1] ?? '';
+      exe = basename(args[sep + 1] ?? '');
       args = args.slice(sep + 2);
     }
 
@@ -286,6 +303,8 @@ function healthyGuest(): Record<string, { code: number; stdout?: string }> {
     'which claude': { code: 0, stdout: '/usr/local/bin/claude\n' },
     'which srt': { code: 0, stdout: '/usr/local/bin/srt\n' },
     'bwrap --version': { code: 0, stdout: 'bubblewrap 0.8.0\n' },
+    'srt --help': { code: 0, stdout: 'usage: srt [--settings <file>] -- <command>\n' },
+    'srt --version': { code: 0, stdout: 'sandbox-runtime 0.4.1\n' },
     'cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns': { code: 1 },
     'cat /proc/sys/fs/binfmt_misc/WSLInterop': { code: 1 },
   };
@@ -308,7 +327,15 @@ const CONTAINED: Record<string, number> = {
 
 function sandboxed(
   transport: ExecTransport,
-  o: { launcher?: SandboxLauncher; engineVersion?: string } = {},
+  o: {
+    launcher?: SandboxLauncher;
+    engineVersion?: string;
+    purpose?: BoundaryPurpose;
+    boundaryId?: string;
+    requiresEngine?: boolean;
+    requiredBinaries?: readonly { bin: string; why: string; remedy: string }[];
+    profileDigest?: string;
+  } = {},
 ): SandboxedExecutionSubstrate {
   return new SandboxedExecutionSubstrate({
     transport,
@@ -317,6 +344,11 @@ function sandboxed(
     engineVersion: o.engineVersion ?? '2.1.218',
     projectRoot: process.cwd(),
     minEngineVersion: '2.1.216',
+    purpose: o.purpose ?? BoundaryPurpose.RECIPE,
+    boundaryId: o.boundaryId ?? 'SC-BOUNDARY-RECIPE',
+    ...(o.requiredBinaries === undefined ? {} : { requiredBinaries: o.requiredBinaries }),
+    ...(o.requiresEngine === undefined ? {} : { requiresEngine: o.requiresEngine }),
+    ...(o.profileDigest === undefined ? {} : { profileDigest: o.profileDigest }),
   });
 }
 
@@ -409,28 +441,53 @@ describe('Windows delegates execution into a WSL2 guest', () => {
 });
 
 describe('prerequisites are detected, not assumed', () => {
-  it('the seccomp filter is DETECTED when it is installed', async () => {
+  it('the recipe boundary does not require what bubblewrap never uses', async () => {
     /*
-     * The defect this replaces: the prerequisite was hard-coded `satisfied: false`, so
-     * a machine that HAD the filter was still told to install it, and no amount of
-     * installing anything could ever change the answer.
+     * `socat` and the syscall filter used to be prerequisites of THIS boundary, and
+     * neither was used by it: the launcher's argv mentions neither. A prerequisite
+     * counted because a file exists on disk, rather than because it participates, is
+     * a checkbox pretending to be a control.
+     *
+     * They moved to the Producer boundary, where the mechanism genuinely needs them.
      */
-    const s = sandboxed(new StubTransport(healthyGuest()));
-    const probe = await s.probe();
-    const seccomp = probe.prerequisites.find((p) => p.id === 'SECCOMP_FILTER');
-    expect(seccomp?.satisfied).toBe(true);
-    expect(probe.observations['seccomp:detail']).toMatch(/binary at/);
+    const ids = RECIPE_REQUIRED_BINARIES.map((b) => b.bin);
+    expect(ids).toContain('bwrap');
+    expect(ids).not.toContain('socat');
+    expect(PRODUCER_REQUIRED_BINARIES.map((b) => b.bin)).toContain('socat');
+
+    const probe = await sandboxed(new StubTransport(healthyGuest())).probe();
+    expect(probe.prerequisites.map((p) => p.id)).not.toContain('SECCOMP_FILTER');
   });
 
-  it('and reported missing, with a remedy, when it is not', async () => {
+  it('the Producer boundary IS the sandbox runtime, so its absence stops everything', async () => {
+    // Detection is no longer a checkbox: the runtime is what wraps every command, so
+    // "not installed" and "no boundary" are the same fact rather than two.
     const guest = healthyGuest();
-    delete guest['which srt'];
-    const s = sandboxed(new StubTransport(guest));
-    const probe = await s.probe();
-    const seccomp = probe.prerequisites.find((p) => p.id === 'SECCOMP_FILTER');
-    expect(seccomp?.satisfied).toBe(false);
-    expect(seccomp?.why).toMatch(/Unix socket/);
-    expect(seccomp?.remedy).toMatch(/sandbox-runtime/);
+    delete guest['srt --help'];
+    const probe = await sandboxed(new StubTransport(guest), {
+      launcher: new ClaudeSandboxLauncher({ settingsPath: '/tmp/settings.json' }),
+      purpose: BoundaryPurpose.PRODUCER,
+      boundaryId: 'SC-BOUNDARY-PRODUCER',
+      requiredBinaries: PRODUCER_REQUIRED_BINARIES,
+      requiresEngine: true,
+    }).probe();
+
+    const launcher = probe.prerequisites.find((p) => p.id === 'SANDBOX_LAUNCHER');
+    expect(launcher?.satisfied).toBe(false);
+    expect(launcher?.remedy).toMatch(/sandbox-runtime/);
+  });
+
+  it('a sandbox runtime whose command line Serva cannot read is refused, not guessed', async () => {
+    const guest = healthyGuest();
+    guest['srt --help'] = { code: 0, stdout: 'usage: srt [--wat]\n' };
+    const probe = await sandboxed(new StubTransport(guest), {
+      launcher: new ClaudeSandboxLauncher({ settingsPath: '/tmp/settings.json' }),
+      purpose: BoundaryPurpose.PRODUCER,
+      boundaryId: 'SC-BOUNDARY-PRODUCER',
+    }).probe();
+    const launcher = probe.prerequisites.find((p) => p.id === 'SANDBOX_LAUNCHER');
+    expect(launcher?.satisfied).toBe(false);
+    expect(probe.observations['launcher:detail']).toMatch(/will not guess a command line/);
   });
 
   it('a binary resolving under /mnt/ is the Windows one, and does not count', async () => {
@@ -455,9 +512,32 @@ describe('prerequisites are detected, not assumed', () => {
   });
 
   it('an engine older than the qualification was written for is a prerequisite failure', async () => {
-    const s = sandboxed(new StubTransport(healthyGuest()), { engineVersion: '2.0.0' });
+    const s = sandboxed(new StubTransport(healthyGuest()), {
+      engineVersion: '2.0.0',
+      requiresEngine: true,
+    });
     const probe = await s.probe();
     expect(probe.prerequisites.find((p) => p.id === 'ENGINE_VERSION')?.satisfied).toBe(false);
+  });
+
+  it('an unreadable engine version is not a pass', async () => {
+    // `compareVersions` returns 0 for anything it cannot parse, so `'UNKNOWN' >= min`
+    // used to be true: the prerequisite reported satisfied for a version nobody had
+    // established. "We could not tell" is not "it is new enough".
+    const s = sandboxed(new StubTransport(healthyGuest()), {
+      engineVersion: 'UNKNOWN',
+      requiresEngine: true,
+    });
+    const p = (await s.probe()).prerequisites.find((x) => x.id === 'ENGINE_VERSION');
+    expect(p?.satisfied).toBe(false);
+    expect(p?.why).toMatch(/could not read at all/);
+  });
+
+  it('the recipe boundary does not require an engine version at all', async () => {
+    // No engine is involved in `bwrap npm test`. Gating it on one would be a
+    // prerequisite that cannot affect the thing it gates.
+    const probe = await sandboxed(new StubTransport(healthyGuest())).probe();
+    expect(probe.prerequisites.map((x) => x.id)).not.toContain('ENGINE_VERSION');
   });
 
   it('compares versions numerically', () => {
@@ -769,5 +849,96 @@ describe('containment is judged on the resolved path', () => {
   it('parent traversal lands outside and is seen to', () => {
     const dir = fixture();
     expect(withinAny(join(dir, '..', '..', 'etc'), [dir])).toBe(false);
+  });
+});
+
+/* ================================================= execution boundary identity */
+
+describe('a qualification is a measurement OF something', () => {
+  const wsl = () =>
+    executionBoundary({
+      boundaryId: 'SC-BOUNDARY-PRODUCER',
+      purpose: BoundaryPurpose.PRODUCER,
+      transport: 'wsl:Ubuntu',
+      guest: 'Ubuntu 26.04 LTS',
+      engineLocation: '/usr/local/bin/claude',
+      engineVersion: '2.1.218',
+      sandboxMechanism: 'claude-sandbox-runtime',
+      sandboxVersion: '0.4.1',
+      profileDigest: 'p'.repeat(64),
+    });
+
+  it('a WSL qualification does not authorize a native Windows engine', () => {
+    /*
+     * The defect this closes, exactly: Serva qualified the guest and dispatched onto
+     * the host, and every other check passed because the only question asked was
+     * whether an enforcement class said HARD.
+     */
+    const nativeWindows = executionBoundary({
+      ...wsl(),
+      transport: 'local',
+      engineLocation: 'C:\\Program Files\\claude\\claude.exe',
+    });
+    const why = boundaryMismatch(wsl(), nativeWindows);
+    expect(why).toMatch(/EXECUTION_BOUNDARY_MISMATCH/);
+    expect(why).toMatch(/transport: qualified wsl:Ubuntu, actual local/);
+    expect(why).toMatch(/engine location/);
+  });
+
+  it('distribution A does not authorize distribution B', () => {
+    const other = executionBoundary({ ...wsl(), transport: 'wsl:Debian', guest: 'Debian 12' });
+    expect(boundaryMismatch(wsl(), other)).toMatch(
+      /transport: qualified wsl:Ubuntu, actual wsl:Debian/,
+    );
+  });
+
+  it('engine version X does not authorize engine version Y', () => {
+    const upgraded = executionBoundary({ ...wsl(), engineVersion: '2.2.0' });
+    expect(boundaryMismatch(wsl(), upgraded)).toMatch(/engine version/);
+  });
+
+  it('a changed sandbox profile invalidates the qualification', () => {
+    const relaxed = executionBoundary({ ...wsl(), profileDigest: 'q'.repeat(64) });
+    expect(boundaryMismatch(wsl(), relaxed)).toMatch(/sandbox profile/);
+  });
+
+  it('a changed sandbox mechanism or version invalidates it', () => {
+    expect(
+      boundaryMismatch(wsl(), executionBoundary({ ...wsl(), sandboxMechanism: 'bubblewrap' })),
+    ).toMatch(/sandbox mechanism/);
+    expect(
+      boundaryMismatch(wsl(), executionBoundary({ ...wsl(), sandboxVersion: '0.5.0' })),
+    ).toMatch(/sandbox version/);
+  });
+
+  it('a simulated boundary never matches a measured one', () => {
+    const simulated = executionBoundary({ ...wsl(), simulated: true });
+    expect(boundaryMismatch(wsl(), simulated)).toMatch(/simulated/);
+  });
+
+  it('the identical boundary matches', () => {
+    expect(boundaryMismatch(wsl(), wsl())).toBeUndefined();
+  });
+
+  it('the qualification carries the boundary it measured', async () => {
+    const q = await sandboxed(new StubTransport(healthyGuest(), CONTAINED), {
+      purpose: BoundaryPurpose.PRODUCER,
+      boundaryId: 'SC-BOUNDARY-PRODUCER',
+      requiresEngine: true,
+      profileDigest: 'p'.repeat(64),
+    }).qualify(fixture());
+
+    expect(q.boundary.purpose).toBe(BoundaryPurpose.PRODUCER);
+    expect(q.boundary.engineLocation).toBe('/usr/local/bin/claude');
+    expect(q.boundary.profileDigest).toBe('p'.repeat(64));
+    expect(q.boundary.simulated).toBe(false);
+    // Same machine, different profile: a different boundary, and it says so.
+    const other = await sandboxed(new StubTransport(healthyGuest(), CONTAINED), {
+      purpose: BoundaryPurpose.PRODUCER,
+      boundaryId: 'SC-BOUNDARY-PRODUCER',
+      requiresEngine: true,
+      profileDigest: 'z'.repeat(64),
+    }).qualify(fixture());
+    expect(boundaryMismatch(q.boundary, other.boundary)).toMatch(/sandbox profile/);
   });
 });

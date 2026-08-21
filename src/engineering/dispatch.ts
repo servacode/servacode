@@ -5,6 +5,7 @@ import { fail } from '../core/errors.js';
 import { RunOutcome } from '../vocab/index.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { engineeringAuthorityRefusal } from '../substrate/types.js';
+import { BoundaryPurpose, describeBoundary, executionBoundary } from '../substrate/boundary.js';
 import { resolveProducerPolicy, resolveReviewerPolicy } from './capability.js';
 import {
   buildSandboxProfile,
@@ -101,6 +102,10 @@ export interface DispatchDeps {
   readonly enabledProducers: ReadonlySet<string>;
   /** The engine's declared capabilities, used to confirm the profile can be applied. */
   readonly engineCapabilities: EngineCapabilities;
+  /** The engine version the runtime's adapter reported. Observed, not configured. */
+  readonly engineVersion: string;
+  /** TEST ONLY. Permits a simulated boundary; no production caller sets it. */
+  readonly allowSimulatedBoundary?: boolean;
 }
 
 export interface ProducerDispatch {
@@ -233,17 +238,6 @@ export async function dispatchProducer(
 
   const contract = deps.registry.get(o.item.producerAgentId);
 
-  // The eight-condition gate. Throws with the reason; there is no downgrade path.
-  const policy = resolveProducerPolicy({
-    contract,
-    workspace: o.workspace,
-    qualification: deps.qualification,
-    enabledProducers: deps.enabledProducers,
-    projectRoot: deps.projectRoot,
-    reviewerAvailable: o.reviewerAvailable,
-    executorsAvailable: o.executorsAvailable,
-  });
-
   const profile = writeSandboxProfile(
     buildSandboxProfile({
       worktreePath: o.workspace.path,
@@ -253,6 +247,65 @@ export async function dispatchProducer(
     deps.projectRoot,
     o.workspace.workspaceId,
   );
+
+  /*
+   * The boundary this run will ACTUALLY use, derived from the runtime in hand.
+   *
+   * Three of these facts are observed independently of the qualification and are the
+   * ones that were wrong: the transport, the guest, and the engine executable. A WSL2
+   * qualification paired with a native-Windows `claude.exe` differs in all three, which
+   * is precisely the case that used to pass.
+   *
+   * The sandbox mechanism and its version are CARRIED from the qualification rather
+   * than re-observed — re-probing the guest on every dispatch would be a second
+   * measurement, not a second opinion, and the fingerprint over the qualification
+   * already covers them. Said plainly here so nobody reads this check as proving more
+   * than it does.
+   */
+  const location = deps.runtime.engineLocation();
+  if (location === undefined) {
+    return fail({
+      code: 'E_CAPABILITY_NOT_ENABLED',
+      message:
+        "The runtime's engine does not declare where it runs, so Serva cannot confirm it is the environment that was qualified",
+      remedy:
+        'Write authority is granted to a named execution environment, never to an unnamed one.',
+      details: { workItemId: o.item.workItemId },
+      specRef: 'Phase 4 §2',
+    });
+  }
+  const actualBoundary = executionBoundary({
+    boundaryId: deps.qualification.boundary.boundaryId,
+    purpose: BoundaryPurpose.PRODUCER,
+    transport: location.transport,
+    ...(location.guest === undefined ? {} : { guest: location.guest }),
+    engineLocation: location.executable,
+    engineVersion: deps.engineVersion,
+    sandboxMechanism: deps.qualification.boundary.sandboxMechanism,
+    ...(deps.qualification.boundary.sandboxVersion === undefined
+      ? {}
+      : { sandboxVersion: deps.qualification.boundary.sandboxVersion }),
+    profileDigest: profile.policyDigest,
+    // Carried from the qualification: a simulation cannot be turned into a measurement
+    // by the act of dispatching against it, and pretending otherwise here would hide
+    // the one fact the gate needs.
+    simulated: deps.qualification.boundary.simulated,
+  });
+
+  // The nine-condition gate, boundary first. Throws with the reason; no downgrade path.
+  const policy = resolveProducerPolicy({
+    contract,
+    workspace: o.workspace,
+    qualification: deps.qualification,
+    enabledProducers: deps.enabledProducers,
+    projectRoot: deps.projectRoot,
+    reviewerAvailable: o.reviewerAvailable,
+    executorsAvailable: o.executorsAvailable,
+    actualBoundary,
+    ...(deps.allowSimulatedBoundary === undefined
+      ? {}
+      : { allowSimulatedBoundary: deps.allowSimulatedBoundary }),
+  });
 
   try {
     const check = verifySandboxProfileInForce({
@@ -327,7 +380,11 @@ export async function dispatchProducer(
         basis:
           'engineering producer on a ' +
           deps.qualification.enforcementClass +
-          ' substrate, worktree ' +
+          ' boundary ' +
+          describeBoundary(actualBoundary) +
+          ' (fingerprint ' +
+          actualBoundary.fingerprint +
+          '), worktree ' +
           o.workspace.workspaceId,
         ...(profile.path === undefined ? {} : { settingsPath: profile.path }),
         sandboxProfileDigest: profile.digest,
@@ -345,6 +402,8 @@ export async function dispatchProducer(
         workspaceId: o.workspace.workspaceId,
         sandboxProfileDigest: profile.digest,
         substrateClass: deps.qualification.enforcementClass,
+        executionBoundary: describeBoundary(actualBoundary),
+        boundaryFingerprint: actualBoundary.fingerprint,
       },
     });
     tx.commit();

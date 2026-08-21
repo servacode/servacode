@@ -308,7 +308,30 @@ export interface Estimate {
  * Four methods, no more. An engine that needs a fifth is telling you the boundary is
  * in the wrong place.
  */
+/**
+ * Where an adapter starts processes, when it knows.
+ *
+ * Provider-agnostic on purpose: it names a transport and an executable, and says
+ * nothing about sandboxes or substrates. Serva's engineering layer turns it into an
+ * execution-boundary identity; the engine layer stays ignorant of what that is for.
+ */
+export interface EngineExecutionLocation {
+  /** `local`, `wsl:<distro>`, `fake`, … */
+  readonly transport: string;
+  readonly guest?: string;
+  /** The executable actually invoked, as the execution environment names it. */
+  readonly executable: string;
+}
+
 export interface EngineAdapter {
+  /**
+   * Where this adapter runs the engine.
+   *
+   * Optional because not every adapter has a meaningful answer, and REQUIRED in
+   * practice for anything that grants write authority: authority derived from a
+   * measurement of one execution environment must not be usable in another.
+   */
+  readonly executionLocation?: EngineExecutionLocation;
   readonly id: string;
   health(): Promise<EngineStatus>;
   capabilities(): Promise<EngineCapabilities>;

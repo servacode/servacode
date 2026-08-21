@@ -30,6 +30,16 @@ import type { Clock } from '../core/clock.js';
 
 export interface FakeResponse {
   readonly structuredOutput?: unknown;
+  /**
+   * Build the structured output from the request.
+   *
+   * Needed because some governed results must ECHO something the runtime chose — a
+   * reviewer verdict names the ChangeSet it reviewed, and Serva refuses a verdict that
+   * names a different one. A static fixture cannot produce that, and hard-coding the
+   * expected id in a test would make the test agree with itself rather than with the
+   * system.
+   */
+  readonly structuredOutputFrom?: (request: InvocationRequest) => unknown;
   readonly text?: string;
   readonly terminatedBy?: TerminationReason;
   readonly toolCalls?: readonly ObservedToolCall[];
@@ -65,6 +75,14 @@ export const FAKE_CAPABILITIES: EngineCapabilities = Object.freeze({
 
 export class FakeEngineAdapter implements EngineAdapter {
   readonly id = 'fake';
+  /**
+   * Declared, and declared as fake.
+   *
+   * An engineering boundary built from this can never match a real one, so a scripted
+   * engine cannot stand in for a Producer's execution environment however the
+   * surrounding test is wired.
+   */
+  readonly executionLocation = { transport: 'fake', executable: 'fake-engine' };
   /** Every request this adapter was asked to run, in order. Tests assert on it. */
   readonly seen: InvocationRequest[] = [];
   private readonly byAgent = new Map<string, FakeResponse[]>();
@@ -170,9 +188,11 @@ export class FakeEngineAdapter implements EngineAdapter {
       runId: request.runId,
       ok: terminatedBy === TerminationReason.COMPLETED,
       terminatedBy,
-      ...(response.structuredOutput === undefined
-        ? {}
-        : { structuredOutput: response.structuredOutput }),
+      ...(response.structuredOutputFrom !== undefined
+        ? { structuredOutput: response.structuredOutputFrom(request) }
+        : response.structuredOutput === undefined
+          ? {}
+          : { structuredOutput: response.structuredOutput }),
       ...(response.text === undefined ? {} : { text: response.text }),
       toolCalls,
       consumption: {

@@ -449,6 +449,18 @@ describe('provider-specific code stays behind the adapter boundary', () => {
        */
       if (norm.endsWith('src/substrate/host.ts')) continue;
       if (norm.endsWith('src/substrate/sandboxed.ts')) continue;
+      /*
+       * claudeSandbox.ts names the mechanism that actually contains a Producer. It is
+       * irreducibly provider-specific for the same reason host.ts is, and — like
+       * host.ts — it reaches into no adapter; the test below proves that.
+       *
+       * engineering/engine.ts is a WIRING module, the engineering counterpart of
+       * app/ai.ts: it constructs the adapter and binds it to a boundary. Wiring is
+       * where a provider is allowed to be named, which is why app/ai.ts was already
+       * excepted; the rule is that nothing else knows.
+       */
+      if (norm.endsWith('src/substrate/claudeSandbox.ts')) continue;
+      if (norm.endsWith('src/engineering/engine.ts')) continue;
       if (norm.endsWith('src/engineering/sandboxProfile.ts')) continue;
       if (norm.endsWith('src/engineering/secrets.ts')) continue;
       if (norm.endsWith('src/engineering/recipe.ts')) continue;
@@ -473,6 +485,7 @@ describe('provider-specific code stays behind the adapter boundary', () => {
     for (const file of [
       'src/substrate/host.ts',
       'src/substrate/sandboxed.ts',
+      'src/substrate/claudeSandbox.ts',
       'src/engineering/sandboxProfile.ts',
       'src/engineering/secrets.ts',
       'src/engineering/recipe.ts',

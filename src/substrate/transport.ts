@@ -244,9 +244,29 @@ export function selectWslDistribution(
 export class WslTransport implements ExecTransport {
   readonly kind = TransportKind.WSL2;
   readonly id: string;
+  private started: Promise<void> | undefined;
 
   constructor(readonly distro: string) {
     this.id = 'wsl:' + distro;
+  }
+
+  /**
+   * Start the distribution once, before anything is timed.
+   *
+   * A cold WSL2 distribution takes many seconds to boot, and the first probe was paying
+   * that cost inside its own timeout — so `bwrap` reported MISSING on a machine whose
+   * `bwrap` answered correctly a second later. A probe that reports absent because the
+   * guest was still waking up is the same class of false negative as the `which` bug:
+   * it blocks a healthy machine and gives the owner nothing to fix.
+   *
+   * The warmup runs `true`, which is the smallest thing that forces a boot.
+   */
+  private warm(): Promise<void> {
+    this.started ??= runProcess('wsl.exe', ['-d', this.distro, '--', 'true'], {
+      timeoutMs: 120_000,
+      maxOutputBytes: 4_000,
+    }).then(() => undefined);
+    return this.started;
   }
 
   toGuestPath(hostPath: string): string {
@@ -254,6 +274,7 @@ export class WslTransport implements ExecTransport {
   }
 
   async run(command: TransportCommand): Promise<TransportResult> {
+    await this.warm();
     const envArgs: string[] = ['-i'];
     for (const [k, v] of Object.entries(command.env)) envArgs.push(k + '=' + v);
 
@@ -275,7 +296,8 @@ export class WslTransport implements ExecTransport {
   }
 
   /** One simple command per fact; see WSL_REQUIRED_BINARIES for why never a script. */
-  async raw(args: readonly string[], timeoutMs = 15_000): Promise<TransportResult> {
+  async raw(args: readonly string[], timeoutMs = 30_000): Promise<TransportResult> {
+    await this.warm();
     return runProcess('wsl.exe', ['-d', this.distro, '--', ...args], {
       timeoutMs,
       maxOutputBytes: 200_000,
@@ -305,6 +327,45 @@ export async function listWslDistributions(): Promise<WslDistribution[]> {
   });
   if (r.spawnFailed || r.exitCode !== 0) return [];
   return parseWslList(r.stdout);
+}
+
+/** A program name safe to name in a resolver. Matches the recipe schema's rule. */
+const SAFE_BINARY = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
+
+export const GUEST_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
+
+/**
+ * Where does `bin` actually live in the execution environment?
+ *
+ * `which` was the obvious answer and it silently failed: run under `env -i PATH=…`,
+ * GNU `env` resolves the program name against its OWN environment, which `-i` has just
+ * emptied — so `which` itself is not found and every binary reports MISSING. The live
+ * report caught it as `GUEST_BWRAP: MISS` sitting next to a launcher that had just
+ * printed `bubblewrap 0.11.1`, which is the kind of contradiction a probe should never
+ * be able to produce.
+ *
+ * `sh -c 'command -v <bin>'` resolves inside the shell, after the environment is in
+ * place. The name is interpolated into that one-line script, which is only safe
+ * because it is a program name from Serva's own closed lists and is re-validated here
+ * against the same pattern the recipe schema enforces. Anything else is refused rather
+ * than quoted.
+ */
+export async function resolveGuestBinary(
+  transport: ExecTransport,
+  bin: string,
+): Promise<string | undefined> {
+  if (!SAFE_BINARY.test(bin)) return undefined;
+  const r = await transport.run({
+    executable: '/bin/sh',
+    args: ['-c', 'command -v ' + bin],
+    cwd: '/',
+    env: { PATH: GUEST_PATH },
+    timeoutMs: 20_000,
+    maxOutputBytes: 20_000,
+  });
+  if (r.spawnFailed || r.exitCode !== 0) return undefined;
+  const first = r.stdout.replace(/\0/g, '').trim().split('\n')[0]?.trim();
+  return first !== undefined && first.length > 0 ? first : undefined;
 }
 
 export { runProcess as runHostProcess };

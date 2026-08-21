@@ -9,6 +9,12 @@ import {
   relativeRule,
 } from '../agents/toolPolicy.js';
 import { engineeringAuthorityRefusal, type SubstrateQualification } from '../substrate/types.js';
+import {
+  BoundaryPurpose,
+  boundaryMismatch,
+  describeBoundary,
+  type ExecutionBoundary,
+} from '../substrate/boundary.js';
 import type { AgentContract } from '../agents/schema.js';
 import type { ToolPolicy } from '../engine/types.js';
 import type { EngineeringWorkspace } from './workspace.js';
@@ -16,9 +22,10 @@ import type { EngineeringWorkspace } from './workspace.js';
 /**
  * Producer capability. SPEC: Phase 4 §9–§10, 19 §5, 33 PC-5.
  *
- * The gate every dangerous capability passes through, and the eight things that must
+ * The gate every dangerous capability passes through, and the NINE things that must
  * all be true before an agent may write a byte:
  *
+ *   0. the boundary that earned HARD is the boundary this run will use
  *   1. the substrate is qualified HARD
  *   2. the agent's contract loads
  *   3. the agent is in the enabled set for this task
@@ -27,6 +34,13 @@ import type { EngineeringWorkspace } from './workspace.js';
  *   6. the worktree is not the primary checkout
  *   7. an independent reviewer is available
  *   8. the required evidence executors are available
+ *
+ * Condition 0 was missing, and its absence was the defect that mattered most. Serva
+ * qualified a WSL2 guest and then dispatched a Producer onto native Windows, and every
+ * other condition passed, because `enforcementClass === HARD` is a claim with no
+ * subject. A measurement is a measurement OF something; authority from it is authority
+ * to run THAT thing. It is checked first because it is the one whose failure means the
+ * other eight were answering the wrong question.
  *
  * Any one of them false gives `CAPABILITY_NOT_ENABLED` with the reason. **There is no
  * silent downgrade**: an agent that asked to write and was quietly given read-only
@@ -96,6 +110,25 @@ export interface ProducerGateInput {
   readonly reviewerAvailable: boolean;
   readonly executorsAvailable: boolean;
   readonly taskMagnitude?: string;
+  /**
+   * The boundary this run will ACTUALLY use, observed from the engine in hand.
+   *
+   * Required, not optional. An optional check is a check somebody forgets, and this is
+   * the one that stopped a WSL2 qualification from authorizing a native-Windows
+   * Producer. Making it part of the type means no caller can reach write authority
+   * without having answered it.
+   */
+  readonly actualBoundary: ExecutionBoundary;
+  /**
+   * TEST ONLY. Permit a SIMULATED boundary to authorize a write.
+   *
+   * Orchestration has to be testable without a qualified machine, and a simulated
+   * boundary is how. It is an explicit opt-in rather than a default because the
+   * difference between "a boundary declared its outcomes" and "a boundary was measured"
+   * is the entire subject of this phase. No file under `src/` sets it, and a test
+   * asserts that.
+   */
+  readonly allowSimulatedBoundary?: boolean;
 }
 
 /**
@@ -148,6 +181,27 @@ export function producerContractRefusal(
 
 /** Returns the reason a Producer may not be dispatched, or undefined. */
 export function producerRefusal(input: ProducerGateInput): string | undefined {
+  /*
+   * Condition 0, before anything else.
+   *
+   * Deliberately ahead of the enforcement-class check: a HARD class for the wrong
+   * boundary is more dangerous than no class at all, because it reads as permission.
+   */
+  const mismatch = boundaryMismatch(input.qualification.boundary, input.actualBoundary);
+  if (mismatch !== undefined) return mismatch;
+
+  if (input.actualBoundary.purpose !== BoundaryPurpose.PRODUCER) {
+    return (
+      'The boundary offered for this run is a ' +
+      input.actualBoundary.purpose +
+      ' boundary. A Producer must run under a boundary qualified for Producers: the deterministic recipe boundary contains different things, by a different mechanism, and was measured for a different purpose.'
+    );
+  }
+
+  if (input.actualBoundary.simulated && input.allowSimulatedBoundary !== true) {
+    return 'The execution boundary is SIMULATED. A simulation declares its outcomes rather than measuring them, so it does not authorize a run that writes.';
+  }
+
   const substrate = engineeringAuthorityRefusal(input.qualification);
   if (substrate !== undefined) return substrate;
 
@@ -177,6 +231,10 @@ export interface ProducerPolicyOptions {
   readonly projectRoot: string;
   readonly reviewerAvailable: boolean;
   readonly executorsAvailable: boolean;
+  /** The boundary this run will actually use. See ProducerGateInput. */
+  readonly actualBoundary: ExecutionBoundary;
+  /** TEST ONLY. See ProducerGateInput. */
+  readonly allowSimulatedBoundary?: boolean;
   /** Recipes the Producer may invoke through Bash. Empty is valid and common. */
   readonly allowedCommands?: readonly string[];
 }
@@ -200,6 +258,10 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
     projectRoot: opts.projectRoot,
     reviewerAvailable: opts.reviewerAvailable,
     executorsAvailable: opts.executorsAvailable,
+    actualBoundary: opts.actualBoundary,
+    ...(opts.allowSimulatedBoundary === undefined
+      ? {}
+      : { allowSimulatedBoundary: opts.allowSimulatedBoundary }),
   });
   if (refusal !== undefined) {
     return fail({
@@ -247,6 +309,8 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
     maxToolCalls: 200,
     rationale: [
       'substrate: ' + opts.qualification.enforcementClass + ' (qualified)',
+      'execution boundary: ' + describeBoundary(opts.actualBoundary),
+      'boundary fingerprint: ' + opts.actualBoundary.fingerprint,
       'contract tool surface: ' + opts.contract.tools,
       'worktree: ' + opts.workspace.path,
       'the primary checkout is not writable by this run',

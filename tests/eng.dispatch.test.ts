@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { GateVerdict, RunOutcome } from '../src/vocab/index.js';
-import { FakeEngineAdapter } from '../src/engine/fake.js';
+import { FAKE_CAPABILITIES, FakeEngineAdapter } from '../src/engine/fake.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import {
@@ -19,6 +19,12 @@ import { DEFAULT_REQUIRED_CHECKS } from '../src/engineering/executors.js';
 import { dispatchProducer, dispatchReviewer } from '../src/engineering/dispatch.js';
 import { listReviews, validateReviewerResult } from '../src/engineering/review.js';
 import { EvidenceClass } from '../src/vocab/index.js';
+import { buildSandboxProfile } from '../src/engineering/sandboxProfile.js';
+import {
+  BoundaryPurpose,
+  executionBoundary,
+  type ExecutionBoundary,
+} from '../src/substrate/boundary.js';
 import { cleanup, freshStore } from './helpers.js';
 import type { ExecutionRecipe } from '../src/engineering/recipe.js';
 import type { ExecutorDeps } from '../src/engineering/execution.js';
@@ -67,7 +73,34 @@ function nodeRecipe(id: string, args: string[], component: string): ExecutionRec
   });
 }
 
-async function setup(o: { enforcement?: 'HARD' | 'SOFT' | 'NONE' } = {}) {
+/**
+ * A simulated PRODUCER boundary matching the scripted engine's own location.
+ *
+ * Orchestration has to be testable without a qualified machine. The boundary is marked
+ * simulated — the fixture does not get to describe itself as measured — so every use of
+ * it must also pass the explicit `allowSimulatedBoundary` opt-in, which nothing in
+ * `src/` does.
+ */
+function simulatedProducerBoundary(projectRoot: string): ExecutionBoundary {
+  return executionBoundary({
+    boundaryId: 'SC-BOUNDARY-PRODUCER',
+    purpose: BoundaryPurpose.PRODUCER,
+    transport: 'fake',
+    engineLocation: 'fake-engine',
+    engineVersion: FAKE_CAPABILITIES.version,
+    sandboxMechanism: 'simulated',
+    profileDigest: buildSandboxProfile({
+      worktreePath: join(projectRoot, 'w'),
+      projectRoot,
+      networkAllowed: false,
+    }).policyDigest,
+    simulated: true,
+  });
+}
+
+async function setup(
+  o: { enforcement?: 'HARD' | 'SOFT' | 'NONE'; boundary?: ExecutionBoundary } = {},
+) {
   const { store, root, deps } = freshStore();
   roots.push(root);
 
@@ -96,6 +129,7 @@ async function setup(o: { enforcement?: 'HARD' | 'SOFT' | 'NONE' } = {}) {
   const substrate = new SimulatedExecutionSubstrate({
     clock: deps.clock,
     enforcement: o.enforcement ?? 'HARD',
+    boundary: o.boundary ?? simulatedProducerBoundary(repo),
   });
   const fixtureDir = makeFixtureDir();
   fixtures.push(fixtureDir);
@@ -134,10 +168,14 @@ async function setup(o: { enforcement?: 'HARD' | 'SOFT' | 'NONE' } = {}) {
     gateDeps: { ids: deps.ids, clock: deps.clock, evaluator: 'ENGINEERING_GATE' },
     projectRoot: repo,
     enabledProducers: new Set([PRODUCER]),
+    producerBoundary: qualification.boundary,
+    allowSimulatedBoundary: true,
   });
 
   const dispatchDeps = {
     engineCapabilities: await engine.capabilities(),
+    engineVersion: FAKE_CAPABILITIES.version,
+    allowSimulatedBoundary: true,
     store,
     clock: deps.clock,
     ids: deps.ids,

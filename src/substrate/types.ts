@@ -1,4 +1,5 @@
 import { EnforcementClass } from '../vocab/index.js';
+import type { ExecutionBoundary } from './boundary.js';
 
 /**
  * ExecutionSubstrate — the boundary that has to hold before an agent may write or
@@ -132,6 +133,14 @@ export interface SubstrateQualification {
    * caller finds that out before running a Producer on the strength of it.
    */
   readonly fingerprint: string;
+  /**
+   * WHICH boundary this qualification measured.
+   *
+   * A qualification without a subject is the defect that made a WSL2 measurement
+   * authorize a native-Windows Producer: everything checked `enforcementClass === HARD`
+   * and nothing asked what had been qualified. Authority now travels with its subject.
+   */
+  readonly boundary: ExecutionBoundary;
 }
 
 /**

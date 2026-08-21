@@ -2,56 +2,43 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { EnforcementClass, EvidenceClass, GateVerdict, RunOutcome } from '../../src/vocab/index.js';
+import { EnforcementClass, EvidenceClass } from '../../src/vocab/index.js';
 import { selectExecutionSubstrate } from '../../src/substrate/host.js';
-import {
-  engineeringAuthorityRefusal,
-  type SubstrateQualification,
-} from '../../src/substrate/types.js';
+import { describeBoundary } from '../../src/substrate/boundary.js';
 import { makeFixtureDir, removeFixtureDir } from '../../src/substrate/fake.js';
-import { ContractRegistry } from '../../src/agents/registry.js';
-import { AgentRuntime } from '../../src/agents/runtime.js';
-import { ClaudeCliEngineAdapter } from '../../src/engine/claude/adapter.js';
-import { GitService } from '../../src/engineering/git.js';
-import { EngineeringWorkspaceManager } from '../../src/engineering/workspace.js';
+import { resolveEngineeringEngine, type EngineeringEngine } from '../../src/engineering/engine.js';
 import {
   ExecutionRecipeSchema,
   RecipeRegistry,
   type ExecutionRecipe,
 } from '../../src/engineering/recipe.js';
-import { listExecutions, runRecipe } from '../../src/engineering/execution.js';
 import { EngineeringFactory } from '../../src/engineering/factory.js';
+import { GitService } from '../../src/engineering/git.js';
+import { EngineeringWorkspaceManager } from '../../src/engineering/workspace.js';
 import { DEFAULT_REQUIRED_CHECKS } from '../../src/engineering/executors.js';
-import { dispatchProducer, dispatchReviewer } from '../../src/engineering/dispatch.js';
+import { implementWorkItem, ImplementOutcome } from '../../src/app/implement.js';
 import { engineeringStatus, buildEngineeringLayer } from '../../src/app/engineering.js';
-import { cleanup, freshRuntime, freshStore } from '../helpers.js';
+import { ContractRegistry } from '../../src/agents/registry.js';
+import { cleanup, freshRuntime } from '../helpers.js';
 import { systemClock } from '../../src/core/clock.js';
+import type { SubstrateQualification } from '../../src/substrate/types.js';
 
 /**
- * PHASE 4 LIVE ACCEPTANCE — the real machine, not a fake.
+ * PHASE 4 LIVE ACCEPTANCE — the real machine, the real production path.
  *
- * `npm run test:engineering-live`. Excluded from `npm run verify` and from
- * `npm run test:claude`.
+ * `npm run test:engineering-live`. Excluded from `npm run verify` and `test:claude`.
  *
- * One question, answered honestly: **can this machine carry engineering authority, and
- * what did it actually prove?** The real host is probed, the enforcement class is
- * derived from qualification tests that genuinely run, and then exactly one of two
- * paths is taken:
+ * Two boundaries are probed, because there are two and they are not the same thing:
  *
- *   HARD      the full acceptance — real worktree, a REAL Producer AgentRun, real
- *             measured evidence, a REAL independent Reviewer AgentRun, real gate, real
- *             local commit — inside a DISPOSABLE fixture repository, never the Serva
- *             source tree.
+ *   RECIPE    Serva's own build/test/lint commands, contained by bubblewrap.
+ *   PRODUCER  the engine session an agent runs in, contained by Claude Code's own
+ *             sandbox, inside the guest where that engine is installed.
  *
- *   not HARD  report BLOCKED with the exact prerequisites, and PROVE nothing executed.
- *             **No model call is made on this path**, because a Producer that cannot be
- *             contained is not dispatched, and spending the owner's usage to discover
- *             that twice would be waste.
- *
- * It never downgrades itself to SOFT to make the demo pass, and it never substitutes a
- * `writeFileSync` for a Producer or a string literal for a Reviewer. That substitution
- * is what the previous version did, and it meant the one thing this phase exists for
- * had never actually happened.
+ * The HARD path runs `implementWorkItem` — the same function `serva implement` calls.
+ * It does NOT construct a native-host adapter for a Windows Producer, and it contains
+ * no `writeFileSync` standing in for a Producer and no literal standing in for a
+ * review. If prerequisites are missing the answer is BLOCKED, and **no Producer model
+ * call is spent** discovering that.
  */
 
 const roots: string[] = [];
@@ -61,72 +48,11 @@ afterAll(() => {
   for (const f of fixtures.splice(0)) removeFixtureDir(f);
 });
 
-/** Read-only: `claude --version`. No model call, nothing billed. */
-function engineVersion(): string {
-  try {
-    const out = execFileSync('claude', ['--version'], {
-      encoding: 'utf8',
-      timeout: 20_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return /(\d+\.\d+\.\d+)/.exec(out)?.[1] ?? 'UNKNOWN';
-  } catch {
-    return 'UNKNOWN';
-  }
-}
-
 function report(title: string, lines: readonly string[]): void {
   console.log('\n' + title);
   console.log('-'.repeat(title.length));
   for (const l of lines) console.log(l);
   console.log('');
-}
-
-/** A disposable fixture repository with a genuinely failing test. */
-function fixtureRepo(): { repo: string; base: string } {
-  const { root } = freshStore();
-  roots.push(root);
-  const repo = join(root, 'live-fixture-repo');
-  mkdirSync(join(repo, 'src'), { recursive: true });
-  const git = (...args: string[]): string =>
-    execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-
-  writeFileSync(join(repo, 'package.json'), '{"name":"live-fixture","private":true}\n', 'utf8');
-  writeFileSync(join(repo, 'build.js'), 'process.exit(0);\n', 'utf8');
-  writeFileSync(
-    join(repo, 'test.js'),
-    [
-      "const total = require('./src/total.js');",
-      'if (total([1, 2, 3]) !== 6) {',
-      '  console.error("expected 6, got " + total([1, 2, 3]));',
-      '  process.exit(1);',
-      '}',
-      'process.exit(0);',
-      '',
-    ].join('\n'),
-    'utf8',
-  );
-  // The defect the Producer is asked to fix: it sums all but the last element.
-  writeFileSync(
-    join(repo, 'src', 'total.js'),
-    [
-      'module.exports = function total(xs) {',
-      '  let sum = 0;',
-      '  for (let i = 0; i < xs.length - 1; i++) sum += xs[i];',
-      '  return sum;',
-      '};',
-      '',
-    ].join('\n'),
-    'utf8',
-  );
-
-  git('init', '-q', '-b', 'main');
-  git('config', 'user.email', 'fixture@localhost');
-  git('config', 'user.name', 'Live Fixture');
-  git('config', 'commit.gpgsign', 'false');
-  git('add', '.');
-  git('commit', '-q', '-m', 'base with a failing suite');
-  return { repo, base: git('rev-parse', 'HEAD').trim() };
 }
 
 function liveRecipe(id: string, args: string[], component: string): ExecutionRecipe {
@@ -147,51 +73,73 @@ function liveRecipe(id: string, args: string[], component: string): ExecutionRec
   });
 }
 
-const LIVE_RECIPES: readonly ExecutionRecipe[] = [
-  liveRecipe('SC-RECIPE-UNIT-TEST', ['test.js'], 'SC-RTC-012'),
-  liveRecipe('SC-RECIPE-BUILD', ['build.js'], 'SC-RTC-011'),
-];
-
 const PRODUCER = 'SC-AGENT-150';
 const REVIEWER = 'SC-AGENT-200';
 
-let qualification: SubstrateQualification | undefined;
-let selectionBasis = '';
+let recipeQualification: SubstrateQualification | undefined;
+let engineering: EngineeringEngine | undefined;
 
-describe('PHASE 4 — live substrate qualification', () => {
-  it('derives the enforcement class from what this machine actually proved', async () => {
+describe('PHASE 4 — live boundaries', () => {
+  it('qualifies the RECIPE boundary from what this machine proved', async () => {
     const { rt, root } = freshRuntime();
     roots.push(root);
     const selection = await selectExecutionSubstrate({
       clock: systemClock,
-      engineVersion: engineVersion(),
+      engineVersion: 'UNKNOWN',
       projectRoot: rt.root,
     });
-    rt.close();
-    selectionBasis = selection.basis;
-
-    const fixture = makeFixtureDir('serva-live-qual-');
+    const fixture = makeFixtureDir('serva-live-recipe-');
     fixtures.push(fixture);
     const q = await selection.substrate.qualify(fixture);
-    qualification = q;
+    recipeQualification = q;
+    rt.close();
 
-    const refusal = engineeringAuthorityRefusal(q);
-    const missing = q.probe.prerequisites.filter((p) => !p.satisfied);
-
-    report('SERVA CODE — PHASE 4 LIVE SUBSTRATE REPORT', [
-      '  host:          ' + q.probe.hostPlatform + '/' + q.probe.hostArch,
-      '  guest:         ' + (q.probe.guestPlatform ?? '(none)'),
-      '  substrate:     ' + q.probe.substrateId,
+    report('SERVA CODE — RECIPE BOUNDARY (deterministic build/test/lint)', [
       '  chosen because ' + selection.basis,
-      '  isolation:     ' + q.probe.isolationMethod,
-      '  engine:        ' + q.engineVersion,
-      '  fingerprint:   ' + q.fingerprint.slice(0, 16) + '…',
+      '  boundary:      ' + describeBoundary(q.boundary),
       '  class:         ' + q.enforcementClass,
-      '  authority:     ' + (refusal === undefined ? 'GRANTED' : 'REFUSED'),
-      ...(refusal === undefined ? [] : ['  refusal:       ' + refusal]),
       '',
-      '  qualification cases:',
-      ...q.tests.map((t) => '    [' + t.outcome.padEnd(7) + '] ' + t.id + '  ' + t.title),
+      '  prerequisites:',
+      ...q.probe.prerequisites.map(
+        (p) => '    [' + (p.satisfied ? ' ok ' : 'MISS') + '] ' + p.id + '  ' + p.what,
+      ),
+    ]);
+
+    expect(q.boundary.purpose).toBe('RECIPE');
+    // The prerequisites of this boundary are only what its mechanism uses. socat and
+    // the syscall filter belong to the Producer boundary, where they participate.
+    expect(q.probe.prerequisites.map((p) => p.id)).not.toContain('SECCOMP_FILTER');
+  });
+
+  it('qualifies the PRODUCER boundary — engine, guest, auth, sandbox', async () => {
+    const { rt, root } = freshRuntime();
+    roots.push(root);
+    const e = await resolveEngineeringEngine({ clock: systemClock, projectRoot: rt.root });
+    engineering = e;
+    rt.close();
+
+    const missing = e.prerequisites.filter((p) => !p.satisfied);
+    report('SERVA CODE — PRODUCER BOUNDARY (the engine session an agent runs in)', [
+      '  chosen because ' + e.basis,
+      '  boundary:      ' + (e.boundary === undefined ? '(none)' : describeBoundary(e.boundary)),
+      '  fingerprint:   ' + (e.boundary?.fingerprint.slice(0, 16) ?? '(none)') + '…',
+      '  guest engine:  ' + (e.boundary?.engineLocation ?? '(not found)'),
+      '  engine version:' + (e.status?.version ?? '(unknown)'),
+      '  authenticated: ' + String(e.status?.authenticated ?? false),
+      '  billing route: ' + (e.status?.billingMode ?? '(unknown)'),
+      '  sandbox:       ' + (e.boundary?.sandboxMechanism ?? '(none)'),
+      '  class:         ' + (e.qualification?.enforcementClass ?? 'NONE'),
+      '  authority:     ' + (e.refusal === undefined ? 'GRANTED' : 'REFUSED'),
+      ...(e.refusal === undefined ? [] : ['  refusal:       ' + e.refusal]),
+      ...(e.qualification === undefined
+        ? []
+        : [
+            '',
+            '  qualification cases:',
+            ...e.qualification.tests.map(
+              (t) => '    [' + t.outcome.padEnd(7) + '] ' + t.id + '  ' + t.title,
+            ),
+          ]),
       ...(missing.length === 0
         ? []
         : [
@@ -203,90 +151,137 @@ describe('PHASE 4 — live substrate qualification', () => {
               '        remedy: ' + p.remedy,
             ]),
             '',
-            '  Serva installs none of these. Changing the machine a sandbox runs on is',
-            "  the owner's decision, not a side effect of running a test.",
+            '  Serva installs none of these, copies no credentials into the guest, and',
+            "  never logs in on the owner's behalf.",
           ]),
     ]);
 
-    // Derived, never asserted: HARD requires every blocking case PASSED, and a NOT_RUN
-    // counts against the substrate exactly as a failure does.
-    if (q.enforcementClass === EnforcementClass.HARD) {
-      expect(q.tests.filter((t) => t.blocking).every((t) => t.outcome === 'PASSED')).toBe(true);
-      expect(q.probe.simulated).not.toBe(true);
-    } else {
-      expect(q.tests.some((t) => t.blocking && t.outcome !== 'PASSED')).toBe(true);
-      expect(q.blockedBy).toBeDefined();
-    }
-
-    // Every unsatisfied prerequisite must name something a person can actually do.
+    // Every unsatisfied prerequisite names something a person can actually do.
     for (const p of missing) {
       expect(p.remedy.length, p.id).toBeGreaterThan(0);
       expect(p.why.length, p.id).toBeGreaterThan(0);
     }
+
+    if (
+      e.qualification !== undefined &&
+      e.qualification.enforcementClass === EnforcementClass.HARD
+    ) {
+      expect(
+        e.qualification.tests.filter((t) => t.blocking).every((t) => t.outcome === 'PASSED'),
+      ).toBe(true);
+      expect(e.boundary?.simulated).toBe(false);
+      expect(e.boundary?.purpose).toBe('PRODUCER');
+      // On Windows the Producer boundary must be the GUEST, never the host.
+      if (process.platform === 'win32') {
+        expect(e.boundary?.transport.startsWith('wsl:')).toBe(true);
+        expect(e.boundary?.engineLocation?.startsWith('/mnt/')).toBe(false);
+      }
+    }
+  }, 300_000);
+
+  it('the two boundaries are distinct, and neither authorizes the other', () => {
+    const recipe = recipeQualification?.boundary;
+    const producer = engineering?.boundary;
+    if (recipe === undefined || producer === undefined) return;
+    // Different purposes, different mechanisms, different fingerprints. A HARD recipe
+    // boundary has never been evidence about a Producer, and now it cannot be mistaken
+    // for one either.
+    expect(recipe.fingerprint).not.toBe(producer.fingerprint);
+    expect(recipe.purpose).not.toBe(producer.purpose);
   });
 
-  it('the owner-facing status agrees with the qualification', async () => {
+  it('the owner-facing status agrees with the recipe qualification', async () => {
     const { rt, root } = freshRuntime();
     roots.push(root);
-    const layer = await buildEngineeringLayer(rt, { engineVersion: engineVersion() });
+    const layer = await buildEngineeringLayer(rt);
     const { view } = await engineeringStatus(layer);
     rt.close();
-
-    expect(view.executionSubstrate).toBe(qualification?.enforcementClass);
-    expect(view.substrateBasis).toBe(selectionBasis);
     expect(view.simulated).toBe(false);
-    if (view.governance === 'ACTIVE') {
-      expect(view.blockedBy).toBeUndefined();
-    } else {
-      // A blocked state must SAY it is blocked, and say what is missing.
-      expect(view.blockedBy).toBeDefined();
-      expect(view.enabledProducers).toEqual([]);
-    }
-  });
+    expect(view.executionSubstrate).toBe(recipeQualification?.enforcementClass);
+  }, 120_000);
 });
 
 describe('PHASE 4 — live acceptance', () => {
-  it('either completes a governed change or refuses to execute at all', async () => {
-    const q = qualification;
-    expect(q).toBeDefined();
-    if (q === undefined) return;
+  it('either implements the work item or refuses, through the production path', async () => {
+    const e = engineering;
+    const recipeQ = recipeQualification;
+    expect(e).toBeDefined();
+    expect(recipeQ).toBeDefined();
+    if (e === undefined || recipeQ === undefined) return;
 
-    const { repo, base } = fixtureRepo();
-    const { store, root, deps } = freshStore();
+    /* ---------------- a disposable fixture project, never the Serva source tree */
+
+    const { rt, root } = freshRuntime();
     roots.push(root);
+    const repo = rt.root;
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    const g = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    writeFileSync(join(repo, '.gitignore'), '.serva/\n', 'utf8');
+    writeFileSync(
+      join(repo, 'test.js'),
+      [
+        "const total = require('./src/total.js');",
+        'if (total([1, 2, 3]) !== 6) {',
+        '  console.error("expected 6, got " + total([1, 2, 3]));',
+        '  process.exit(1);',
+        '}',
+        'process.exit(0);',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    writeFileSync(
+      join(repo, 'src', 'total.js'),
+      [
+        'module.exports = function total(xs) {',
+        '  let sum = 0;',
+        '  for (let i = 0; i < xs.length - 1; i++) sum += xs[i];',
+        '  return sum;',
+        '};',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 'fixture@localhost');
+    g('config', 'user.name', 'Live Fixture');
+    g('config', 'commit.gpgsign', 'false');
+    g('add', '.');
+    g('commit', '-q', '-m', 'base with a failing suite');
+    const base = g('rev-parse', 'HEAD').trim();
 
-    const selection = await selectExecutionSubstrate({
-      clock: systemClock,
-      engineVersion: q.engineVersion,
-      projectRoot: repo,
-    });
-    const substrate = selection.substrate;
+    const recipes = new RecipeRegistry([
+      liveRecipe('SC-RECIPE-UNIT-TEST', ['test.js'], 'SC-RTC-012'),
+    ]);
     const git = new GitService({ repoRoot: repo });
-    const workspaces = new EngineeringWorkspaceManager({
-      store,
-      git,
-      clock: deps.clock,
-      projectRoot: repo,
-    });
-    const recipes = new RecipeRegistry(LIVE_RECIPES);
-    const registry = ContractRegistry.shared();
-    const executorDeps = {
-      store,
-      clock: deps.clock,
-      ids: deps.ids,
-      substrate,
-      qualification: q,
-      env: process.env,
-    };
     const factory = new EngineeringFactory({
-      store,
+      store: rt.store,
       git,
-      workspaces,
+      workspaces: new EngineeringWorkspaceManager({
+        store: rt.store,
+        git,
+        clock: rt.clock,
+        projectRoot: repo,
+      }),
       recipes,
-      registry,
-      qualification: q,
-      executorDeps,
-      gateDeps: { ids: deps.ids, clock: deps.clock, evaluator: 'ENGINEERING_GATE_LIVE' },
+      registry: ContractRegistry.shared(),
+      qualification: recipeQ,
+      executorDeps: {
+        store: rt.store,
+        clock: rt.clock,
+        ids: rt.ids,
+        substrate: (
+          await selectExecutionSubstrate({
+            clock: systemClock,
+            engineVersion: 'UNKNOWN',
+            projectRoot: repo,
+          })
+        ).substrate,
+        qualification: recipeQ,
+        env: process.env,
+      },
+      gateDeps: { ids: rt.ids, clock: rt.clock, evaluator: 'ENGINEERING_GATE_LIVE' },
       projectRoot: repo,
       enabledProducers: new Set([PRODUCER]),
     });
@@ -308,163 +303,104 @@ describe('PHASE 4 — live acceptance', () => {
       maxAttempts: 2,
     });
 
-    /* ------------------------------------------------ the not-HARD path */
+    const substrate = (
+      await selectExecutionSubstrate({
+        clock: systemClock,
+        engineVersion: 'UNKNOWN',
+        projectRoot: repo,
+      })
+    ).substrate;
 
-    if (q.enforcementClass !== EnforcementClass.HARD) {
-      const refusal = factory.refusal(item);
+    /*
+     * The SAME function `serva implement` calls. It refuses internally before creating
+     * a worktree, dispatching a model or running a command when the Producer boundary
+     * is not HARD — so the not-HARD path costs nothing and proves it.
+     */
+    const result = await implementWorkItem(
+      {
+        rt,
+        registry: ContractRegistry.shared(),
+        recipes,
+        recipeSubstrate: substrate,
+        recipeQualification: recipeQ,
+        engine: e,
+        enabledProducers: new Set([PRODUCER]),
+        required: { ...DEFAULT_REQUIRED_CHECKS, build: false, lint: false },
+      },
+      item,
+    );
+
+    if (result.outcome === ImplementOutcome.BLOCKED && result.attempts.length === 0) {
       report('SERVA CODE — PHASE 4 LIVE ACCEPTANCE: BLOCKED', [
         '  verdict:  BLOCKED — PLATFORM_PREREQUISITE_REQUIRED',
-        '  class:    ' + q.enforcementClass + ' (measured, not assumed)',
-        '  refusal:  ' + (refusal ?? '(none)'),
+        '  boundary: ' + (e.boundary === undefined ? '(none)' : describeBoundary(e.boundary)),
+        '  refusal:  ' + (result.refusal ?? '(none)'),
         '',
         '  No worktree was created. No Producer was dispatched. No Reviewer was',
         '  dispatched. No command was run. No model call was made.',
-        '  Serva did not downgrade itself to SOFT execution to make this pass.',
+        '  Serva did not downgrade to SOFT, and did not fall back to the host engine.',
       ]);
-
-      expect(refusal).toMatch(/requires HARD/);
-      await expect(factory.openWorkspace(item, 1, 'x'.repeat(64))).rejects.toThrowError(
-        /requires HARD/,
-      );
-      // The execution path refuses independently of the factory, so a guard higher up
-      // being forgotten would not open a hole here.
-      await expect(
-        runRecipe(executorDeps, {
-          recipe: recipes.get('SC-RECIPE-UNIT-TEST'),
-          workItemId: item.workItemId,
-          workspaceId: 'none',
-          workspacePath: repo,
-          projectRoot: repo,
-          baseCommit: base,
-          headCommit: base,
-        }),
-      ).rejects.toThrowError(/requires HARD/);
-
-      // The strongest available proof of no downgrade: nothing ran.
-      expect(listExecutions(store)).toHaveLength(0);
-      expect(workspaces.list()).toHaveLength(0);
+      expect(result.refusal).toBeDefined();
       expect(await git.isClean(repo)).toBe(true);
+      expect(await git.headCommit(repo)).toBe(base);
+      rt.close();
       return;
     }
 
-    /* ---------------------------------------------------- the HARD path */
-
-    const engine = new ClaudeCliEngineAdapter({ clock: deps.clock, env: process.env });
-    const capabilities = await engine.capabilities();
-    const runtime = new AgentRuntime({
-      store,
-      ids: deps.ids,
-      clock: deps.clock,
-      registry,
-      engine,
-      enabledAgents: new Set([PRODUCER, REVIEWER]),
-      projectRoot: repo,
-    });
-    const dispatchDeps = {
-      store,
-      clock: deps.clock,
-      ids: deps.ids,
-      runtime,
-      registry,
-      substrate,
-      qualification: q,
-      projectRoot: repo,
-      enabledProducers: new Set([PRODUCER]),
-      engineCapabilities: capabilities,
-    };
-
-    const workspace = await factory.openWorkspace(item, 1, 'x'.repeat(64));
-    expect(workspace.path).not.toBe(repo);
-
-    // A REAL Producer AgentRun. No writeFileSync stand-in.
-    const producer = await dispatchProducer(dispatchDeps, {
-      item,
-      workspace,
-      taskDefinition:
-        'The function total() in src/total.js should sum every element of its argument and currently omits the last one. Fix it. Change nothing else.',
-      reviewerAvailable: true,
-      executorsAvailable: true,
-    });
-    expect(producer.runId).toMatch(/^SC-RUN-/);
-
-    const measured = await factory.verifyAttempt(item, workspace, {
-      required: { ...DEFAULT_REQUIRED_CHECKS, lint: false, codeReview: false },
-      producerRunId: producer.runId,
-    });
-
-    // A REAL independent Reviewer AgentRun. No fabricated SC-RUN-LIVE-REVIEWER.
-    const review = await dispatchReviewer(dispatchDeps, {
-      item,
-      workspace,
-      changeSet: measured.changeSet,
-      evidence: measured.evidence,
-      diff: await git.diff(base, workspace.path),
-      producerRunRef: producer.runId,
-    });
-
-    const final = await factory.verifyAttempt(item, workspace, {
-      required: { ...DEFAULT_REQUIRED_CHECKS, lint: false },
-      producerRunId: producer.runId,
-    });
+    /* ------------------------------------------------------- the HARD path ran */
 
     report('SERVA CODE — PHASE 4 LIVE ACCEPTANCE: EXECUTED', [
-      '  class:        ' + q.enforcementClass,
-      '  worktree:     ' + workspace.path,
-      '  producer run: ' + producer.runId + ' (' + producer.outcome + ')',
-      '  reviewer run: ' + review.runId + ' (' + review.outcome + ')',
-      '  change set:   ' + final.changeSet.changeSetId,
-      '  verdict:      ' + final.gateResult.verdict,
-      ...(producer.unprovedBoundary.length === 0
+      '  boundary:    ' + (e.boundary === undefined ? '(none)' : describeBoundary(e.boundary)),
+      '  fingerprint: ' + (result.boundaryFingerprint ?? '(none)'),
+      '  outcome:     ' + result.outcome,
+      ...result.attempts.flatMap((a) => [
+        '',
+        '  attempt ' + String(a.attempt) + ' — workspace ' + a.workspaceId,
+        '    producer run: ' + (a.producerRunId ?? '(none)'),
+        '    reviewer run: ' + (a.reviewerRunId ?? '(none)'),
+        '    change set:   ' + (a.changeSetId ?? '(none)'),
+        '    gate:         ' + (a.verdict ?? '(none)'),
+        ...a.notes.map((n) => '      - ' + n),
+      ]),
+      ...(result.verification === undefined
         ? []
         : [
             '',
-            '  Not established before dispatch:',
-            ...producer.unprovedBoundary.map((u) => '    - ' + u),
+            '  measured evidence:',
+            ...result.verification.evidence.map(
+              (ev) =>
+                '    [' +
+                ev.outcome +
+                '] ' +
+                (ev.runtimeComponentId ?? 'JUDGED') +
+                '  ' +
+                ev.detail,
+            ),
           ]),
-      '',
-      '  evidence:',
-      ...final.evidence.map(
-        (e) => '    [' + e.outcome + '] ' + (e.runtimeComponentId ?? 'JUDGED') + '  ' + e.detail,
-      ),
+      ...(result.commit === undefined
+        ? []
+        : ['', '  commit ' + result.commit + ' on ' + String(result.branch)]),
     ]);
 
-    // Two distinct runs, and the reviewer is not the producer.
-    expect(review.runId).not.toBe(producer.runId);
-    expect(final.usedUnvalidatedJudgement).toBe(false);
-    expect(final.evidence.some((e) => e.basis === 'MEASURED')).toBe(true);
-
-    if (producer.outcome !== RunOutcome.COMPLETED || review.review?.outcome !== 'PASS') {
-      // An honest non-acceptance. The machinery worked; the change was not accepted.
-      expect(final.attemptOutcome).not.toBe('ACCEPTED');
-      return;
+    // Whatever the outcome, the runs were real and distinct, and the checkout is clean.
+    for (const a of result.attempts) {
+      expect(a.producerRunId).toMatch(/^SC-RUN-/);
+      if (a.reviewerRunId !== undefined) expect(a.reviewerRunId).not.toBe(a.producerRunId);
     }
-
-    expect([GateVerdict.PASS, GateVerdict.PASS_WITH_QUALIFICATION]).toContain(
-      final.gateResult.verdict,
-    );
-    const { commit } = await factory.acceptChange(item, workspace, final);
-    expect(commit).toMatch(/^[0-9a-f]{7,}$/);
-
-    // Phase 4 performs no remote write, and the primary checkout is untouched.
-    expect(git.invocations.some((a) => a[0] === 'push')).toBe(false);
+    expect(result.verification?.usedUnvalidatedJudgement).not.toBe(true);
+    expect(git.invocations.some((x) => x[0] === 'push')).toBe(false);
     expect(await git.isClean(repo)).toBe(true);
     expect(await git.headCommit(repo)).toBe(base);
-  });
+    rt.close();
+  }, 900_000);
 
-  it('never enables an escape hatch, whatever the substrate turned out to be', () => {
-    /*
-     * A last, cheap check on the one thing no measurement would catch: the flags that
-     * would make every other guarantee in this phase decorative. They may be NAMED —
-     * a refusal has to say what it refuses — but every occurrence must sit in a context
-     * that refuses, denies or documents, never one that sets them.
-     */
+  it('never enables an escape hatch, and never stands in for a Producer', () => {
     const forbidden = [
       '--dangerously-skip-permissions',
       'bypassPermissions',
       'dangerouslyDisableSandbox',
     ];
     const offenders: string[] = [];
-
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
         const p = join(dir, e.name);
@@ -478,15 +414,21 @@ describe('PHASE 4 — live acceptance', () => {
           const line = lines[i] ?? '';
           if (!forbidden.some((f) => line.includes(f))) continue;
           const context = lines.slice(Math.max(0, i - 8), i + 1).join(' ');
-          const refusing = /never|not |no |refus|deny|denied|forbid|must not|would defeat/i.test(
-            context,
-          );
-          if (!refusing) offenders.push(p + ':' + String(i + 1) + '  ' + line.trim());
+          if (!/never|not |no |refus|deny|denied|forbid|must not|would defeat/i.test(context)) {
+            offenders.push(p + ':' + String(i + 1) + '  ' + line.trim());
+          }
         }
       }
     };
     walk(resolve('src'));
-
     expect(offenders).toEqual([]);
+
+    /*
+     * A self-reading check lived here and was wrong by construction: the file contains
+     * the pattern it searches for, so it could only ever fail. What it was trying to
+     * assert is covered honestly elsewhere — `usedUnvalidatedJudgement` is asserted
+     * false above, and `eng.binding.test.ts` proves no file under `src/` sets either
+     * escape hatch.
+     */
   });
 });

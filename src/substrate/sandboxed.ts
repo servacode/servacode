@@ -16,7 +16,14 @@ import {
   type SubstrateQualification,
 } from './types.js';
 import { QUALIFICATION_CASES } from './qualification.js';
-import { TransportKind, type ExecTransport, type TransportCommand } from './transport.js';
+import {
+  GUEST_PATH,
+  TransportKind,
+  resolveGuestBinary,
+  type ExecTransport,
+  type TransportCommand,
+} from './transport.js';
+import { executionBoundary, type BoundaryPurpose, type ExecutionBoundary } from './boundary.js';
 import type { SandboxLauncher, SandboxSpec } from './sandboxLauncher.js';
 import type { Clock } from '../core/clock.js';
 
@@ -62,32 +69,76 @@ export interface SandboxedSubstrateOptions {
   readonly alwaysDenyRead?: readonly string[];
   /** Minimum engine version this qualification was written against. */
   readonly minEngineVersion?: string;
+  /**
+   * What this boundary is FOR, and what it is called.
+   *
+   * A Producer boundary and a recipe boundary have different mechanisms and therefore
+   * different prerequisites. Mixing the two lists was how `socat` and the syscall filter
+   * came to be required by a launcher that never used them — a prerequisite counted
+   * because it existed on disk rather than because it participated.
+   */
+  readonly purpose: BoundaryPurpose;
+  readonly boundaryId: string;
+  /** Binaries this boundary genuinely needs. Defaults to the recipe set. */
+  readonly requiredBinaries?: readonly GuestBinary[];
+  /** True when this boundary hosts the engine itself, which must then be present. */
+  readonly requiresEngine?: boolean;
+  /** Extra prerequisites established by the caller, e.g. guest auth. */
+  readonly extraPrerequisites?: readonly Prerequisite[];
+  /** Digest of the sandbox settings profile this boundary is measured under. */
+  readonly profileDigest?: string;
 }
 
-/** Binaries the guest must provide before anything can be proved about it. */
-export const GUEST_REQUIRED_BINARIES: readonly { bin: string; why: string; remedy: string }[] =
-  Object.freeze([
-    {
-      bin: 'node',
-      why: 'The qualification programs and every Node recipe run inside the guest. A Node resolving under /mnt/ is the Windows binary reached through interop, which is not the same thing.',
-      remedy: 'Install Node.js inside the distribution using its package manager.',
-    },
-    {
-      bin: 'git',
-      why: 'Serva computes every ChangeSet with git, inside the same environment the change was made in.',
-      remedy: 'Install git inside the distribution.',
-    },
-    {
-      bin: 'bwrap',
-      why: 'bubblewrap is what enforces filesystem isolation; without it there is no boundary to measure.',
-      remedy: 'sudo apt-get install bubblewrap',
-    },
-    {
-      bin: 'socat',
-      why: 'Relays traffic through the sandbox network proxy; the engine sandbox does not start without it.',
-      remedy: 'sudo apt-get install socat',
-    },
-  ]);
+export interface GuestBinary {
+  readonly bin: string;
+  readonly why: string;
+  readonly remedy: string;
+}
+
+/**
+ * Binaries Serva's own DETERMINISTIC RECIPE boundary needs.
+ *
+ * Note what is absent: `socat` and the syscall filter. Neither is used by bubblewrap as
+ * Serva invokes it, so requiring them here would be requiring something that does not
+ * participate. They belong to the Producer boundary, where they do.
+ */
+export const RECIPE_REQUIRED_BINARIES: readonly GuestBinary[] = Object.freeze([
+  {
+    bin: 'node',
+    why: 'The qualification programs and every Node recipe run inside the guest. A Node resolving under /mnt/ is the Windows binary reached through interop, which is not the same thing.',
+    remedy: 'Install Node.js inside the distribution using its package manager.',
+  },
+  {
+    bin: 'git',
+    why: 'Serva computes every ChangeSet with git, inside the same environment the change was made in.',
+    remedy: 'Install git inside the distribution.',
+  },
+  {
+    bin: 'bwrap',
+    why: 'bubblewrap is what enforces filesystem isolation; without it there is no boundary to measure.',
+    remedy: 'sudo apt-get install bubblewrap',
+  },
+]);
+
+/**
+ * Binaries the PRODUCER boundary needs — the engine's own sandbox.
+ *
+ * `socat` is here rather than in the recipe list because this is where it is actually
+ * used: the sandbox's network proxy relays through it, and without it the sandbox does
+ * not start. That failure shows up as Q-A failing, so the requirement is measured
+ * rather than merely declared.
+ */
+export const PRODUCER_REQUIRED_BINARIES: readonly GuestBinary[] = Object.freeze([
+  ...RECIPE_REQUIRED_BINARIES,
+  {
+    bin: 'socat',
+    why: 'The engine sandbox relays traffic through a proxy that needs socat; without it the sandbox does not start at all.',
+    remedy: 'sudo apt-get install socat',
+  },
+]);
+
+/** Kept for callers that want the recipe list under its old name. */
+export const GUEST_REQUIRED_BINARIES = RECIPE_REQUIRED_BINARIES;
 
 /**
  * The seccomp filter package.
@@ -231,6 +282,9 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
   readonly id: string;
   /** Every transport invocation, so Q-K can prove there was no unsandboxed retry. */
   private transportCalls = 0;
+  /** Filled by `probe`, so the boundary identity records what was actually found. */
+  private engineLocation: string | undefined;
+  private launcherVersion: string | undefined;
 
   constructor(private readonly opts: SandboxedSubstrateOptions) {
     this.id = 'sandboxed:' + opts.transport.id;
@@ -256,7 +310,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     // Binaries. A path under /mnt/ is the Windows executable reached through interop,
     // and counting it would qualify the substrate on the strength of the very escape
     // route the qualification exists to close.
-    for (const req of GUEST_REQUIRED_BINARIES) {
+    for (const req of this.opts.requiredBinaries ?? RECIPE_REQUIRED_BINARIES) {
       const found = await this.which(req.bin);
       const usable = found !== undefined && !found.startsWith('/mnt/');
       observations['bin:' + req.bin] = found ?? 'MISSING';
@@ -269,38 +323,40 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       });
     }
 
-    const engineBin = await this.which('claude');
-    observations['bin:claude'] = engineBin ?? 'MISSING';
-    prerequisites.push({
-      id: 'GUEST_ENGINE',
-      what: 'Claude Code installed where the sandbox runs',
-      why: 'The engine must run inside the boundary. An install on the other side of the transport cannot be contained by it.',
-      remedy: 'Install Claude Code in the execution environment.',
-      satisfied: engineBin !== undefined && !engineBin.startsWith('/mnt/'),
-    });
+    let engineBin: string | undefined;
+    if (this.opts.requiresEngine === true) {
+      engineBin = await this.which('claude');
+      observations['bin:claude'] = engineBin ?? 'MISSING';
+      prerequisites.push({
+        id: 'GUEST_ENGINE',
+        what: 'Claude Code installed where the sandbox runs',
+        why: 'The engine must run inside the boundary. An install on the other side of the transport cannot be contained by it.',
+        remedy: 'Install Claude Code in the execution environment.',
+        satisfied: engineBin !== undefined && !engineBin.startsWith('/mnt/'),
+      });
+    }
 
-    // The seccomp filter, DETECTED. Two ways, because a global npm install and a
-    // packaged binary put it in different places.
-    const seccomp = await this.detectSeccomp();
-    observations['seccomp:detected'] = String(seccomp.present);
-    observations['seccomp:detail'] = seccomp.detail;
-    prerequisites.push({
-      id: 'SECCOMP_FILTER',
-      what: SECCOMP_PACKAGE + ' (the syscall filter)',
-      why: 'On WSL2 a host binary is launched over a Unix socket rather than through the filesystem, so bubblewrap can be working perfectly while host escape is wide open. The filter is what closes the socket.',
-      remedy: 'npm install -g ' + SECCOMP_PACKAGE + ' (inside the execution environment)',
-      satisfied: seccomp.present,
-    });
+    /*
+     * There is deliberately no standalone "is the syscall filter installed?" checkbox
+     * any more.
+     *
+     * It was detected and then never used by the launcher, so a machine could satisfy
+     * it while the boundary it was supposed to strengthen did not involve it at all.
+     * On the Producer boundary the filter IS the launcher, so its detection below is
+     * the same fact — and Q-J measures whether the escape it exists to close is closed.
+     * Presence has stopped standing in for enforcement.
+     */
 
     const launcher = await this.opts.launcher.detect(t);
     observations['launcher'] = this.opts.launcher.id;
     observations['launcher:detail'] = launcher.detail;
     for (const [k, v] of Object.entries(launcher.observations)) observations[k] = v;
+    for (const extra of this.opts.extraPrerequisites ?? []) prerequisites.push(extra);
     prerequisites.push({
       id: 'SANDBOX_LAUNCHER',
       what: 'A working sandbox launcher (' + this.opts.launcher.id + ')',
       why: 'It is the mechanism that contains a process. Without it nothing above can be measured, let alone enforced.',
-      remedy: 'Install the launcher in the execution environment.',
+      remedy: launcher.remedy ?? 'Install the launcher in the execution environment.',
       satisfied: launcher.available,
     });
 
@@ -319,19 +375,48 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       satisfied: usernsValue === 'unset' || usernsValue === '0',
     });
 
-    if (this.opts.minEngineVersion !== undefined) {
-      const ok = compareVersions(this.opts.engineVersion, this.opts.minEngineVersion) >= 0;
+    /*
+     * The engine version is a PRODUCER prerequisite only.
+     *
+     * The recipe boundary is bubblewrap running `npm test`; no engine is involved, so
+     * requiring a Claude version there is the same mistake as requiring socat for a
+     * launcher that never uses it — a prerequisite that cannot affect the thing it
+     * gates.
+     */
+    if (this.opts.minEngineVersion !== undefined && this.opts.requiresEngine === true) {
+      /*
+       * An unparseable version is NOT a pass.
+       *
+       * `compareVersions` returns 0 for anything it cannot read, so `'UNKNOWN' >= min`
+       * was true and the prerequisite reported satisfied for an engine whose version
+       * nobody had established. "We could not tell" and "it is new enough" are
+       * different facts, and only one of them is a reason to proceed.
+       */
+      const parseable = /^\d+\.\d+/.test(this.opts.engineVersion);
+      const ok =
+        parseable && compareVersions(this.opts.engineVersion, this.opts.minEngineVersion) >= 0;
       prerequisites.push({
         id: 'ENGINE_VERSION',
         what: 'Claude Code >= ' + this.opts.minEngineVersion,
-        why: 'Sandbox behaviour is version-dependent, and a qualification measured against one version does not carry to another.',
-        remedy: 'Update Claude Code.',
+        why:
+          'Sandbox behaviour is version-dependent, and a qualification measured against one version does not carry to another.' +
+          (parseable
+            ? ''
+            : ' The reported version is "' +
+              this.opts.engineVersion +
+              '", which Serva could not read at all.'),
+        remedy: parseable
+          ? 'Update Claude Code.'
+          : 'Make `claude --version` answer in the execution environment; an unreadable version is not a version.',
         satisfied: ok,
       });
     }
 
     const interop = await this.readGuestFile('/proc/sys/fs/binfmt_misc/WSLInterop');
     observations['guest:interop'] = interop === undefined ? 'absent' : 'present';
+
+    this.engineLocation = engineBin;
+    this.launcherVersion = launcher.version;
 
     return {
       substrateId: this.id,
@@ -341,7 +426,9 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
         ? {}
         : { guestPlatform: observations['transport:guestOs'] }),
       isolationMethod:
-        this.opts.launcher.id === 'bubblewrap' ? IsolationMethod.BUBBLEWRAP : IsolationMethod.NONE,
+        this.opts.launcher.id === 'bubblewrap' || this.opts.launcher.id === 'claude-sandbox-runtime'
+          ? IsolationMethod.BUBBLEWRAP
+          : IsolationMethod.NONE,
       engineVersion: this.opts.engineVersion,
       ...(launcher.version === undefined ? {} : { sandboxVersion: launcher.version }),
       prerequisites,
@@ -351,63 +438,20 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
   }
 
   private async which(bin: string): Promise<string | undefined> {
-    const r = await this.opts.transport.run({
-      executable: 'which',
-      args: [bin],
-      cwd: '/',
-      env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
-      timeoutMs: 20_000,
-      maxOutputBytes: 20_000,
-    });
-    if (r.spawnFailed || r.exitCode !== 0) return undefined;
-    const first = r.stdout.replace(/\0/g, '').trim().split('\n')[0]?.trim();
-    return first !== undefined && first.length > 0 ? first : undefined;
+    return resolveGuestBinary(this.opts.transport, bin);
   }
 
   private async readGuestFile(path: string): Promise<string | undefined> {
     const r = await this.opts.transport.run({
-      executable: 'cat',
+      executable: '/bin/cat',
       args: [path],
       cwd: '/',
-      env: { PATH: '/usr/bin:/bin' },
+      env: { PATH: GUEST_PATH },
       timeoutMs: 15_000,
       maxOutputBytes: 20_000,
     });
     if (r.spawnFailed || r.exitCode !== 0) return undefined;
     return r.stdout.replace(/\0/g, '');
-  }
-
-  /**
-   * Is the syscall filter actually installed?
-   *
-   * Two independent probes because a global npm install and a distribution package put
-   * it in different places, and reporting "absent" for a machine that has it would send
-   * the owner to install something twice.
-   */
-  private async detectSeccomp(): Promise<{ present: boolean; detail: string }> {
-    const bin = await this.which('srt');
-    if (bin !== undefined && !bin.startsWith('/mnt/')) {
-      return { present: true, detail: 'sandbox runtime binary at ' + bin };
-    }
-    const r = await this.opts.transport.run({
-      executable: 'npm',
-      args: ['ls', '-g', '--depth', '0', '--parseable', SECCOMP_PACKAGE],
-      cwd: '/',
-      env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', HOME: '/root' },
-      timeoutMs: 60_000,
-      maxOutputBytes: 50_000,
-    });
-    const out = r.stdout.replace(/\0/g, '');
-    if (!r.spawnFailed && r.exitCode === 0 && out.includes('sandbox-runtime')) {
-      return { present: true, detail: 'npm reports the package installed globally' };
-    }
-    return {
-      present: false,
-      detail:
-        'neither an `srt` binary nor a global npm install of ' +
-        SECCOMP_PACKAGE +
-        ' was found in the execution environment',
-    };
   }
 
   /* -------------------------------------------------------------- execute */
@@ -450,6 +494,37 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     }
 
     const t = this.opts.transport;
+
+    /*
+     * Resolve the executable to an absolute path in the execution environment, and
+     * refuse anything that resolves under /mnt/.
+     *
+     * Two reasons, and the second is a containment property rather than a convenience.
+     * First, a scrubbed environment cannot resolve a bare name — the same trap that
+     * made every binary probe report MISSING. Second, a `node` that resolves to
+     * `/mnt/c/Program Files/nodejs/node` is the WINDOWS binary reached through interop:
+     * running it would leave the guest entirely, which is precisely the escape the
+     * qualification exists to close. It is refused here as well as measured by Q-J,
+     * because a boundary with one check is a boundary with one bug.
+     */
+    const resolved = await resolveGuestBinary(t, request.executable);
+    if (resolved === undefined) {
+      return refuse(
+        'The executable `' +
+          request.executable +
+          '` could not be resolved in the execution environment, so nothing was run.',
+      );
+    }
+    if (resolved.startsWith('/mnt/')) {
+      return refuse(
+        '`' +
+          request.executable +
+          '` resolves to ' +
+          resolved +
+          ', which is a host binary reached through interop rather than a program inside the boundary.',
+      );
+    }
+
     const guestCwd = t.toGuestPath(request.cwd);
     const spec: SandboxSpec = {
       allowWrite: request.writeScope.map((p) => t.toGuestPath(p)),
@@ -465,7 +540,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     };
 
     const command: TransportCommand = {
-      executable: request.executable,
+      executable: resolved,
       args: [...request.args],
       cwd: guestCwd,
       env: { ...request.env },
@@ -524,6 +599,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
         qualifiedAt: at,
         engineVersion: this.opts.engineVersion,
         fingerprint,
+        boundary: this.boundaryOf(probe),
       };
     }
 
@@ -551,7 +627,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
         executable: 'node',
         args: [scriptGuest],
         cwd: layout.worktree,
-        env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
+        env: { PATH: GUEST_PATH },
         timeoutMs: 60_000,
         maxOutputBytes: 200_000,
         writeScope: [layout.worktree],
@@ -614,6 +690,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       qualifiedAt: at,
       engineVersion: this.opts.engineVersion,
       fingerprint,
+      boundary: this.boundaryOf(probe),
     };
   }
 
@@ -635,7 +712,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       executable: 'node',
       args: ['-e', 'require("fs").writeFileSync(' + q(layout.outside + '/qk.txt') + ', "x")'],
       cwd: layout.worktree,
-      env: { PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin' },
+      env: { PATH: GUEST_PATH },
       timeoutMs: 30_000,
       maxOutputBytes: 50_000,
       writeScope: [layout.worktree],
@@ -697,6 +774,22 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     return unenforced();
   }
 
+  /** The identity of the boundary this substrate is. Compared before every dispatch. */
+  boundaryOf(probe: SubstrateProbe): ExecutionBoundary {
+    return executionBoundary({
+      boundaryId: this.opts.boundaryId,
+      purpose: this.opts.purpose,
+      transport: this.opts.transport.id,
+      ...(probe.guestPlatform === undefined ? {} : { guest: probe.guestPlatform }),
+      ...(this.engineLocation === undefined ? {} : { engineLocation: this.engineLocation }),
+      engineVersion: this.opts.engineVersion,
+      sandboxMechanism: this.opts.launcher.id,
+      ...(this.launcherVersion === undefined ? {} : { sandboxVersion: this.launcherVersion }),
+      ...(this.opts.profileDigest === undefined ? {} : { profileDigest: this.opts.profileDigest }),
+      simulated: false,
+    });
+  }
+
   /**
    * What this qualification is a measurement OF.
    *
@@ -715,7 +808,10 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
         transport: p.observations['transport'] ?? this.opts.transport.id,
         kernel: p.observations['transport:kernel'] ?? 'unknown',
         guestOs: p.observations['transport:guestOs'] ?? 'unknown',
-        seccomp: p.observations['seccomp:detected'] ?? 'unknown',
+        boundaryId: this.opts.boundaryId,
+        purpose: this.opts.purpose,
+        engineLocation: this.engineLocation ?? 'none',
+        profileDigest: this.opts.profileDigest ?? 'none',
       }),
     );
   }

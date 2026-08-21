@@ -17,6 +17,7 @@ import {
   type SubstrateQualification,
 } from './types.js';
 import { QUALIFICATION_CASES } from './qualification.js';
+import { BoundaryPurpose, executionBoundary, type ExecutionBoundary } from './boundary.js';
 import type { Clock } from '../core/clock.js';
 
 /**
@@ -52,6 +53,14 @@ export interface SimulatedSubstrateOptions {
   readonly engineVersion?: string;
   /** Cases to force-fail, so a single broken dimension can be tested in isolation. */
   readonly failCases?: readonly string[];
+  /**
+   * The boundary identity this simulation reports.
+   *
+   * Supplied by orchestration tests so a simulated qualification can be matched against
+   * a scripted engine's location. `simulated` is forced true whatever is passed: a
+   * fixture does not get to describe itself as a measured boundary.
+   */
+  readonly boundary?: ExecutionBoundary;
 }
 
 export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
@@ -175,6 +184,24 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
       fingerprint: digestOf(
         canonicalJson({ substrateId: this.id, simulated: true, enforcement: this.enforcement }),
       ),
+      /*
+       * A simulated boundary, marked as such in its own identity.
+       *
+       * `boundaryMismatch` compares `simulated`, so a qualification taken here can
+       * never match a real engine's boundary — a simulation cannot accidentally
+       * authorize a Producer no matter how the surrounding code is wired.
+       */
+      boundary:
+        this.opts.boundary === undefined
+          ? executionBoundary({
+              boundaryId: 'SC-BOUNDARY-SIMULATED',
+              purpose: BoundaryPurpose.RECIPE,
+              transport: 'simulated',
+              engineVersion: this.opts.engineVersion ?? '0.0.0-simulated',
+              sandboxMechanism: 'simulated',
+              simulated: true,
+            })
+          : executionBoundary({ ...this.opts.boundary, simulated: true }),
     };
   }
 

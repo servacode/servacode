@@ -29,6 +29,7 @@ import type { GateEngineDeps } from '../gates/engine.js';
 import type { GitService } from './git.js';
 import type { RecipeRegistry } from './recipe.js';
 import type { SubstrateQualification } from '../substrate/types.js';
+import type { ExecutionBoundary } from '../substrate/boundary.js';
 import type { ContractRegistry } from '../agents/registry.js';
 import type { Store } from '../store/store.js';
 import type { GateResult } from '../gates/types.js';
@@ -113,6 +114,14 @@ export interface FactoryDeps {
   readonly gateDeps: GateEngineDeps;
   readonly projectRoot: string;
   readonly enabledProducers: ReadonlySet<string>;
+  /**
+   * The boundary a Producer would actually run in, resolved from the engineering
+   * engine. Absent means no engine has been resolved, which is itself a refusal:
+   * there is nothing to compare the qualification against.
+   */
+  readonly producerBoundary?: ExecutionBoundary;
+  /** TEST ONLY. Permits a simulated boundary; no production caller sets it. */
+  readonly allowSimulatedBoundary?: boolean;
 }
 
 export class EngineeringFactory {
@@ -141,6 +150,10 @@ export class EngineeringFactory {
       }
     }
 
+    if (this.deps.producerBoundary === undefined) {
+      return 'No engineering engine has been resolved, so there is no execution boundary to compare the qualification against. Serva does not grant write authority to an unnamed environment.';
+    }
+
     return producerRefusal({
       contract: this.deps.registry.get(item.producerAgentId),
       qualification: this.deps.qualification,
@@ -149,6 +162,10 @@ export class EngineeringFactory {
       projectRoot: this.deps.projectRoot,
       reviewerAvailable: this.deps.registry.has(item.reviewerAgentId),
       executorsAvailable: this.deps.recipes.all().length > 0,
+      actualBoundary: this.deps.producerBoundary,
+      ...(this.deps.allowSimulatedBoundary === undefined
+        ? {}
+        : { allowSimulatedBoundary: this.deps.allowSimulatedBoundary }),
     });
   }
 
@@ -255,6 +272,23 @@ export class EngineeringFactory {
     const unresolved: string[] = [];
 
     /*
+     * An empty ChangeSet is never an acceptance.
+     *
+     * Every deterministic check passes vacuously against no change — scope is trivially
+     * conformant, the suite still goes green — so a Producer that edited nothing would
+     * sail through the gate and reach `acceptChange`, which then fails at `git commit`
+     * with "nothing to commit". The gate would have said PASS about work that does not
+     * exist, and the only thing standing between that and a recorded acceptance was an
+     * error message from git.
+     */
+    const emptyChange = changeSet.entries.length === 0;
+    if (emptyChange) {
+      unresolved.push(
+        'The Producer left the worktree unchanged. An empty ChangeSet satisfies every check vacuously, so it is routed to rework rather than accepted.',
+      );
+    }
+
+    /*
      * Scope first, and unconditionally.
      *
      * A change that escaped its boundary should not have its tests run: the result
@@ -312,7 +346,7 @@ export class EngineeringFactory {
     });
     tx.commit();
 
-    const attemptOutcome = routeVerdict(gateResult.verdict);
+    const attemptOutcome = emptyChange ? AttemptOutcome.REWORK : routeVerdict(gateResult.verdict);
     if (attemptOutcome !== AttemptOutcome.ACCEPTED) {
       for (const q of gateResult.qualifications) {
         unresolved.push(q.kind + ' on ' + q.subject + ': ' + q.detail);

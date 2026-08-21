@@ -43,6 +43,13 @@ import {
 } from '../src/engineering/capability.js';
 import { EngineeringFactory, routeVerdict } from '../src/engineering/factory.js';
 import { scanText } from '../src/engineering/secrets.js';
+import { buildSandboxProfile } from '../src/engineering/sandboxProfile.js';
+import { FAKE_CAPABILITIES } from '../src/engine/fake.js';
+import {
+  BoundaryPurpose,
+  executionBoundary,
+  type ExecutionBoundary,
+} from '../src/substrate/boundary.js';
 import { cleanup, freshStore } from './helpers.js';
 import { SequentialIdSource } from '../src/core/ids.js';
 import { FixedClock } from '../src/core/clock.js';
@@ -136,6 +143,32 @@ interface Fixture {
  * `passing` decides whether the fixture's own test script exits 0 or 1, which is how a
  * gate failure is produced from a genuine measurement rather than from a stub.
  */
+
+/**
+ * A simulated PRODUCER boundary matching the scripted engine's own location.
+ *
+ * Orchestration has to be testable without a qualified machine. The boundary is marked
+ * simulated — the fixture does not get to describe itself as measured — so every use of
+ * it must also pass the explicit `allowSimulatedBoundary` opt-in, which nothing in
+ * `src/` does.
+ */
+function simulatedProducerBoundary(projectRoot: string): ExecutionBoundary {
+  return executionBoundary({
+    boundaryId: 'SC-BOUNDARY-PRODUCER',
+    purpose: BoundaryPurpose.PRODUCER,
+    transport: 'fake',
+    engineLocation: 'fake-engine',
+    engineVersion: FAKE_CAPABILITIES.version,
+    sandboxMechanism: 'simulated',
+    profileDigest: buildSandboxProfile({
+      worktreePath: join(projectRoot, 'w'),
+      projectRoot,
+      networkAllowed: false,
+    }).policyDigest,
+    simulated: true,
+  });
+}
+
 async function setupFactory(
   passing = true,
   enforcement: 'HARD' | 'SOFT' | 'NONE' = 'HARD',
@@ -175,7 +208,11 @@ async function setupFactory(
     clock: deps.clock,
     projectRoot: repo,
   });
-  const substrate = new SimulatedExecutionSubstrate({ clock: new FixedClock(), enforcement });
+  const substrate = new SimulatedExecutionSubstrate({
+    clock: new FixedClock(),
+    enforcement,
+    boundary: simulatedProducerBoundary(repo),
+  });
   const fixtureDir = makeFixtureDir();
   fixtures.push(fixtureDir);
   const qualification = await substrate.qualify(fixtureDir);
@@ -206,6 +243,8 @@ async function setupFactory(
     gateDeps,
     projectRoot: repo,
     enabledProducers: new Set(['SC-AGENT-150']),
+    producerBoundary: qualification.boundary,
+    allowSimulatedBoundary: true,
   });
 
   return {
@@ -754,6 +793,8 @@ describe('a Producer is dispatched only when every condition is true', () => {
       projectRoot: f.repo,
       reviewerAvailable: true,
       executorsAvailable: true,
+      actualBoundary: f.qualification.boundary,
+      allowSimulatedBoundary: true,
       ...o,
     });
   }
@@ -822,6 +863,8 @@ describe('a Producer is dispatched only when every condition is true', () => {
         projectRoot: f.repo,
         reviewerAvailable: true,
         executorsAvailable: true,
+        actualBoundary: f.qualification.boundary,
+        allowSimulatedBoundary: true,
       }),
     ).toThrowError(/cannot be dispatched/);
   });
@@ -838,6 +881,8 @@ describe('a Producer is dispatched only when every condition is true', () => {
       projectRoot: f.repo,
       reviewerAvailable: true,
       executorsAvailable: true,
+      actualBoundary: f.qualification.boundary,
+      allowSimulatedBoundary: true,
     });
     expect(policy.available).toContain('Edit');
     expect(policy.available).toContain('Bash');

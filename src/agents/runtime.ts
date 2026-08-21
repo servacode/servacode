@@ -31,6 +31,7 @@ import {
   type EngineObservation,
   type InvocationRequest,
   type ObservedToolCall,
+  type EngineExecutionLocation,
   type RunBudget,
   type ToolPolicy,
 } from '../engine/types.js';
@@ -216,6 +217,18 @@ export function isResult(outcome: ToolCallOutcome): boolean {
 
 export class AgentRuntime {
   constructor(private readonly deps: AgentRuntimeDeps) {}
+
+  /**
+   * Where this runtime's engine actually runs.
+   *
+   * Exposed so a caller about to grant write authority can compare the environment it
+   * qualified with the one it is about to use. Reading it from the runtime rather than
+   * taking the caller's word is the whole point: a value supplied alongside a request
+   * would be an assertion, and this is an observation.
+   */
+  engineLocation(): EngineExecutionLocation | undefined {
+    return this.deps.engine.executionLocation;
+  }
 
   /**
    * Run one agent.

@@ -20,6 +20,8 @@ import {
   type ObservedToolCall,
 } from '../types.js';
 import { CLAUDE_BIN, buildArgv, sessionUuidFor } from './argv.js';
+import { LocalProcessLauncher, type ProcessLauncher } from '../processLauncher.js';
+import type { EngineExecutionLocation } from '../types.js';
 import { StreamParser, type StreamEvent } from './stream.js';
 import { billingRouteRefusal, DEFAULT_ALLOWED_BILLING } from './billing.js';
 import { probeClaude, type CommandRunner } from './probe.js';
@@ -52,6 +54,15 @@ export interface ClaudeAdapterOptions {
   readonly run?: CommandRunner;
   readonly spawnFn?: typeof spawn;
   readonly probeTtlMs?: number;
+  /**
+   * WHERE the engine process runs. Defaults to this machine.
+   *
+   * Injected rather than assumed because "spawn on this machine" was a hard-coded
+   * decision hiding inside a call to `spawn`, and on Windows it is the wrong one for
+   * anything that writes: native Windows has no sandbox, so a Producer started here has
+   * no boundary however carefully a WSL2 guest was qualified a moment earlier.
+   */
+  readonly launcher?: ProcessLauncher;
 }
 
 const defaultRunner: CommandRunner = (bin, args, timeoutMs) =>
@@ -83,6 +94,7 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
   private readonly env: NodeJS.ProcessEnv;
   private readonly runner: CommandRunner;
   private readonly spawnFn: typeof spawn;
+  private readonly launcher: ProcessLauncher;
   private readonly allowedBilling: readonly BillingMode[];
   private readonly ttl: number;
   private cachedStatus: EngineStatus | undefined;
@@ -93,8 +105,31 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
     this.env = opts.env ?? process.env;
     this.runner = opts.run ?? defaultRunner;
     this.spawnFn = opts.spawnFn ?? spawn;
+    // A supplied `spawnFn` still governs a local launch, so every existing test that
+    // injects one keeps working without knowing this abstraction exists.
+    this.launcher = opts.launcher ?? new LocalProcessLauncher(this.spawnFn);
     this.allowedBilling = opts.allowedBilling ?? DEFAULT_ALLOWED_BILLING;
     this.ttl = opts.probeTtlMs ?? 60_000;
+  }
+
+  /** Where this adapter starts processes. Part of the execution boundary identity. */
+  get location(): ProcessLauncher['location'] {
+    return this.launcher.location;
+  }
+
+  /** The executable name this adapter invokes. */
+  get executable(): string {
+    return this.bin;
+  }
+
+  get executionLocation(): EngineExecutionLocation {
+    return {
+      transport: this.launcher.location.transport,
+      ...(this.launcher.location.guest === undefined
+        ? {}
+        : { guest: this.launcher.location.guest }),
+      executable: this.bin,
+    };
   }
 
   async health(): Promise<EngineStatus> {
@@ -179,12 +214,28 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
     mkdirSync(promptDir, { recursive: true });
     writeFileSync(promptFile, request.systemPrompt, 'utf8');
 
-    const argv = buildArgv(request, {
-      supportsTurnLimit: status.capabilities.supportsTurnLimit,
-      supportsAmbientConfigIsolation: status.capabilities.supportsAmbientConfigIsolation,
-      sessionId,
-      systemPromptFile: promptFile,
-    });
+    /*
+     * Paths in argv are expressed as the EXECUTION ENVIRONMENT sees them.
+     *
+     * The files are written on the host; a guest process opens them at a different
+     * path. A path that did not go through the launcher is a path the process cannot
+     * open, which would fail as a missing prompt file rather than as the mapping bug
+     * it actually is.
+     */
+    const argv = buildArgv(
+      {
+        ...request,
+        ...(request.settingsPath === undefined
+          ? {}
+          : { settingsPath: this.launcher.toExecutionPath(request.settingsPath) }),
+      },
+      {
+        supportsTurnLimit: status.capabilities.supportsTurnLimit,
+        supportsAmbientConfigIsolation: status.capabilities.supportsAmbientConfigIsolation,
+        sessionId,
+        systemPromptFile: this.launcher.toExecutionPath(promptFile),
+      },
+    );
 
     try {
       return await this.spawnAndCollect(request, argv, startedAt, opts);
@@ -214,11 +265,10 @@ export class ClaudeCliEngineAdapter implements EngineAdapter {
       let killedBy: TerminationReason | undefined;
       const began = this.opts.clock.epochMs();
 
-      const child = this.spawnFn(this.bin, [...argv], {
+      // The launcher decides WHERE. Everything else about the invocation is identical
+      // wherever it runs, which is what keeps the rest of this adapter honest.
+      const child = this.launcher.spawn(this.bin, argv, {
         cwd: request.cwd,
-        shell: false, // there is no shell; argv elements are never re-parsed
-        windowsHide: true,
-        stdio: ['pipe', 'pipe', 'pipe'],
         env: this.env,
       });
 

@@ -12,7 +12,12 @@ import {
   type SubstrateQualification,
 } from './types.js';
 import { QUALIFICATION_CASES } from './qualification.js';
-import { SandboxedExecutionSubstrate, compareVersions } from './sandboxed.js';
+import {
+  RECIPE_REQUIRED_BINARIES,
+  SandboxedExecutionSubstrate,
+  compareVersions,
+} from './sandboxed.js';
+import { BoundaryPurpose, executionBoundary } from './boundary.js';
 import { BubblewrapLauncher, UnimplementedLauncher } from './sandboxLauncher.js';
 import {
   LocalPosixTransport,
@@ -86,11 +91,20 @@ export async function selectExecutionSubstrate(
   opts: SubstrateSelectionOptions,
 ): Promise<SubstrateSelection> {
   const platform = opts.platform ?? process.platform;
+  /*
+   * The RECIPE boundary: Serva's own deterministic build, test and lint commands.
+   *
+   * Its prerequisites are only what bubblewrap actually uses. The Producer boundary is
+   * a different mechanism with a different list, built by `resolveEngineeringEngine`.
+   */
   const common = {
     clock: opts.clock,
     engineVersion: opts.engineVersion,
     projectRoot: opts.projectRoot,
     minEngineVersion: MIN_SANDBOX_ENGINE_VERSION,
+    purpose: BoundaryPurpose.RECIPE,
+    boundaryId: 'SC-BOUNDARY-RECIPE',
+    requiredBinaries: RECIPE_REQUIRED_BINARIES,
     ...(opts.alwaysDenyRead === undefined ? {} : { alwaysDenyRead: opts.alwaysDenyRead }),
   };
 
@@ -297,6 +311,13 @@ export class UnqualifiableSubstrate implements ExecutionSubstrate {
           missing: missing.map((p) => p.id),
         }),
       ),
+      boundary: executionBoundary({
+        boundaryId: 'SC-BOUNDARY-NONE',
+        purpose: BoundaryPurpose.RECIPE,
+        transport: 'none',
+        engineVersion: this.opts.engineVersion,
+        sandboxMechanism: 'none',
+      }),
     };
   }
 
