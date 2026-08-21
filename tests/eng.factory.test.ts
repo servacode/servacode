@@ -4,7 +4,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EnforcementClass, EvidenceClass, GateVerdict, ValidityState } from '../src/vocab/index.js';
 import { ContractRegistry } from '../src/agents/registry.js';
-import { FakeExecutionSubstrate, makeFixtureDir, removeFixtureDir } from '../src/substrate/fake.js';
+import {
+  SimulatedExecutionSubstrate,
+  makeFixtureDir,
+  removeFixtureDir,
+} from '../src/substrate/fake.js';
 import { GitService } from '../src/engineering/git.js';
 import { EngineeringWorkspaceManager } from '../src/engineering/workspace.js';
 import {
@@ -117,8 +121,8 @@ interface Fixture {
   readonly base: string;
   readonly store: ReturnType<typeof freshStore>['store'];
   readonly git: GitService;
-  readonly substrate: FakeExecutionSubstrate;
-  readonly qualification: Awaited<ReturnType<FakeExecutionSubstrate['qualify']>>;
+  readonly substrate: SimulatedExecutionSubstrate;
+  readonly qualification: Awaited<ReturnType<SimulatedExecutionSubstrate['qualify']>>;
   readonly recipes: RecipeRegistry;
   readonly executorDeps: ExecutorDeps;
   readonly gateDeps: { ids: SequentialIdSource; clock: FixedClock; evaluator: string };
@@ -171,7 +175,7 @@ async function setupFactory(
     clock: deps.clock,
     projectRoot: repo,
   });
-  const substrate = new FakeExecutionSubstrate({ clock: new FixedClock(), enforcement });
+  const substrate = new SimulatedExecutionSubstrate({ clock: new FixedClock(), enforcement });
   const fixtureDir = makeFixtureDir();
   fixtures.push(fixtureDir);
   const qualification = await substrate.qualify(fixtureDir);
@@ -919,10 +923,25 @@ describe('rework is bounded and acceptance is deterministic', () => {
     const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
     writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 1;\n// x\n', 'utf8');
     const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
-    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(/is not accepted/);
+    // Refused twice over: no review is recorded, and the gate said REWORK. The review
+    // check fires first because it does not depend on the verdict at all.
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(
+      /No independent review is recorded/,
+    );
+    expect(v.attemptOutcome).toBe('REWORK');
   }, 60_000);
 
-  it('an accepted change becomes a local commit carrying its provenance', async () => {
+  it('a verdict supplied by the caller cannot be integrated', async () => {
+    /*
+     * The hole this closes: `verifyAttempt` used to take a `judged` array straight from
+     * its caller and hand it to the gate, so a required, BLOCKING review criterion was
+     * satisfied by a literal. No run had to exist; the `runRef` string was never
+     * resolved against anything. The accepted record would then claim an independent
+     * review that never happened.
+     *
+     * The seam still exists, because gate composition has to be testable without
+     * spending a model call. What changed is that it can no longer reach acceptance.
+     */
     const f = await setupFactory(true);
     const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
     const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
@@ -938,47 +957,45 @@ describe('rework is bounded and acceptance is deterministic', () => {
         codeReview: true,
         qaVerification: false,
       },
-      judged: [
+      testOnlyJudged: [
         {
           criterionId: 'EC-REVIEW',
           outcome: 'PASS',
-          detail: 'correct, in scope, and does what the work item asked',
-          runRef: 'SC-RUN-REVIEWER',
+          detail: 'looks fine to me',
+          runRef: 'SC-RUN-TOTALLY-MADE-UP',
           reviewerRole: 'CODE_REVIEW',
         },
       ],
     });
-    /*
-     * PASS_WITH_QUALIFICATION, not PASS, and that is the correct answer.
-     *
-     * The reviewer's approval is JUDGED basis, so the caveat travels with the result
-     * (31 §4.1.2 branch 7): the change is accepted, and the record says out loud that
-     * one of the reasons was somebody's judgement rather than a measurement.
-     */
+
+    // The gate composes as before — that is what the seam is for.
     expect(v.gateResult.verdict).toBe(GateVerdict.PASS_WITH_QUALIFICATION);
-    expect(v.gateResult.qualifications.map((q) => q.kind)).toContain('JUDGED_BASIS');
-    expect(v.gateResult.qualifications.map((q) => q.criterionRef)).toContain('EC-REVIEW');
+    // ...and the result is flagged, and refuses to become a commit.
+    expect(v.usedUnvalidatedJudgement).toBe(true);
+    expect(v.unresolved.join(' ')).toMatch(/test seam/);
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(
+      /no AgentRun backs|not accepted/,
+    );
+
+    // Nothing was committed, and no review was invented.
+    expect(await f.git.headCommit(w.path)).toBe(f.base);
+  }, 90_000);
+
+  it('acceptance refuses when no independent review is recorded at all', async () => {
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+
+    // Review not required by the gate, so the attempt is ACCEPTED...
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
     expect(v.attemptOutcome).toBe('ACCEPTED');
 
-    const { commit, branch } = await f.factory.acceptChange(item, w, v);
-    expect(commit).toMatch(/^[0-9a-f]{7,}$/);
-    expect(branch).toBe(w.branch);
-
-    const message = execFileSync('git', ['log', '-1', '--format=%B', commit], {
-      cwd: w.path,
-      encoding: 'utf8',
-    });
-    expect(message).toContain(item.workItemId);
-    expect(message).toContain(v.changeSet.changeSetId);
-    expect(message).toContain('SC-AGENT-150');
-    expect(message).toContain('SC-AGENT-200');
-    expect(message).toContain(v.gateResult.id);
-
-    // Phase 4 performs no remote write, and the owner's checkout learns nothing.
-    expect(f.git.invocations.some((a) => a[0] === 'push')).toBe(false);
-    expect(await f.git.isClean(f.repo)).toBe(true);
-    expect(await f.git.currentBranch(f.repo)).toBe('main');
-    expect(await f.git.headCommit(f.repo)).toBe(f.base);
+    // ...and integration still refuses, because the store holds no review. Two checks
+    // against the same fact from different directions.
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(
+      /No independent review is recorded/,
+    );
   }, 90_000);
 
   it('routing follows the canonical verdict taxonomy', () => {

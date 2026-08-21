@@ -3,6 +3,7 @@ import { GateVerdict } from '../vocab/index.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { fail } from '../core/errors.js';
 import { buildChangeSet, type ChangeSet, type ScopeOptions } from './changeset.js';
+import { integrateVerifiedChangeSet } from './integration.js';
 import {
   DEFAULT_REQUIRED_CHECKS,
   RuntimeComponent,
@@ -17,6 +18,7 @@ import {
 } from './executors.js';
 import { evidenceForChangeSet, type EngineeringEvidence, type ExecutorDeps } from './execution.js';
 import { evaluateEngineeringGate, type JudgedInput } from './gate.js';
+import { judgedForChangeSet, listReviews } from './review.js';
 import { producerRefusal } from './capability.js';
 import {
   WorkspaceState,
@@ -96,6 +98,8 @@ export interface VerificationResult {
   readonly gateResult: GateResult;
   readonly attemptOutcome: AttemptOutcome;
   readonly unresolved: readonly string[];
+  /** True when a test seam supplied a judged input that no AgentRun backs. */
+  readonly usedUnvalidatedJudgement: boolean;
 }
 
 export interface FactoryDeps {
@@ -207,9 +211,23 @@ export class EngineeringFactory {
     workspace: EngineeringWorkspace,
     o: {
       readonly required?: RequiredChecks;
-      readonly judged?: readonly JudgedInput[];
       readonly producerRunId?: string;
       readonly scopeOptions?: Partial<ScopeOptions>;
+      /**
+       * TEST ONLY. A judged verdict that no AgentRun backs.
+       *
+       * This used to be the ordinary `judged` parameter, and it was a hole straight
+       * through the most important criterion in the system: a caller could satisfy a
+       * required, BLOCKING review with a literal, and the accepted record would then
+       * claim an independent review that never happened.
+       *
+       * The production path takes judged inputs from `judgedForChangeSet`, which
+       * returns only reviews validated against a real reviewer AgentRun. This seam
+       * exists so gate composition can be tested without spending a model call, it is
+       * named so nobody reaches for it by accident, and every result it touches is
+       * flagged `usedUnvalidatedJudgement` — which `acceptChange` refuses on.
+       */
+      readonly testOnlyJudged?: readonly JudgedInput[];
     } = {},
   ): Promise<VerificationResult> {
     const required = o.required ?? DEFAULT_REQUIRED_CHECKS;
@@ -271,11 +289,25 @@ export class EngineeringFactory {
 
     const { valid, stale } = evidenceForChangeSet(this.deps.store, changeSet.changeSetId);
 
+    /*
+     * Judged inputs come from PERSISTED reviews, each already tied to a terminated,
+     * independent, read-only AgentRun bound to this exact ChangeSet. A verdict about a
+     * different ChangeSet is not carried forward: the reviewer looked at other code.
+     */
+    const validatedJudged = judgedForChangeSet(this.deps.store, changeSet.changeSetId);
+    const usedUnvalidatedJudgement = (o.testOnlyJudged ?? []).length > 0;
+    if (usedUnvalidatedJudgement) {
+      unresolved.push(
+        'A judged verdict was supplied directly rather than by a reviewer AgentRun. This is a test seam; the result cannot be accepted.',
+      );
+    }
+    const judged = [...validatedJudged, ...(o.testOnlyJudged ?? [])];
+
     const tx = this.deps.store.begin();
     const gateResult = evaluateEngineeringGate(tx, this.deps.gateDeps, {
       changeSet,
       evidence: valid,
-      judged: o.judged ?? [],
+      judged,
       required,
     });
     tx.commit();
@@ -303,6 +335,7 @@ export class EngineeringFactory {
       gateResult,
       attemptOutcome,
       unresolved,
+      usedUnvalidatedJudgement,
     };
   }
 
@@ -318,6 +351,51 @@ export class EngineeringFactory {
     workspace: EngineeringWorkspace,
     verification: VerificationResult,
   ): Promise<{ commit: string; branch: string }> {
+    /*
+     * A second, independent check at the integration boundary.
+     *
+     * The gate already required a review, and this asks the store directly whether one
+     * exists for this ChangeSet. Two checks against the same fact from different
+     * directions is the point: the first can be satisfied by a verdict handed in, and
+     * this one cannot be satisfied by anything except a persisted, validated review.
+     */
+    if (verification.usedUnvalidatedJudgement) {
+      return fail({
+        code: 'E_VALIDATION',
+        message:
+          'ChangeSet ' +
+          verification.changeSet.changeSetId +
+          ' was verified with a judged verdict that no AgentRun backs',
+        remedy:
+          'A change is integrated only after a real independent reviewer accepted it. The test seam is not an acceptance path.',
+        details: { changeSetId: verification.changeSet.changeSetId },
+        specRef: 'Phase 4 §19, SC-POL-006',
+      });
+    }
+    const reviews = listReviews(this.deps.store).filter(
+      (r) => r.changeSetId === verification.changeSet.changeSetId,
+    );
+    if (reviews.length === 0) {
+      return fail({
+        code: 'E_VALIDATION',
+        message:
+          'No independent review is recorded for ChangeSet ' + verification.changeSet.changeSetId,
+        remedy:
+          'NO EVIDENCE = NOT VERIFIED. Dispatch the reviewer, or accept that this change is not accepted.',
+        details: { changeSetId: verification.changeSet.changeSetId },
+        specRef: 'Phase 4 §19',
+      });
+    }
+    if (reviews.some((r) => r.reviewerAgentId === item.producerAgentId)) {
+      return fail({
+        code: 'E_VALIDATION',
+        message: 'The recorded review was produced by the producing agent',
+        remedy: 'An agent never certifies its own work (SC-POL-006).',
+        details: { changeSetId: verification.changeSet.changeSetId },
+        specRef: 'SC-POL-006',
+      });
+    }
+
     if (verification.attemptOutcome !== AttemptOutcome.ACCEPTED) {
       return fail({
         code: 'E_INVALID_TRANSITION',
@@ -333,17 +411,6 @@ export class EngineeringFactory {
       });
     }
 
-    const paths = verification.changeSet.entries.filter((e) => e.status !== 'D').map((e) => e.path);
-    const staged = await this.deps.git.stagePaths(paths, workspace.path);
-    if (!staged.ok) {
-      return fail({
-        code: 'E_INTERNAL',
-        message: 'Could not stage the accepted paths',
-        remedy: 'Nothing was committed. Inspect the worktree.',
-        details: { stderr: staged.stderr.slice(0, 400) },
-      });
-    }
-
     const message = [
       item.title,
       '',
@@ -355,16 +422,21 @@ export class EngineeringFactory {
       'Evidence:  ' + verification.evidence.map((e) => e.id).join(', '),
     ].join('\n');
 
-    const committed = await this.deps.git.commit(message, workspace.path);
-    if (!committed.ok) {
-      return fail({
-        code: 'E_INTERNAL',
-        message: 'Could not create the accepted commit',
-        remedy: 'The worktree is unchanged. Nothing was integrated.',
-        details: { stderr: committed.stderr.slice(0, 400) },
-      });
-    }
-    const commit = await this.deps.git.headCommit(workspace.path);
+    /*
+     * Stage exactly the verified change, prove the index matches it, commit, then prove
+     * the COMMIT matches it — independently, from the object database.
+     *
+     * Nothing below this line runs unless both proofs held. Recording acceptance before
+     * the post-commit check would mean the audit trail asserts a provenance nobody
+     * verified, which is the failure mode this whole phase exists to prevent.
+     */
+    const integration = await integrateVerifiedChangeSet(this.deps.git, {
+      changeSet: verification.changeSet,
+      worktreePath: workspace.path,
+      branch: workspace.branch,
+      message,
+    });
+    const commit = integration.commit;
 
     this.deps.workspaces.update(workspace.workspaceId, {
       state: WorkspaceState.ACCEPTED,
@@ -385,6 +457,12 @@ export class EngineeringFactory {
         evidence: verification.evidence.map((e) => e.id),
         producerAgentId: item.producerAgentId,
         reviewerAgentId: item.reviewerAgentId,
+        // The proof, not the intention: both digests are over the same canonical form.
+        verifiedIdentity: integration.stagedIdentity.digest,
+        committedIdentity: integration.committedIdentity.digest,
+        // Dirty paths deliberately left out of the commit, so the record says so rather
+        // than leaving the reader to infer that the worktree was pristine.
+        notStaged: integration.notStaged,
       },
     });
     tx.commit();

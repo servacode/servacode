@@ -1,5 +1,5 @@
 import { EnforcementClass } from '../vocab/index.js';
-import { HostExecutionSubstrate } from '../substrate/host.js';
+import { selectExecutionSubstrate } from '../substrate/host.js';
 import {
   engineeringAuthorityRefusal,
   type ExecutionSubstrate,
@@ -13,6 +13,8 @@ import { reconcileWorkspaces, type ReconciliationReport } from '../engineering/r
 import { ContractRegistry } from '../agents/registry.js';
 import { producerContractRefusal } from '../engineering/capability.js';
 import { makeFixtureDir, removeFixtureDir } from '../substrate/fake.js';
+import { join } from 'node:path';
+import { SERVA_INTERNAL_DIR } from '../agents/toolPolicy.js';
 import type { ServaRuntime } from './runtime.js';
 
 /**
@@ -65,6 +67,8 @@ export type EngineeringGovernance =
 
 export interface EngineeringLayer {
   readonly substrate: ExecutionSubstrate;
+  /** Why this substrate was chosen for this machine. */
+  readonly substrateBasis: string;
   readonly git: GitService;
   readonly workspaces: EngineeringWorkspaceManager;
   readonly recipes: RecipeRegistry;
@@ -78,10 +82,18 @@ export interface EngineeringLayerOptions {
   readonly engineVersion?: string;
 }
 
-export function buildEngineeringLayer(
+/**
+ * Wire the engineering layer for this project.
+ *
+ * Asynchronous because choosing the substrate means asking the machine what it is —
+ * on Windows, which WSL2 distributions exist. Doing that lazily on first use was the
+ * alternative and it is worse: the owner would not learn the substrate is unavailable
+ * until something was already half-dispatched.
+ */
+export async function buildEngineeringLayer(
   rt: ServaRuntime,
   opts: EngineeringLayerOptions = {},
-): EngineeringLayer {
+): Promise<EngineeringLayer> {
   const registry = opts.registry ?? ContractRegistry.shared();
   const git = new GitService({ repoRoot: rt.root });
   const workspaces = new EngineeringWorkspaceManager({
@@ -90,14 +102,23 @@ export function buildEngineeringLayer(
     clock: rt.clock,
     projectRoot: rt.root,
   });
-  const substrate =
-    opts.substrate ??
-    new HostExecutionSubstrate({
+
+  let substrate = opts.substrate;
+  let basis = 'substrate supplied by the caller';
+  if (substrate === undefined) {
+    const selection = await selectExecutionSubstrate({
       clock: rt.clock,
       engineVersion: opts.engineVersion ?? 'UNKNOWN',
+      projectRoot: rt.root,
+      alwaysDenyRead: [join(rt.root, SERVA_INTERNAL_DIR)],
     });
+    substrate = selection.substrate;
+    basis = selection.basis;
+  }
+
   return {
     substrate,
+    substrateBasis: basis,
     git,
     workspaces,
     recipes: opts.recipes ?? new RecipeRegistry(),
@@ -113,6 +134,16 @@ export interface EngineeringStatusView {
   readonly hostPlatform: string;
   readonly guestPlatform?: string;
   readonly isolationMethod: string;
+  /** Why this substrate, on this machine. */
+  readonly substrateBasis: string;
+  /**
+   * True when the substrate simulates rather than contains.
+   *
+   * Reported next to the governance state because ACTIVE-on-a-simulation and
+   * ACTIVE-on-a-boundary are very different facts, and a reader must not have to know
+   * which class was wired to tell them apart.
+   */
+  readonly simulated: boolean;
   readonly blockedBy?: string;
   readonly missingPrerequisites: readonly { id: string; what: string; remedy: string }[];
   readonly enabledProducers: readonly string[];
@@ -179,6 +210,8 @@ export async function engineeringStatus(
       ? {}
       : { guestPlatform: qualification.probe.guestPlatform }),
     isolationMethod: qualification.probe.isolationMethod,
+    substrateBasis: layer.substrateBasis,
+    simulated: qualification.probe.simulated === true,
     ...(refusal === undefined ? {} : { blockedBy: refusal }),
     missingPrerequisites: missing,
     enabledProducers: enabled,

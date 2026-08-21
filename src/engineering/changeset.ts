@@ -1,9 +1,10 @@
 import { z } from 'zod';
-import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readlinkSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { canonicalJson, digestOf } from '../core/hash.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { safeRealpath } from '../substrate/fake.js';
+import { gitBlobId } from './git.js';
 import type { ChangedPath, GitService } from './git.js';
 import type { EngineeringWorkspace } from './workspace.js';
 import type { Store, Transaction } from '../store/store.js';
@@ -37,6 +38,14 @@ export const ChangedEntrySchema = z
     isSymlink: z.boolean(),
     /** Digest of the file as it stands. Absent for a deletion. */
     digest: z.string().optional(),
+    /**
+     * Git's own blob id for the same bytes. Absent for a deletion.
+     *
+     * Carried so the verified change can be compared to what git actually holds in the
+     * index or in a commit, without decoding either side. The content digest above is
+     * a UTF-8 digest and cannot be compared to a git object; this can.
+     */
+    blobId: z.string().optional(),
     sizeBytes: z.number().int().nonnegative().optional(),
   })
   .strict();
@@ -107,9 +116,31 @@ export async function buildChangeSet(
       status: e.status,
       path: e.path,
       digest: e.digest ?? null,
+      blobId: e.blobId ?? null,
       isSymlink: e.isSymlink,
     })),
   };
+
+  /*
+   * Same change, same identity.
+   *
+   * Minting a fresh id every time the worktree was inspected made re-verification
+   * destroy its own inputs: measuring, then measuring again with a reviewer required,
+   * produced a second ChangeSet whose evidence set was empty — so a change that had
+   * just passed every check came back NOT_VERIFIED. Identity has to be a function of
+   * the change, not of when somebody looked at it.
+   *
+   * Staleness is unaffected, and is the whole reason the digest covers content: edit a
+   * file and the digest moves, so the earlier evidence stops applying exactly as before.
+   */
+  const identityDigest = digestOf(canonicalJson(identity));
+  const existing = listChangeSets(deps.store).find(
+    (c) =>
+      c.digest === identityDigest &&
+      c.workspaceId === workspace.workspaceId &&
+      c.baseCommit === workspace.baseCommit,
+  );
+  if (existing !== undefined) return existing;
 
   const changeSet = ChangeSetSchema.parse({
     changeSetId: deps.ids.next('SC-CS'),
@@ -122,7 +153,7 @@ export async function buildChangeSet(
     headCommit,
     entries,
     diffDigest: digestOf(diff),
-    digest: digestOf(canonicalJson(identity)),
+    digest: identityDigest,
     createdAt: deps.clock.now(),
   });
 
@@ -163,13 +194,19 @@ function describeEntry(workspacePath: string, c: ChangedPath): ChangedEntry {
   // silently followed to whatever it points at.
   const l = lstatSync(abs);
   if (l.isSymbolicLink()) {
+    // A symlink's identity IS its target, and git stores exactly that as the blob.
+    // Recording no identity at all would let a link be repointed between verification
+    // and integration without the comparison noticing.
+    const target = Buffer.from(readlinkSync(abs), 'utf8');
     return ChangedEntrySchema.parse({
       status: c.status,
       path: c.path,
       ...(c.from === undefined ? {} : { from: c.from }),
       isBinary: false,
       isSymlink: true,
-      sizeBytes: 0,
+      digest: digestOf(target.toString('utf8')),
+      blobId: gitBlobId(target),
+      sizeBytes: target.length,
     });
   }
   if (l.isDirectory()) {
@@ -189,6 +226,7 @@ function describeEntry(workspacePath: string, c: ChangedPath): ChangedEntry {
     isBinary: looksBinary(buf),
     isSymlink: false,
     digest: digestOf(buf.toString('utf8')),
+    blobId: gitBlobId(buf),
     sizeBytes: statSync(abs).size,
   });
 }

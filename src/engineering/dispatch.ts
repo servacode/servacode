@@ -1,0 +1,551 @@
+import { z } from 'zod';
+import { existsSync, readFileSync } from 'node:fs';
+import { canonicalJson, digestOf } from '../core/hash.js';
+import { fail } from '../core/errors.js';
+import { RunOutcome } from '../vocab/index.js';
+import { AuditAction, audit } from '../events/audit.js';
+import { engineeringAuthorityRefusal } from '../substrate/types.js';
+import { resolveProducerPolicy, resolveReviewerPolicy } from './capability.js';
+import {
+  buildSandboxProfile,
+  removeSandboxProfile,
+  sandboxProfileDrift,
+  writeSandboxProfile,
+  type GeneratedSandboxProfile,
+} from './sandboxProfile.js';
+import { REVIEWER_RESULT_SCHEMA, ReviewerVerdictSchema, recordReview } from './review.js';
+import type { AgentRuntime, AgentRunResult } from '../agents/runtime.js';
+import type { ContractRegistry } from '../agents/registry.js';
+import type { EngineeringWorkspace } from './workspace.js';
+import type { EngineeringWorkItem } from './factory.js';
+import type { ChangeSet } from './changeset.js';
+import type { EngineeringEvidence } from './execution.js';
+import type { ExecutionSubstrate, SubstrateQualification } from '../substrate/types.js';
+import type { EngineCapabilities } from '../engine/types.js';
+import type { PersistedReview } from './review.js';
+import type { Store } from '../store/store.js';
+import type { Clock } from '../core/clock.js';
+import type { IdSource } from '../core/ids.js';
+
+/**
+ * Dispatching the company's own agents into the factory.
+ *
+ * SPEC: Phase 4 §9–§10, §19, closure blocker 2.
+ *
+ * What this file replaces: nothing. There was no production path from the factory to
+ * `AgentRuntime` at all. `resolveProducerPolicy`, `buildSandboxProfile`,
+ * `writeSandboxProfile` and `sandboxProfileDrift` all existed, were all tested, and
+ * were called by nothing that could dispatch an agent. The live acceptance stood a
+ * `writeFileSync` in for the Producer and a string literal in for the Reviewer, so the
+ * one thing Phase 4 is FOR — a governed agent changing code under a measured boundary
+ * — was the one thing that had never happened.
+ *
+ * The flow, and the reason each step precedes the next:
+ *
+ *   substrate qualified HARD          nothing is dispatched onto an unmeasured machine
+ *     -> Producer policy resolved     the eight-condition gate, before anything runs
+ *     -> sandbox profile written      under `.serva`, which the run itself is denied
+ *     -> profile confirmed in force   see verifySandboxProfileInForce for its limits
+ *     -> AgentRuntime.run(...)        ONE runtime; Phase 4 adds no second one
+ *     -> Serva computes the ChangeSet the agent's account of its edits is not consulted
+ *
+ * The Reviewer follows the same shape with a read-only grant, a separate run, a
+ * separate session, and a context bundle built from evidence rather than from anything
+ * the Producer said.
+ */
+
+/* ------------------------------------------------------------------ producer */
+
+/** The structured payload a Producer AgentRun returns. Its edits are on disk. */
+export const ProducerResultSchema = z
+  .object({
+    summary: z.string().min(1),
+    /**
+     * What the Producer BELIEVES it changed.
+     *
+     * Recorded, and deliberately not used for anything that matters. Serva computes the
+     * ChangeSet from the repository; this exists so the two can be COMPARED, which
+     * makes a Producer that misreports its own work visible rather than merely wrong.
+     */
+    claimedPaths: z.array(z.string()).default([]),
+    /** Things it noticed outside its scope. An Observation, never a silent edit. */
+    observations: z.array(z.string()).default([]),
+    /** Why it could not finish, when it could not. */
+    blockers: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export type ProducerResult = z.output<typeof ProducerResultSchema>;
+
+export const PRODUCER_RESULT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['summary', 'claimedPaths', 'observations', 'blockers'],
+  properties: {
+    summary: { type: 'string' },
+    claimedPaths: { type: 'array', items: { type: 'string' } },
+    observations: { type: 'array', items: { type: 'string' } },
+    blockers: { type: 'array', items: { type: 'string' } },
+  },
+};
+
+export interface DispatchDeps {
+  readonly store: Store;
+  readonly clock: Clock;
+  readonly ids: IdSource;
+  readonly runtime: AgentRuntime;
+  readonly registry: ContractRegistry;
+  readonly substrate: ExecutionSubstrate;
+  readonly qualification: SubstrateQualification;
+  readonly projectRoot: string;
+  readonly enabledProducers: ReadonlySet<string>;
+  /** The engine's declared capabilities, used to confirm the profile can be applied. */
+  readonly engineCapabilities: EngineCapabilities;
+}
+
+export interface ProducerDispatch {
+  readonly runId: string;
+  readonly outcome: RunOutcome;
+  readonly result?: ProducerResult;
+  readonly sandboxProfile: GeneratedSandboxProfile;
+  readonly diagnostics: readonly string[];
+  /** What the pre-dispatch check could not establish, carried rather than dropped. */
+  readonly unprovedBoundary: readonly string[];
+}
+
+/**
+ * Confirm the sandbox profile is actually in force before granting write authority.
+ *
+ * The first attempt at this probed Serva's own substrate: it ran a command through
+ * `substrate.execute()` that tried to write outside the worktree, and required it to
+ * fail. That test is a fine test — and it answers the wrong question. Serva's substrate
+ * contains the DETERMINISTIC RECIPES. The profile written here governs a different
+ * boundary: the engine's own sandbox, which constrains the Producer's tool calls and
+ * whatever its Bash commands spawn. Proving one says nothing about the other, and
+ * conflating them would have let a real gap hide behind a green check.
+ *
+ * What can be established without spending a model call, and is:
+ *
+ *   1. the engine can carry a Serva-supplied settings file at all — a profile that
+ *      cannot be passed is a profile that is not in force;
+ *   2. the file Serva wrote is on disk and still digests to what Serva intended,
+ *      catching a write that failed, truncated, or was changed in between;
+ *   3. no drift against the effective policy, whenever the engine reports one.
+ *
+ * What CANNOT be established here, stated rather than papered over: whether the engine
+ * honours the profile at runtime. That is measured by the substrate qualification for
+ * recipes, and by the live acceptance for a real Producer session. Returning "verified"
+ * for something unverifiable is the failure this whole phase exists to prevent, so the
+ * absence is reported as an unresolved qualification instead.
+ */
+export interface SandboxProfileCheck {
+  /** The reason the profile is not in force, or undefined. */
+  readonly refusal?: string;
+  /** What could not be established, and is therefore not claimed. */
+  readonly unproved: readonly string[];
+}
+
+export function verifySandboxProfileInForce(o: {
+  readonly profile: GeneratedSandboxProfile;
+  readonly capabilities: EngineCapabilities;
+  readonly effectiveSettings?: Record<string, unknown>;
+}): SandboxProfileCheck {
+  if (!o.capabilities.supportsAmbientConfigIsolation) {
+    return {
+      refusal:
+        'This engine version cannot be given an isolated settings source, so a Serva-generated sandbox profile could not be applied to the run.',
+      unproved: [],
+    };
+  }
+
+  if (o.profile.path === undefined) {
+    return { refusal: 'No sandbox profile was written for this run.', unproved: [] };
+  }
+  if (!existsSync(o.profile.path)) {
+    return {
+      refusal: 'The sandbox profile Serva wrote is not on disk at ' + o.profile.path + '.',
+      unproved: [],
+    };
+  }
+
+  let onDisk: unknown;
+  try {
+    onDisk = JSON.parse(readFileSync(o.profile.path, 'utf8'));
+  } catch (e) {
+    return {
+      refusal: 'The sandbox profile on disk is not readable JSON: ' + String(e),
+      unproved: [],
+    };
+  }
+  if (digestOf(canonicalJson(onDisk as Record<string, unknown>)) !== o.profile.digest) {
+    return {
+      refusal:
+        'The sandbox profile on disk does not match the one Serva generated. It was changed between writing and dispatch.',
+      unproved: [],
+    };
+  }
+
+  const drift = sandboxProfileDrift(o.profile, o.effectiveSettings);
+  if (o.effectiveSettings !== undefined && drift !== undefined) {
+    return { refusal: 'SANDBOX_PROFILE_DRIFT: ' + drift, unproved: [] };
+  }
+
+  return {
+    unproved:
+      o.effectiveSettings === undefined
+        ? [
+            'The engine reported no effective sandbox policy, so Serva confirmed the profile it wrote and not the policy the engine applied.',
+          ]
+        : [],
+  };
+}
+
+/**
+ * Run one Producer attempt inside its worktree, under a measured boundary.
+ *
+ * Throws when the capability gate refuses — a refusal must not be recoverable by
+ * ignoring a return value. Returns normally for an agent-level failure, which is an
+ * outcome the rework loop routes on rather than an exception.
+ */
+export async function dispatchProducer(
+  deps: DispatchDeps,
+  o: {
+    readonly item: EngineeringWorkItem;
+    readonly workspace: EngineeringWorkspace;
+    readonly taskDefinition: string;
+    readonly ownerRequest?: string;
+    readonly reviewerAvailable: boolean;
+    readonly executorsAvailable: boolean;
+    readonly reworkContext?: string;
+  },
+): Promise<ProducerDispatch> {
+  const refusal = engineeringAuthorityRefusal(deps.qualification);
+  if (refusal !== undefined) {
+    return fail({
+      code: 'E_CAPABILITY_NOT_ENABLED',
+      message: 'Refusing to dispatch a Producer: ' + refusal,
+      remedy:
+        'Write authority requires a substrate Serva has measured. Nothing was created and no model call was made.',
+      details: { workItemId: o.item.workItemId, agentId: o.item.producerAgentId },
+      specRef: '33 PC-5, Phase 4 §9',
+    });
+  }
+
+  const contract = deps.registry.get(o.item.producerAgentId);
+
+  // The eight-condition gate. Throws with the reason; there is no downgrade path.
+  const policy = resolveProducerPolicy({
+    contract,
+    workspace: o.workspace,
+    qualification: deps.qualification,
+    enabledProducers: deps.enabledProducers,
+    projectRoot: deps.projectRoot,
+    reviewerAvailable: o.reviewerAvailable,
+    executorsAvailable: o.executorsAvailable,
+  });
+
+  const profile = writeSandboxProfile(
+    buildSandboxProfile({
+      worktreePath: o.workspace.path,
+      projectRoot: deps.projectRoot,
+      networkAllowed: false,
+    }),
+    deps.projectRoot,
+    o.workspace.workspaceId,
+  );
+
+  try {
+    const check = verifySandboxProfileInForce({
+      profile,
+      capabilities: deps.engineCapabilities,
+    });
+    if (check.refusal !== undefined) {
+      return fail({
+        code: 'E_CAPABILITY_NOT_ENABLED',
+        message: 'SANDBOX_PROFILE_NOT_IN_FORCE: ' + check.refusal,
+        remedy:
+          'Serva does not dispatch a Producer on the strength of a settings file it could not confirm. No model call was made.',
+        details: {
+          workItemId: o.item.workItemId,
+          workspaceId: o.workspace.workspaceId,
+          profileDigest: profile.digest,
+        },
+        specRef: 'Phase 4 §4',
+      });
+    }
+
+    const run = await deps.runtime.run({
+      agentId: contract.id,
+      workItemId: o.item.workItemId,
+      taskDefinition: o.taskDefinition,
+      scopeBoundary:
+        'Edit only files under: ' +
+        o.item.allowedScope.join(', ') +
+        '. Everything else in this worktree is out of scope; report it as an observation rather than changing it.',
+      ...(o.ownerRequest === undefined ? {} : { ownerRequest: o.ownerRequest }),
+      resultSchema: PRODUCER_RESULT_SCHEMA,
+      resultValidator: ProducerResultSchema,
+      canon: [
+        {
+          source: 'work-item',
+          kind: 'REQUIREMENTS',
+          version: '1',
+          content:
+            o.item.requirements.map((r) => '- ' + r).join('\n') +
+            '\n\nAcceptance criteria:\n' +
+            o.item.acceptanceCriteria.map((a) => '- ' + a).join('\n'),
+          relevance: 1,
+        },
+        ...(o.item.decisions.length === 0
+          ? []
+          : [
+              {
+                source: 'decisions',
+                kind: 'DECISION' as const,
+                version: '1',
+                content: o.item.decisions.map((d) => '- ' + d).join('\n'),
+                relevance: 0.8,
+              },
+            ]),
+        ...(o.reworkContext === undefined
+          ? []
+          : [
+              {
+                source: 'rework',
+                kind: 'EVIDENCE' as const,
+                version: '1',
+                content: o.reworkContext,
+                relevance: 1,
+              },
+            ]),
+      ],
+      // ONE runtime. The grant is computed by Serva and proved against the contract
+      // inside the runtime before anything is bound.
+      capability: {
+        policy,
+        cwd: o.workspace.path,
+        basis:
+          'engineering producer on a ' +
+          deps.qualification.enforcementClass +
+          ' substrate, worktree ' +
+          o.workspace.workspaceId,
+        ...(profile.path === undefined ? {} : { settingsPath: profile.path }),
+        sandboxProfileDigest: profile.digest,
+      },
+    });
+
+    const tx = deps.store.begin();
+    audit(tx, {
+      action: AuditAction.PRODUCER_DISPATCHED,
+      subject: run.runId,
+      outcome: run.outcome === RunOutcome.COMPLETED ? 'OK' : 'FAILED',
+      detail: {
+        workItemId: o.item.workItemId,
+        agentId: contract.id,
+        workspaceId: o.workspace.workspaceId,
+        sandboxProfileDigest: profile.digest,
+        substrateClass: deps.qualification.enforcementClass,
+      },
+    });
+    tx.commit();
+
+    return {
+      runId: run.runId,
+      outcome: run.outcome,
+      ...(resultOf<ProducerResult>(run, ProducerResultSchema) === undefined
+        ? {}
+        : { result: resultOf<ProducerResult>(run, ProducerResultSchema)! }),
+      sandboxProfile: profile,
+      diagnostics: run.diagnostics,
+      unprovedBoundary: check.unproved,
+    };
+  } finally {
+    // The profile is per-run and lives under `.serva`; leaving it behind would let a
+    // later run inherit a boundary nobody chose for it.
+    removeSandboxProfile(profile);
+  }
+}
+
+/* ------------------------------------------------------------------ reviewer */
+
+export interface ReviewerDispatch {
+  readonly runId: string;
+  readonly outcome: RunOutcome;
+  readonly review?: PersistedReview;
+  readonly problems: readonly string[];
+}
+
+/**
+ * Dispatch the independent reviewer and persist a verdict only if it validates.
+ *
+ * The reviewer gets: the work item, the acceptance criteria, the exact ChangeSet, the
+ * measured evidence, and the diff. It does NOT get the Producer's reasoning — a
+ * reviewer that can read the argument reviews the argument rather than the artifact,
+ * and the independence the gate depends on is gone.
+ */
+export async function dispatchReviewer(
+  deps: DispatchDeps,
+  o: {
+    readonly item: EngineeringWorkItem;
+    readonly workspace: EngineeringWorkspace;
+    readonly changeSet: ChangeSet;
+    readonly evidence: readonly EngineeringEvidence[];
+    readonly diff: string;
+    readonly producerRunRef?: string;
+    readonly criterionId?: 'EC-REVIEW' | 'EC-QA';
+  },
+): Promise<ReviewerDispatch> {
+  const criterionId = o.criterionId ?? 'EC-REVIEW';
+  const contract = deps.registry.get(o.item.reviewerAgentId);
+
+  if (contract.id === o.item.producerAgentId) {
+    return fail({
+      code: 'E_VALIDATION',
+      message:
+        'The reviewer and the producer are the same agent: an agent never certifies its own work',
+      remedy: 'An agent never certifies its own work (SC-POL-006).',
+      details: { agentId: contract.id },
+      specRef: 'SC-POL-006',
+    });
+  }
+
+  const policy = resolveReviewerPolicy(o.workspace, deps.projectRoot);
+
+  const run = await deps.runtime.run({
+    agentId: contract.id,
+    workItemId: o.item.workItemId,
+    taskDefinition:
+      'Review ChangeSet ' +
+      o.changeSet.changeSetId +
+      ' against the requirements and acceptance criteria below. Decide whether the change does what was asked, stays in scope, and is correct. ' +
+      'Answer for criterion ' +
+      criterionId +
+      ', and echo the ChangeSet id you reviewed. ' +
+      'You have read-only access to the worktree; you cannot and must not change anything.',
+    scopeBoundary:
+      'Review only ChangeSet ' +
+      o.changeSet.changeSetId +
+      '. Do not review the repository at large, and do not propose work outside the declared scope.',
+    resultSchema: REVIEWER_RESULT_SCHEMA,
+    resultValidator: ReviewerVerdictSchema,
+    canon: [
+      {
+        source: 'work-item',
+        kind: 'REQUIREMENTS',
+        version: '1',
+        content:
+          o.item.requirements.map((r) => '- ' + r).join('\n') +
+          '\n\nAcceptance criteria:\n' +
+          o.item.acceptanceCriteria.map((a) => '- ' + a).join('\n') +
+          '\n\nDeclared scope: ' +
+          o.item.allowedScope.join(', '),
+        relevance: 1,
+      },
+      {
+        source: 'changeset',
+        kind: 'CHANGESET',
+        version: o.changeSet.digest,
+        content:
+          'ChangeSet ' +
+          o.changeSet.changeSetId +
+          ' (base ' +
+          o.changeSet.baseCommit +
+          ')\n' +
+          o.changeSet.entries.map((e) => '  ' + e.status + ' ' + e.path).join('\n'),
+        relevance: 1,
+      },
+      {
+        // Measurements, not claims. The reviewer judges what a runtime component
+        // observed, and is told plainly which is which.
+        source: 'evidence',
+        kind: 'EVIDENCE',
+        version: '1',
+        content:
+          o.evidence.length === 0
+            ? 'No deterministic evidence was captured for this ChangeSet.'
+            : o.evidence
+                .map(
+                  (e) =>
+                    '[' +
+                    e.outcome +
+                    '] ' +
+                    (e.runtimeComponentId ?? 'JUDGED') +
+                    ' (' +
+                    e.basis +
+                    '): ' +
+                    e.detail,
+                )
+                .join('\n'),
+        relevance: 1,
+      },
+    ],
+    workspace: [
+      {
+        source: 'diff',
+        version: o.changeSet.diffDigest,
+        content: o.diff,
+        relevance: 1,
+      },
+    ],
+    capability: {
+      policy,
+      cwd: o.workspace.path,
+      basis: 'independent reviewer, read-only, separate run and separate session',
+    },
+  });
+
+  if (run.outcome !== RunOutcome.COMPLETED || run.envelope === undefined) {
+    return {
+      runId: run.runId,
+      outcome: run.outcome,
+      problems: [
+        'The reviewer run ended ' + run.outcome + '. NO EVIDENCE = NOT VERIFIED.',
+        ...run.diagnostics,
+      ],
+    };
+  }
+
+  const tx = deps.store.begin();
+  let review: PersistedReview;
+  try {
+    review = recordReview(tx, {
+      store: deps.store,
+      id: deps.ids.next('SC-REV'),
+      runRef: run.runId,
+      expectedReviewerAgentId: contract.id,
+      producerAgentId: o.item.producerAgentId,
+      ...(o.producerRunRef === undefined ? {} : { producerRunRef: o.producerRunRef }),
+      changeSetId: o.changeSet.changeSetId,
+      workItemId: o.item.workItemId,
+      verdict: (run.envelope as { result?: unknown }).result,
+      recordedAt: deps.clock.now(),
+    });
+    audit(tx, {
+      action: AuditAction.REVIEW_RECORDED,
+      subject: review.id,
+      outcome: 'OK',
+      detail: {
+        changeSetId: review.changeSetId,
+        reviewerAgentId: review.reviewerAgentId,
+        runRef: review.runRef,
+        outcome: review.outcome,
+      },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+
+  return { runId: run.runId, outcome: run.outcome, review, problems: [] };
+}
+
+/** The validated role payload from a completed run, or undefined. */
+function resultOf<T>(
+  run: AgentRunResult,
+  schema: { safeParse(v: unknown): { success: true; data: T } | { success: false } },
+): T | undefined {
+  if (run.envelope === undefined) return undefined;
+  const parsed = schema.safeParse((run.envelope as { result?: unknown }).result);
+  return parsed.success ? parsed.data : undefined;
+}

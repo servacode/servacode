@@ -433,7 +433,8 @@ describe('provider-specific code stays behind the adapter boundary', () => {
        * Phase 4 exceptions, each for a different reason, and each named rather than
        * waved through by a directory-wide allowance:
        *
-       *   host.ts / sandboxProfile.ts  the execution substrate IS the engine's sandbox
+       *   host.ts / sandboxed.ts /     the execution substrate IS the engine's sandbox
+       *   sandboxProfile.ts
        *                                (ADR-003). Probing for the engine binary inside
        *                                WSL and writing the engine's sandbox settings are
        *                                irreducibly provider-specific facts; pretending
@@ -447,6 +448,7 @@ describe('provider-specific code stays behind the adapter boundary', () => {
        * The test below proves none of them reaches into the adapter.
        */
       if (norm.endsWith('src/substrate/host.ts')) continue;
+      if (norm.endsWith('src/substrate/sandboxed.ts')) continue;
       if (norm.endsWith('src/engineering/sandboxProfile.ts')) continue;
       if (norm.endsWith('src/engineering/secrets.ts')) continue;
       if (norm.endsWith('src/engineering/recipe.ts')) continue;
@@ -470,6 +472,7 @@ describe('provider-specific code stays behind the adapter boundary', () => {
     // engineering layer would be the coupling this rule actually exists to prevent.
     for (const file of [
       'src/substrate/host.ts',
+      'src/substrate/sandboxed.ts',
       'src/engineering/sandboxProfile.ts',
       'src/engineering/secrets.ts',
       'src/engineering/recipe.ts',

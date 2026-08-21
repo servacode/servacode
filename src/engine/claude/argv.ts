@@ -89,6 +89,18 @@ export function buildArgv(request: InvocationRequest, opts: ArgvOptions): string
 
   if (opts.supportsAmbientConfigIsolation) argv.push(...ISOLATION_ARGS);
 
+  /*
+   * The sandbox profile for this run.
+   *
+   * Emitted AFTER the isolation args on purpose. `--setting-sources ''` disables every
+   * ambient source; this names one file explicitly, so the only settings in force are
+   * the ones Serva generated for this run. The two together are "nothing ambient, and
+   * exactly this" — either alone would be wrong in a different direction.
+   */
+  if (request.settingsPath !== undefined) {
+    argv.push('--settings', request.settingsPath);
+  }
+
   // 19 §15 / ADR-002 F-5: fail closed, and never wait for a prompt that cannot come.
   argv.push('--permission-mode', 'dontAsk');
 

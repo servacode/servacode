@@ -1,0 +1,401 @@
+import { z } from 'zod';
+import { canonicalJson, digestOf } from '../core/hash.js';
+import { fail } from '../core/errors.js';
+import { RunOutcome } from '../vocab/index.js';
+import { projectAgentRun, readTerminalSnapshot, runStream } from '../events/agentRun.js';
+import type { Store, Transaction } from '../store/store.js';
+import type { JudgedInput } from './gate.js';
+
+/**
+ * The independent reviewer's verdict, and why a caller cannot simply assert one.
+ *
+ * SPEC: Phase 4 §19–§20, SC-POL-006, closure blocker 2.
+ *
+ * The defect this module closes: `verifyAttempt` accepted a `JudgedInput` from its
+ * caller and fed it straight to the gate. So this made a required, BLOCKING review
+ * criterion pass:
+ *
+ *     judged: [{ criterionId: 'EC-REVIEW', outcome: 'PASS', runRef: 'anything' }]
+ *
+ * No run had to exist. No reviewer had to be dispatched. The string in `runRef` was
+ * never resolved against anything. A gate whose most important criterion can be
+ * satisfied by a literal is not a gate — and worse, the resulting record would claim
+ * an independent review that never happened, which is a lie with a signature on it.
+ *
+ * The production path now accepts only a PERSISTED review, and a review is persisted
+ * only after ten conditions are checked against the run's own event log. Everything
+ * here is derived from T-TRACE, which no agent can write to and no caller can forge.
+ */
+
+export const REVIEW_CANON_TYPE = 'engineeringReview';
+
+/** The structured payload a reviewer AgentRun must return. Validated locally. */
+export const ReviewerVerdictSchema = z
+  .object({
+    /** Which gate criterion this verdict answers. */
+    criterionId: z.enum(['EC-REVIEW', 'EC-QA']),
+    outcome: z.enum(['PASS', 'FAIL', 'NOT_VERIFIED']),
+    /**
+     * The ChangeSet the reviewer believes it reviewed.
+     *
+     * Echoed back so Serva can compare it to the one actually bound to the run. A
+     * reviewer that reports on a different change than the one it was given is a
+     * finding, not a verdict.
+     */
+    changeSetId: z.string().min(1),
+    summary: z.string().min(1),
+    findings: z
+      .array(
+        z
+          .object({
+            severity: z.enum(['BLOCKING', 'MAJOR', 'MINOR', 'INFO']),
+            path: z.string().optional(),
+            detail: z.string().min(1),
+          })
+          .strict(),
+      )
+      .default([]),
+    confidence: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+  })
+  .strict()
+  .refine((v) => v.outcome !== 'FAIL' || v.findings.length > 0, {
+    // A rejection with nothing to point at cannot be acted on, and a Producer told
+    // only "no" will guess. 19 CX-2: rework is driven by findings, not by a mood.
+    message: 'A FAIL verdict must name at least one finding.',
+  });
+
+export type ReviewerVerdict = z.output<typeof ReviewerVerdictSchema>;
+
+/** What Serva stores once a reviewer run has been validated. T-CANON. */
+export const PersistedReviewSchema = z
+  .object({
+    id: z.string().min(1),
+    workItemId: z.string().min(1),
+    changeSetId: z.string().min(1),
+    criterionId: z.enum(['EC-REVIEW', 'EC-QA']),
+    reviewerAgentId: z.string().regex(/^SC-AGENT-\d{3}$/),
+    producerAgentId: z.string().regex(/^SC-AGENT-\d{3}$/),
+    /** The reviewer's AgentRun. Resolvable, and resolved before this record exists. */
+    runRef: z.string().min(1),
+    /** The engine session. Proved distinct from the Producer's. */
+    sessionRef: z.string().optional(),
+    producerRunRef: z.string().optional(),
+    outcome: z.enum(['PASS', 'FAIL', 'NOT_VERIFIED']),
+    detail: z.string(),
+    verdict: z.unknown(),
+    /** Digest of the capability grant the reviewer actually ran under. */
+    capabilityDigest: z.string().length(64),
+    recordedAt: z.string(),
+  })
+  .strict();
+
+export type PersistedReview = z.output<typeof PersistedReviewSchema>;
+
+export interface ReviewValidationInput {
+  readonly store: Store;
+  readonly runRef: string;
+  readonly expectedReviewerAgentId: string;
+  readonly producerAgentId: string;
+  readonly producerRunRef?: string;
+  readonly changeSetId: string;
+  readonly workItemId: string;
+  readonly verdict: unknown;
+}
+
+export interface ReviewValidation {
+  readonly ok: boolean;
+  /** Every condition that failed, so a reader sees the whole picture at once. */
+  readonly problems: readonly string[];
+  readonly verdict?: ReviewerVerdict;
+  readonly sessionRef?: string;
+  readonly capabilityDigest?: string;
+}
+
+/** The capability grant recorded for a run, read from its own event log. */
+export function capabilityBoundOf(
+  store: Store,
+  runId: string,
+): Record<string, unknown> | undefined {
+  const events = store.readTrace(runStream(runId));
+  const bound = [...events].reverse().find((e) => e.type === 'CAPABILITY_BOUND');
+  return bound === undefined ? undefined : (bound.payload as Record<string, unknown>);
+}
+
+/** Tools that must not be available to anything called a reviewer. */
+export const REVIEWER_FORBIDDEN_TOOLS: readonly string[] = Object.freeze([
+  'Edit',
+  'Write',
+  'NotebookEdit',
+  'Bash',
+  'PowerShell',
+]);
+
+/**
+ * Is this a real, independent review of THIS change?
+ *
+ * Ten conditions, every one derived from the run's own event log. They are collected
+ * rather than short-circuited: an operator fixing a broken dispatch wants the whole
+ * list, not the first thing that went wrong.
+ */
+export function validateReviewerResult(input: ReviewValidationInput): ReviewValidation {
+  const problems: string[] = [];
+
+  // 1. The run exists at all. `projectAgentRun` throws for an unknown id, which is the
+  //    single check that stops a fabricated `runRef` string in its tracks.
+  let projection;
+  try {
+    projection = projectAgentRun(input.store, input.runRef);
+  } catch {
+    return {
+      ok: false,
+      problems: [
+        'No AgentRun ' +
+          input.runRef +
+          ' exists. A reviewer verdict is a fact about a run that happened, not a value a caller supplies.',
+      ],
+    };
+  }
+
+  // 2. It terminated, and there is an immutable record of how.
+  if (!projection.terminal) {
+    problems.push('Run ' + input.runRef + ' has no terminal event; it may still be in flight.');
+  }
+  const record = readTerminalSnapshot(input.store, input.runRef) as
+    Record<string, unknown> | undefined;
+  if (record === undefined) {
+    problems.push(
+      'Run ' + input.runRef + ' has no AgentRunRecord, so nothing about it is settled.',
+    );
+  }
+
+  // 3. It completed. A BLOCKED or FAILED reviewer run produced no opinion worth having.
+  if (projection.outcome !== RunOutcome.COMPLETED) {
+    problems.push(
+      'Run ' + input.runRef + ' ended ' + String(projection.outcome) + ', not COMPLETED.',
+    );
+  }
+
+  // 4. The reviewer is the expected canonical verifier.
+  if (projection.agentId !== input.expectedReviewerAgentId) {
+    problems.push(
+      'Run ' +
+        input.runRef +
+        ' was executed by ' +
+        String(projection.agentId) +
+        ', not by the expected reviewer ' +
+        input.expectedReviewerAgentId +
+        '.',
+    );
+  }
+
+  // 5. The reviewer is not the Producer. SC-POL-006, checked on the RUN rather than on
+  //    the work item, because the work item is a plan and this is what happened.
+  if (projection.agentId === input.producerAgentId) {
+    problems.push(
+      'The reviewing agent is the producing agent. An agent never certifies its own work (SC-POL-006).',
+    );
+  }
+
+  // 6. The run is bound to this work item.
+  if (projection.workItemId !== undefined && projection.workItemId !== input.workItemId) {
+    problems.push(
+      'Run ' +
+        input.runRef +
+        ' belongs to work item ' +
+        String(projection.workItemId) +
+        ', not ' +
+        input.workItemId +
+        '.',
+    );
+  }
+
+  // 7. The run had a read-only capability grant. Read from CAPABILITY_BOUND, which the
+  //    runtime writes before invoking the engine, so it records what was actually
+  //    granted rather than what somebody intended.
+  const capability = capabilityBoundOf(input.store, input.runRef);
+  if (capability === undefined) {
+    problems.push('Run ' + input.runRef + ' has no CAPABILITY_BOUND event.');
+  } else {
+    const available = Array.isArray(capability['available'])
+      ? (capability['available'] as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+    const forbidden = available.filter((t) => REVIEWER_FORBIDDEN_TOOLS.includes(t));
+    if (forbidden.length > 0) {
+      problems.push(
+        'The reviewer run had write or execute tools available (' +
+          forbidden.join(', ') +
+          '), so it was not read-only.',
+      );
+    }
+    const write = capability['filesystem'] as { write?: unknown } | undefined;
+    if (Array.isArray(write?.write) && write.write.length > 0) {
+      problems.push('The reviewer run had a writable filesystem scope.');
+    }
+  }
+
+  // 8. A distinct engine session. Two runs sharing one session share context, and a
+  //    reviewer that can see the Producer's reasoning is reviewing the argument rather
+  //    than the artifact (19 SM-3).
+  const sessionRef =
+    typeof record?.['engineSessionRef'] === 'string'
+      ? (record['engineSessionRef'] as string)
+      : undefined;
+  if (input.producerRunRef !== undefined) {
+    const producerRecord = readTerminalSnapshot(input.store, input.producerRunRef) as
+      Record<string, unknown> | undefined;
+    const producerSession = producerRecord?.['engineSessionRef'];
+    if (
+      sessionRef !== undefined &&
+      typeof producerSession === 'string' &&
+      sessionRef === producerSession
+    ) {
+      problems.push("The reviewer shared the Producer's engine session.");
+    }
+  }
+
+  // 9. The payload is a valid reviewer verdict by Serva's own schema.
+  const parsed = ReviewerVerdictSchema.safeParse(input.verdict);
+  if (!parsed.success) {
+    problems.push(
+      'The reviewer result is not a valid verdict: ' +
+        parsed.error.issues
+          .slice(0, 5)
+          .map((i) => i.path.join('.') + ': ' + i.message)
+          .join('; '),
+    );
+    return { ok: false, problems };
+  }
+
+  // 10. It is about THIS ChangeSet. A verdict on a different change is stale, however
+  //     recently it was produced and however positive it was.
+  if (parsed.data.changeSetId !== input.changeSetId) {
+    problems.push(
+      'The verdict reports on ChangeSet ' +
+        parsed.data.changeSetId +
+        ', not ' +
+        input.changeSetId +
+        '.',
+    );
+  }
+
+  return {
+    ok: problems.length === 0,
+    problems,
+    verdict: parsed.data,
+    ...(sessionRef === undefined ? {} : { sessionRef }),
+    ...(capability === undefined ? {} : { capabilityDigest: digestOf(canonicalJson(capability)) }),
+  };
+}
+
+export interface RecordReviewInput extends ReviewValidationInput {
+  readonly id: string;
+  readonly recordedAt: string;
+}
+
+/**
+ * Validate and persist. Refuses rather than recording a review it could not verify.
+ *
+ * Throwing rather than returning a flag is deliberate: a caller that wanted a review
+ * and got "no review" must not be able to continue by ignoring a return value.
+ */
+export function recordReview(tx: Transaction, input: RecordReviewInput): PersistedReview {
+  const validation = validateReviewerResult(input);
+  if (!validation.ok || validation.verdict === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message:
+        'Refusing to record a reviewer result for ' +
+        input.changeSetId +
+        ': ' +
+        validation.problems.join(' '),
+      remedy:
+        'A required review is satisfied by a real, independent, terminated AgentRun bound to this ChangeSet. NO EVIDENCE = NOT VERIFIED.',
+      details: { runRef: input.runRef, problems: validation.problems },
+      specRef: 'Phase 4 §19, SC-POL-006',
+    });
+  }
+
+  const review = PersistedReviewSchema.parse({
+    id: input.id,
+    workItemId: input.workItemId,
+    changeSetId: input.changeSetId,
+    criterionId: validation.verdict.criterionId,
+    reviewerAgentId: input.expectedReviewerAgentId,
+    producerAgentId: input.producerAgentId,
+    runRef: input.runRef,
+    ...(validation.sessionRef === undefined ? {} : { sessionRef: validation.sessionRef }),
+    ...(input.producerRunRef === undefined ? {} : { producerRunRef: input.producerRunRef }),
+    outcome: validation.verdict.outcome,
+    detail:
+      validation.verdict.summary +
+      (validation.verdict.findings.length === 0
+        ? ''
+        : ' | ' +
+          validation.verdict.findings
+            .map((f) => '[' + f.severity + '] ' + (f.path ?? '') + ' ' + f.detail)
+            .join('; ')),
+    verdict: validation.verdict,
+    capabilityDigest: validation.capabilityDigest ?? digestOf('none'),
+    recordedAt: input.recordedAt,
+  });
+
+  tx.putCanon(REVIEW_CANON_TYPE, review.id, review);
+  return review;
+}
+
+export function listReviews(store: Store): PersistedReview[] {
+  return store
+    .listCanonIds(REVIEW_CANON_TYPE)
+    .map((id) => {
+      const env = store.getCanon<unknown>(REVIEW_CANON_TYPE, id);
+      if (env === undefined) return undefined;
+      const parsed = PersistedReviewSchema.safeParse(env.body);
+      return parsed.success ? parsed.data : undefined;
+    })
+    .filter((r): r is PersistedReview => r !== undefined);
+}
+
+/**
+ * The judged inputs the gate may consume for one ChangeSet.
+ *
+ * Only persisted reviews, and only those bound to this exact ChangeSet. A review of an
+ * earlier ChangeSet is not carried forward: the reviewer looked at different code.
+ */
+export function judgedForChangeSet(store: Store, changeSetId: string): JudgedInput[] {
+  return listReviews(store)
+    .filter((r) => r.changeSetId === changeSetId)
+    .map((r) => ({
+      criterionId: r.criterionId,
+      outcome: r.outcome,
+      detail: r.detail,
+      runRef: r.runRef,
+      reviewerRole: r.criterionId === 'EC-QA' ? 'QA_VERIFICATION' : 'CODE_REVIEW',
+    }));
+}
+
+/** JSON Schema for the reviewer's structured output, sent to the engine. */
+export const REVIEWER_RESULT_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['criterionId', 'outcome', 'changeSetId', 'summary', 'findings', 'confidence'],
+  properties: {
+    criterionId: { type: 'string', enum: ['EC-REVIEW', 'EC-QA'] },
+    outcome: { type: 'string', enum: ['PASS', 'FAIL', 'NOT_VERIFIED'] },
+    changeSetId: { type: 'string' },
+    summary: { type: 'string' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['severity', 'detail'],
+        properties: {
+          severity: { type: 'string', enum: ['BLOCKING', 'MAJOR', 'MINOR', 'INFO'] },
+          path: { type: 'string' },
+          detail: { type: 'string' },
+        },
+      },
+    },
+    confidence: { type: 'string', enum: ['LOW', 'MEDIUM', 'HIGH'] },
+  },
+};

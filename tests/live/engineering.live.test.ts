@@ -2,14 +2,16 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { EnforcementClass, EvidenceClass, GateVerdict } from '../../src/vocab/index.js';
-import { HostExecutionSubstrate } from '../../src/substrate/host.js';
+import { EnforcementClass, EvidenceClass, GateVerdict, RunOutcome } from '../../src/vocab/index.js';
+import { selectExecutionSubstrate } from '../../src/substrate/host.js';
 import {
   engineeringAuthorityRefusal,
   type SubstrateQualification,
 } from '../../src/substrate/types.js';
 import { makeFixtureDir, removeFixtureDir } from '../../src/substrate/fake.js';
 import { ContractRegistry } from '../../src/agents/registry.js';
+import { AgentRuntime } from '../../src/agents/runtime.js';
+import { ClaudeCliEngineAdapter } from '../../src/engine/claude/adapter.js';
 import { GitService } from '../../src/engineering/git.js';
 import { EngineeringWorkspaceManager } from '../../src/engineering/workspace.js';
 import {
@@ -19,6 +21,8 @@ import {
 } from '../../src/engineering/recipe.js';
 import { listExecutions, runRecipe } from '../../src/engineering/execution.js';
 import { EngineeringFactory } from '../../src/engineering/factory.js';
+import { DEFAULT_REQUIRED_CHECKS } from '../../src/engineering/executors.js';
+import { dispatchProducer, dispatchReviewer } from '../../src/engineering/dispatch.js';
 import { engineeringStatus, buildEngineeringLayer } from '../../src/app/engineering.js';
 import { cleanup, freshRuntime, freshStore } from '../helpers.js';
 import { systemClock } from '../../src/core/clock.js';
@@ -29,21 +33,25 @@ import { systemClock } from '../../src/core/clock.js';
  * `npm run test:engineering-live`. Excluded from `npm run verify` and from
  * `npm run test:claude`.
  *
- * This suite answers one question honestly: **can this machine carry engineering
- * authority, and what did it actually prove?** It probes the real host, derives the
- * enforcement class from qualification tests, and then takes exactly one of two paths:
+ * One question, answered honestly: **can this machine carry engineering authority, and
+ * what did it actually prove?** The real host is probed, the enforcement class is
+ * derived from qualification tests that genuinely run, and then exactly one of two
+ * paths is taken:
  *
- *   HARD      run the full acceptance — real worktree, real edit, real build and test
- *             commands, real evidence, real gate, real local commit — inside a
- *             DISPOSABLE fixture repository, never the Serva source tree.
+ *   HARD      the full acceptance — real worktree, a REAL Producer AgentRun, real
+ *             measured evidence, a REAL independent Reviewer AgentRun, real gate, real
+ *             local commit — inside a DISPOSABLE fixture repository, never the Serva
+ *             source tree.
  *
- *   not HARD  report BLOCKED with the exact prerequisites, and PROVE that nothing
- *             executed anyway.
+ *   not HARD  report BLOCKED with the exact prerequisites, and PROVE nothing executed.
+ *             **No model call is made on this path**, because a Producer that cannot be
+ *             contained is not dispatched, and spending the owner's usage to discover
+ *             that twice would be waste.
  *
- * It never downgrades itself to SOFT to make the demo pass. A green run that had
- * quietly executed a Producer's commands outside a boundary would be the single worst
- * outcome this whole phase exists to prevent, so the not-HARD path asserts the refusal
- * rather than skipping.
+ * It never downgrades itself to SOFT to make the demo pass, and it never substitutes a
+ * `writeFileSync` for a Producer or a string literal for a Reviewer. That substitution
+ * is what the previous version did, and it meant the one thing this phase exists for
+ * had never actually happened.
  */
 
 const roots: string[] = [];
@@ -65,10 +73,6 @@ function engineVersion(): string {
   } catch {
     return 'UNKNOWN';
   }
-}
-
-function realSubstrate(): HostExecutionSubstrate {
-  return new HostExecutionSubstrate({ clock: systemClock, engineVersion: engineVersion() });
 }
 
 function report(title: string, lines: readonly string[]): void {
@@ -148,15 +152,28 @@ const LIVE_RECIPES: readonly ExecutionRecipe[] = [
   liveRecipe('SC-RECIPE-BUILD', ['build.js'], 'SC-RTC-011'),
 ];
 
+const PRODUCER = 'SC-AGENT-150';
+const REVIEWER = 'SC-AGENT-200';
+
 let qualification: SubstrateQualification | undefined;
+let selectionBasis = '';
 
 describe('PHASE 4 — live substrate qualification', () => {
   it('derives the enforcement class from what this machine actually proved', async () => {
-    const substrate = realSubstrate();
+    const { rt, root } = freshRuntime();
+    roots.push(root);
+    const selection = await selectExecutionSubstrate({
+      clock: systemClock,
+      engineVersion: engineVersion(),
+      projectRoot: rt.root,
+    });
+    rt.close();
+    selectionBasis = selection.basis;
+
     const fixture = makeFixtureDir('serva-live-qual-');
     fixtures.push(fixture);
-    qualification = await substrate.qualify(fixture);
-    const q = qualification;
+    const q = await selection.substrate.qualify(fixture);
+    qualification = q;
 
     const refusal = engineeringAuthorityRefusal(q);
     const missing = q.probe.prerequisites.filter((p) => !p.satisfied);
@@ -164,8 +181,11 @@ describe('PHASE 4 — live substrate qualification', () => {
     report('SERVA CODE — PHASE 4 LIVE SUBSTRATE REPORT', [
       '  host:          ' + q.probe.hostPlatform + '/' + q.probe.hostArch,
       '  guest:         ' + (q.probe.guestPlatform ?? '(none)'),
+      '  substrate:     ' + q.probe.substrateId,
+      '  chosen because ' + selection.basis,
       '  isolation:     ' + q.probe.isolationMethod,
       '  engine:        ' + q.engineVersion,
+      '  fingerprint:   ' + q.fingerprint.slice(0, 16) + '…',
       '  class:         ' + q.enforcementClass,
       '  authority:     ' + (refusal === undefined ? 'GRANTED' : 'REFUSED'),
       ...(refusal === undefined ? [] : ['  refusal:       ' + refusal]),
@@ -188,24 +208,33 @@ describe('PHASE 4 — live substrate qualification', () => {
           ]),
     ]);
 
-    // The class is derived, never asserted: a substrate cannot reach HARD without
-    // every blocking case PASSED, and NOT_RUN counts against it exactly as FAILED does.
+    // Derived, never asserted: HARD requires every blocking case PASSED, and a NOT_RUN
+    // counts against the substrate exactly as a failure does.
     if (q.enforcementClass === EnforcementClass.HARD) {
       expect(q.tests.filter((t) => t.blocking).every((t) => t.outcome === 'PASSED')).toBe(true);
+      expect(q.probe.simulated).not.toBe(true);
     } else {
       expect(q.tests.some((t) => t.blocking && t.outcome !== 'PASSED')).toBe(true);
       expect(q.blockedBy).toBeDefined();
+    }
+
+    // Every unsatisfied prerequisite must name something a person can actually do.
+    for (const p of missing) {
+      expect(p.remedy.length, p.id).toBeGreaterThan(0);
+      expect(p.why.length, p.id).toBeGreaterThan(0);
     }
   });
 
   it('the owner-facing status agrees with the qualification', async () => {
     const { rt, root } = freshRuntime();
     roots.push(root);
-    const layer = buildEngineeringLayer(rt, { substrate: realSubstrate() });
+    const layer = await buildEngineeringLayer(rt, { engineVersion: engineVersion() });
     const { view } = await engineeringStatus(layer);
     rt.close();
 
     expect(view.executionSubstrate).toBe(qualification?.enforcementClass);
+    expect(view.substrateBasis).toBe(selectionBasis);
+    expect(view.simulated).toBe(false);
     if (view.governance === 'ACTIVE') {
       expect(view.blockedBy).toBeUndefined();
     } else {
@@ -217,7 +246,7 @@ describe('PHASE 4 — live substrate qualification', () => {
 });
 
 describe('PHASE 4 — live acceptance', () => {
-  it('either completes a verified change or refuses to execute at all', async () => {
+  it('either completes a governed change or refuses to execute at all', async () => {
     const q = qualification;
     expect(q).toBeDefined();
     if (q === undefined) return;
@@ -226,7 +255,12 @@ describe('PHASE 4 — live acceptance', () => {
     const { store, root, deps } = freshStore();
     roots.push(root);
 
-    const substrate = realSubstrate();
+    const selection = await selectExecutionSubstrate({
+      clock: systemClock,
+      engineVersion: q.engineVersion,
+      projectRoot: repo,
+    });
+    const substrate = selection.substrate;
     const git = new GitService({ repoRoot: repo });
     const workspaces = new EngineeringWorkspaceManager({
       store,
@@ -235,6 +269,7 @@ describe('PHASE 4 — live acceptance', () => {
       projectRoot: repo,
     });
     const recipes = new RecipeRegistry(LIVE_RECIPES);
+    const registry = ContractRegistry.shared();
     const executorDeps = {
       store,
       clock: deps.clock,
@@ -248,12 +283,12 @@ describe('PHASE 4 — live acceptance', () => {
       git,
       workspaces,
       recipes,
-      registry: ContractRegistry.shared(),
+      registry,
       qualification: q,
       executorDeps,
       gateDeps: { ids: deps.ids, clock: deps.clock, evaluator: 'ENGINEERING_GATE_LIVE' },
       projectRoot: repo,
-      enabledProducers: new Set(['SC-AGENT-150']),
+      enabledProducers: new Set([PRODUCER]),
     });
 
     const item = factory.recordWorkItem({
@@ -264,8 +299,8 @@ describe('PHASE 4 — live acceptance', () => {
       decisions: [],
       allowedScope: ['src/'],
       forbiddenScope: [],
-      producerAgentId: 'SC-AGENT-150',
-      reviewerAgentId: 'SC-AGENT-200',
+      producerAgentId: PRODUCER,
+      reviewerAgentId: REVIEWER,
       recipes: ['SC-RECIPE-UNIT-TEST'],
       magnitude: 'M1',
       baseCommit: base,
@@ -282,7 +317,8 @@ describe('PHASE 4 — live acceptance', () => {
         '  class:    ' + q.enforcementClass + ' (measured, not assumed)',
         '  refusal:  ' + (refusal ?? '(none)'),
         '',
-        '  No worktree was created. No Producer was dispatched. No command was run.',
+        '  No worktree was created. No Producer was dispatched. No Reviewer was',
+        '  dispatched. No command was run. No model call was made.',
         '  Serva did not downgrade itself to SOFT execution to make this pass.',
       ]);
 
@@ -290,8 +326,8 @@ describe('PHASE 4 — live acceptance', () => {
       await expect(factory.openWorkspace(item, 1, 'x'.repeat(64))).rejects.toThrowError(
         /requires HARD/,
       );
-      // And the execution path refuses independently of the factory, so a guard higher
-      // up being forgotten would not open a hole here.
+      // The execution path refuses independently of the factory, so a guard higher up
+      // being forgotten would not open a hole here.
       await expect(
         runRecipe(executorDeps, {
           recipe: recipes.get('SC-RECIPE-UNIT-TEST'),
@@ -313,65 +349,100 @@ describe('PHASE 4 — live acceptance', () => {
 
     /* ---------------------------------------------------- the HARD path */
 
+    const engine = new ClaudeCliEngineAdapter({ clock: deps.clock, env: process.env });
+    const capabilities = await engine.capabilities();
+    const runtime = new AgentRuntime({
+      store,
+      ids: deps.ids,
+      clock: deps.clock,
+      registry,
+      engine,
+      enabledAgents: new Set([PRODUCER, REVIEWER]),
+      projectRoot: repo,
+    });
+    const dispatchDeps = {
+      store,
+      clock: deps.clock,
+      ids: deps.ids,
+      runtime,
+      registry,
+      substrate,
+      qualification: q,
+      projectRoot: repo,
+      enabledProducers: new Set([PRODUCER]),
+      engineCapabilities: capabilities,
+    };
+
     const workspace = await factory.openWorkspace(item, 1, 'x'.repeat(64));
     expect(workspace.path).not.toBe(repo);
 
-    // Stands in for the Producer's edit. What matters for acceptance is not who typed
-    // it but that the change is measured, and a real model call would spend the
-    // owner's usage for a result the evidence path does not depend on.
-    writeFileSync(
-      join(workspace.path, 'src', 'total.js'),
-      [
-        'module.exports = function total(xs) {',
-        '  let sum = 0;',
-        '  for (let i = 0; i < xs.length; i++) sum += xs[i];',
-        '  return sum;',
-        '};',
-        '',
-      ].join('\n'),
-      'utf8',
-    );
+    // A REAL Producer AgentRun. No writeFileSync stand-in.
+    const producer = await dispatchProducer(dispatchDeps, {
+      item,
+      workspace,
+      taskDefinition:
+        'The function total() in src/total.js should sum every element of its argument and currently omits the last one. Fix it. Change nothing else.',
+      reviewerAvailable: true,
+      executorsAvailable: true,
+    });
+    expect(producer.runId).toMatch(/^SC-RUN-/);
 
-    const verification = await factory.verifyAttempt(item, workspace, {
-      required: {
-        scope: true,
-        build: true,
-        tests: true,
-        lint: false,
-        secrets: true,
-        codeReview: true,
-        qaVerification: false,
-      },
-      judged: [
-        {
-          criterionId: 'EC-REVIEW',
-          outcome: 'PASS',
-          detail: 'The loop bound was the defect; the change is minimal and in scope.',
-          runRef: 'SC-RUN-LIVE-REVIEWER',
-          reviewerRole: 'CODE_REVIEW',
-        },
-      ],
+    const measured = await factory.verifyAttempt(item, workspace, {
+      required: { ...DEFAULT_REQUIRED_CHECKS, lint: false, codeReview: false },
+      producerRunId: producer.runId,
+    });
+
+    // A REAL independent Reviewer AgentRun. No fabricated SC-RUN-LIVE-REVIEWER.
+    const review = await dispatchReviewer(dispatchDeps, {
+      item,
+      workspace,
+      changeSet: measured.changeSet,
+      evidence: measured.evidence,
+      diff: await git.diff(base, workspace.path),
+      producerRunRef: producer.runId,
+    });
+
+    const final = await factory.verifyAttempt(item, workspace, {
+      required: { ...DEFAULT_REQUIRED_CHECKS, lint: false },
+      producerRunId: producer.runId,
     });
 
     report('SERVA CODE — PHASE 4 LIVE ACCEPTANCE: EXECUTED', [
-      '  class:      ' + q.enforcementClass,
-      '  worktree:   ' + workspace.path,
-      '  change set: ' + verification.changeSet.changeSetId,
-      '  verdict:    ' + verification.gateResult.verdict,
+      '  class:        ' + q.enforcementClass,
+      '  worktree:     ' + workspace.path,
+      '  producer run: ' + producer.runId + ' (' + producer.outcome + ')',
+      '  reviewer run: ' + review.runId + ' (' + review.outcome + ')',
+      '  change set:   ' + final.changeSet.changeSetId,
+      '  verdict:      ' + final.gateResult.verdict,
+      ...(producer.unprovedBoundary.length === 0
+        ? []
+        : [
+            '',
+            '  Not established before dispatch:',
+            ...producer.unprovedBoundary.map((u) => '    - ' + u),
+          ]),
       '',
       '  evidence:',
-      ...verification.evidence.map(
+      ...final.evidence.map(
         (e) => '    [' + e.outcome + '] ' + (e.runtimeComponentId ?? 'JUDGED') + '  ' + e.detail,
       ),
     ]);
 
-    expect(verification.evidence.some((e) => e.basis === 'MEASURED')).toBe(true);
-    expect([GateVerdict.PASS, GateVerdict.PASS_WITH_QUALIFICATION]).toContain(
-      verification.gateResult.verdict,
-    );
-    expect(verification.attemptOutcome).toBe('ACCEPTED');
+    // Two distinct runs, and the reviewer is not the producer.
+    expect(review.runId).not.toBe(producer.runId);
+    expect(final.usedUnvalidatedJudgement).toBe(false);
+    expect(final.evidence.some((e) => e.basis === 'MEASURED')).toBe(true);
 
-    const { commit } = await factory.acceptChange(item, workspace, verification);
+    if (producer.outcome !== RunOutcome.COMPLETED || review.review?.outcome !== 'PASS') {
+      // An honest non-acceptance. The machinery worked; the change was not accepted.
+      expect(final.attemptOutcome).not.toBe('ACCEPTED');
+      return;
+    }
+
+    expect([GateVerdict.PASS, GateVerdict.PASS_WITH_QUALIFICATION]).toContain(
+      final.gateResult.verdict,
+    );
+    const { commit } = await factory.acceptChange(item, workspace, final);
     expect(commit).toMatch(/^[0-9a-f]{7,}$/);
 
     // Phase 4 performs no remote write, and the primary checkout is untouched.
@@ -384,7 +455,7 @@ describe('PHASE 4 — live acceptance', () => {
     /*
      * A last, cheap check on the one thing no measurement would catch: the flags that
      * would make every other guarantee in this phase decorative. They may be NAMED —
-     * a refusal has to say what it refuses — but every occurrence must sit on a line
+     * a refusal has to say what it refuses — but every occurrence must sit in a context
      * that refuses, denies or documents, never one that sets them.
      */
     const forbidden = [
@@ -406,11 +477,6 @@ describe('PHASE 4 — live acceptance', () => {
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i] ?? '';
           if (!forbidden.some((f) => line.includes(f))) continue;
-          /*
-           * Judge the occurrence in context, not on its own line. The real refusal
-           * lists hold these flags as bare string literals, and the sentence saying
-           * they are never emitted sits in the comment above them.
-           */
           const context = lines.slice(Math.max(0, i - 8), i + 1).join(' ');
           const refusing = /never|not |no |refus|deny|denied|forbid|must not|would defeat/i.test(
             context,

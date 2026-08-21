@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { EnforcementClass } from '../vocab/index.js';
+import { canonicalJson, digestOf } from '../core/hash.js';
 import {
   EnforcementState,
   IsolationMethod,
@@ -19,22 +20,32 @@ import { QUALIFICATION_CASES } from './qualification.js';
 import type { Clock } from '../core/clock.js';
 
 /**
- * A deterministic substrate for the automated suite.
+ * A deterministic SIMULATION for the automated suite. **It is not a containment
+ * boundary and must never be read as evidence of one.**
  *
- * It is NOT a pretend sandbox that answers "yes" to everything. It enforces a real
- * boundary in-process — every path is resolved through symlinks and checked against
- * the granted write scope before the command runs, and network is refused unless
- * granted — so the factory above it is exercised against something that genuinely says
- * no. A fake that always allowed would make every containment test vacuous.
+ * The claim, stated precisely so nobody has to infer it:
  *
- * What it deliberately does NOT claim: it cannot constrain an arbitrary child process
- * once that process is running, because there is no OS mechanism behind it. That is why
- * `qualify()` reports the subprocess-escape and host-escape cases honestly according to
- * how the fake was configured, and why a fake configured as SOFT can never be talked
- * into HARD.
+ *   IT DOES     check preconditions in-process before spawning — the working directory
+ *               is resolved through symlinks and compared to the granted write scope,
+ *               and a non-HARD configuration refuses outright. That makes the FACTORY
+ *               above it testable against something that genuinely says no.
+ *   IT DOES NOT contain anything. Once a child process starts it is an ordinary host
+ *               process with the ordinary privileges of the test runner. It can write
+ *               anywhere the test runner can write, open any socket, and spawn anything.
+ *
+ * So its qualification outcomes are DECLARED, not measured. A `PASSED` here means "this
+ * fixture was configured to report a pass", which is a fact about the fixture and not
+ * about any boundary. `probe().simulated` is true for exactly this reason, the detail
+ * on every result says so in words, and `SubstrateQualification.fingerprint` carries a
+ * simulated marker so a stored qualification cannot be mistaken for a real one later.
+ *
+ * The consequence, which the test suite is arranged around: **no test that claims to
+ * prove containment may derive its evidence from this class.** Containment is proved by
+ * `SandboxedExecutionSubstrate` against a real launcher, and on a machine that cannot
+ * run one the honest report is BLOCKED rather than a green simulation.
  */
 
-export interface FakeSubstrateOptions {
+export interface SimulatedSubstrateOptions {
   readonly clock: Clock;
   /** What this fake should be able to prove. Tests use it to pin a substrate class. */
   readonly enforcement?: 'HARD' | 'SOFT' | 'NONE';
@@ -43,13 +54,13 @@ export interface FakeSubstrateOptions {
   readonly failCases?: readonly string[];
 }
 
-export class FakeExecutionSubstrate implements ExecutionSubstrate {
-  readonly id = 'fake';
+export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
+  readonly id = 'simulated';
   private readonly enforcement: 'HARD' | 'SOFT' | 'NONE';
   /** Every execution attempted, so a test can assert on what was actually run. */
   readonly executed: ExecuteRequest[] = [];
 
-  constructor(private readonly opts: FakeSubstrateOptions) {
+  constructor(private readonly opts: SimulatedSubstrateOptions) {
     this.enforcement = opts.enforcement ?? 'HARD';
   }
 
@@ -59,6 +70,8 @@ export class FakeExecutionSubstrate implements ExecutionSubstrate {
       hostPlatform: 'fake',
       hostArch: 'fake',
       isolationMethod: IsolationMethod.SIMULATED,
+      // The single flag every caller can branch on without reading this file.
+      simulated: true,
       engineVersion: this.opts.engineVersion ?? '0.0.0-fake',
       prerequisites: [
         {
@@ -104,7 +117,7 @@ export class FakeExecutionSubstrate implements ExecutionSubstrate {
           title: c.title,
           expectation: c.expectation,
           outcome: 'FAILED' as const,
-          detail: 'Forced failure for this fixture.',
+          detail: 'SIMULATED: forced failure for this fixture. Nothing was contained.',
           blocking: c.blocking,
           at,
         };
@@ -115,7 +128,7 @@ export class FakeExecutionSubstrate implements ExecutionSubstrate {
           title: c.title,
           expectation: c.expectation,
           outcome: 'NOT_RUN' as const,
-          detail: 'No boundary exists to test.',
+          detail: 'SIMULATED: no boundary exists to test.',
           blocking: c.blocking,
           at,
         };
@@ -140,7 +153,10 @@ export class FakeExecutionSubstrate implements ExecutionSubstrate {
         title: c.title,
         expectation: c.expectation,
         outcome: 'PASSED' as const,
-        detail: 'Simulated boundary refused the attempt as expected (fixture ' + fixtureDir + ').',
+        detail:
+          'SIMULATED: declared as refused by this fixture (' +
+          fixtureDir +
+          '). No process was contained and nothing was measured.',
         blocking: c.blocking,
         at,
       };
@@ -153,7 +169,12 @@ export class FakeExecutionSubstrate implements ExecutionSubstrate {
       tests,
       ...derived,
       qualifiedAt: at,
-      engineVersion: this.opts.engineVersion ?? '0.0.0-fake',
+      engineVersion: this.opts.engineVersion ?? '0.0.0-simulated',
+      // Marked in the fingerprint itself, so a persisted qualification cannot later be
+      // mistaken for a measurement of a real machine.
+      fingerprint: digestOf(
+        canonicalJson({ substrateId: this.id, simulated: true, enforcement: this.enforcement }),
+      ),
     };
   }
 
@@ -337,8 +358,8 @@ export function removeFixtureDir(dir: string): void {
 }
 
 /** A substrate that refuses everything. The safe default when nothing is qualified. */
-export function unqualifiedSubstrate(clock: Clock): FakeExecutionSubstrate {
-  return new FakeExecutionSubstrate({ clock, enforcement: 'NONE' });
+export function unqualifiedSubstrate(clock: Clock): SimulatedExecutionSubstrate {
+  return new SimulatedExecutionSubstrate({ clock, enforcement: 'NONE' });
 }
 
 export { EnforcementClass };

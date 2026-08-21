@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { fail } from '../core/errors.js';
 
@@ -71,6 +72,19 @@ export function assertSafeRef(ref: string): void {
       specRef: 'Phase 4 §22',
     });
   }
+}
+
+/**
+ * Git's own object id for a blob: `sha1("blob " + length + NUL + bytes)`.
+ *
+ * Computed in-process from the exact bytes, so a worktree file and a blob already in
+ * the object database can be compared without decoding either of them.
+ */
+export function gitBlobId(content: Buffer): string {
+  const header = Buffer.from('blob ' + String(content.length) + '\0', 'utf8');
+  return createHash('sha1')
+    .update(Buffer.concat([header, content]))
+    .digest('hex');
 }
 
 export interface GitResult {
@@ -259,13 +273,98 @@ export class GitService {
     return this.git(['worktree', 'prune']);
   }
 
-  /** Stage exactly the approved paths. Never `git add -A`. */
+  /**
+   * Stage exactly the named paths, INCLUDING deletions.
+   *
+   * `git add -- <paths>` was the first attempt and it silently dropped every deletion:
+   * without `-A` git stages additions and modifications for a pathspec and leaves a
+   * removed file staged as unchanged. The accepted commit then differed from the
+   * ChangeSet that passed the tests, the review and the gate — a provenance break that
+   * no later check would have caught, because every check ran against the worktree.
+   *
+   * `-A` is scoped to an EXACT pathspec list, never to `.`: it must stage deletions
+   * without sweeping in anything the gate never saw.
+   */
+  async stagePathsExact(paths: readonly string[], cwd: string): Promise<GitResult> {
+    for (const p of paths) assertNotOptionLike(p, 'staged path');
+    if (paths.length === 0) {
+      return { ok: true, exitCode: 0, stdout: '', stderr: '' };
+    }
+    return this.git(['add', '-A', '--', ...paths], cwd);
+  }
+
+  /** Kept for callers that must stage additions only. Does NOT stage deletions. */
   async stagePaths(paths: readonly string[], cwd: string): Promise<GitResult> {
     for (const p of paths) assertNotOptionLike(p, 'staged path');
     if (paths.length === 0) {
       return { ok: true, exitCode: 0, stdout: '', stderr: '' };
     }
     return this.git(['add', '--', ...paths], cwd);
+  }
+
+  /** Is the index identical to HEAD? A precondition for a scoped, exact staging. */
+  async indexIsEmpty(cwd: string): Promise<boolean> {
+    const r = await this.git(['diff', '--cached', '--name-only', '-z'], cwd);
+    return r.ok && r.stdout.replace(/\0/g, '').trim().length === 0;
+  }
+
+  /** What the INDEX holds, relative to a base commit. */
+  async stagedPaths(baseCommit: string, cwd: string): Promise<ChangedPath[]> {
+    assertNotOptionLike(baseCommit, 'base commit');
+    const r = await this.git(
+      ['diff', '--cached', '--name-status', '-z', '--find-renames', baseCommit],
+      cwd,
+    );
+    return r.ok ? parseNameStatusZ(r.stdout) : [];
+  }
+
+  /** What a COMMIT changed, relative to a base commit. Derived independently. */
+  async commitPaths(baseCommit: string, commit: string, cwd: string): Promise<ChangedPath[]> {
+    assertNotOptionLike(baseCommit, 'base commit');
+    assertNotOptionLike(commit, 'commit');
+    const r = await this.git(
+      ['diff', '--name-status', '-z', '--find-renames', baseCommit, commit],
+      cwd,
+    );
+    return r.ok ? parseNameStatusZ(r.stdout) : [];
+  }
+
+  /**
+   * The blob id and mode git holds for each of `paths`, in a tree-ish.
+   *
+   * `rev` is `:` for the index or a commit sha. Blob ids rather than decoded text:
+   * comparing content by reading stdout as UTF-8 corrupts binary files and can split a
+   * multi-byte sequence across chunk boundaries, so the comparison would be unreliable
+   * in exactly the cases it needs to be exact. A blob id is a hash of the bytes.
+   */
+  async treeEntries(
+    rev: string,
+    paths: readonly string[],
+    cwd: string,
+  ): Promise<Map<string, { mode: string; blobId: string }>> {
+    const out = new Map<string, { mode: string; blobId: string }>();
+    if (paths.length === 0) return out;
+    for (const p of paths) assertNotOptionLike(p, 'blob path');
+    if (rev !== ':') assertNotOptionLike(rev, 'revision');
+
+    const r =
+      rev === ':'
+        ? await this.git(['ls-files', '--stage', '-z', '--', ...paths], cwd)
+        : await this.git(['ls-tree', '-r', '-z', rev, '--', ...paths], cwd);
+    if (!r.ok) return out;
+
+    for (const line of r.stdout.split('\0')) {
+      if (line.length === 0) continue;
+      // `<mode> <sha> <stage>` TAB `<path>` (index), `<mode> blob <sha>` TAB `<path>` (tree).
+      const tab = line.indexOf('\t');
+      if (tab < 0) continue;
+      const head = line.slice(0, tab).split(/\s+/);
+      const mode = head[0];
+      const blobId = rev === ':' ? head[1] : head[2];
+      if (mode === undefined || blobId === undefined) continue;
+      out.set(line.slice(tab + 1), { mode, blobId });
+    }
+    return out;
   }
 
   /**

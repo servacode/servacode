@@ -145,6 +145,14 @@ export interface InvocationRequest {
   readonly sessionPolicy: 'NEW' | { readonly continue: string };
   readonly budget: RunBudget;
   readonly cwd: string;
+  /**
+   * A Serva-generated settings file governing the engine's own sandbox for this run.
+   *
+   * Never inherited from ambient project or user configuration, for the same reason
+   * the context bundle is constructed rather than discovered: a policy the repository
+   * can influence is a policy the thing being governed can influence.
+   */
+  readonly settingsPath?: string;
   readonly determinismHint?: 'LOW_VARIANCE' | 'DEFAULT';
   readonly model?: string;
 }

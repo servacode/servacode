@@ -237,6 +237,122 @@ export const EVERYTHING_UNDER_CWD = '**';
  * silently given nothing will report on files it never opened, which is worse than a
  * refusal that says so.
  */
+/**
+ * Tools whose availability implies a capability the contract has to declare.
+ *
+ * Used to prove an explicitly granted policy does not exceed its contract. The mapping
+ * is deliberately coarse: if a tool can write a byte or start a process, it needs the
+ * corresponding declaration, and no argument about how narrowly it is scoped changes
+ * that.
+ */
+const CAPABILITY_IMPLYING_TOOLS: Readonly<Record<string, 'fsWrite' | 'exec'>> = Object.freeze({
+  Edit: 'fsWrite',
+  Write: 'fsWrite',
+  NotebookEdit: 'fsWrite',
+  Bash: 'exec',
+  PowerShell: 'exec',
+});
+
+/** Never available to a governed run, whatever else it was granted. */
+const NEVER_AVAILABLE: readonly string[] = Object.freeze([
+  'Agent',
+  'Task',
+  'WebFetch',
+  'WebSearch',
+  'Monitor',
+  'CronCreate',
+  'CronDelete',
+  'SendMessage',
+  'Artifact',
+]);
+
+/**
+ * Prove an explicitly resolved grant does not exceed the contract it claims to serve.
+ *
+ * Phase 3's `resolveToolPolicy` refuses any contract declaring write, execute or
+ * network, because no substrate could enforce them. Phase 4 supplies a substrate, so
+ * the grant is computed by the engineering capability gate and handed to the runtime.
+ *
+ * That hand-off is the risk: a caller could pass a policy wider than anything the
+ * contract describes, and the runtime would faithfully record the wider one. So the
+ * runtime does not trust it. This function is the check, and it is deliberately about
+ * the CONTRACT rather than about Phase 4 — the runtime stays ignorant of engineering,
+ * and a future phase granting some other capability gets the same scrutiny for free.
+ */
+export function assertGrantWithinContract(contract: AgentContract, policy: ToolPolicy): ToolPolicy {
+  const surface = parseToolSurface(contract);
+
+  for (const tool of policy.available) {
+    const needs = CAPABILITY_IMPLYING_TOOLS[tool];
+    if (needs !== undefined && !surface[needs]) {
+      return fail({
+        code: 'E_CAPABILITY_NOT_ENABLED',
+        message:
+          'Granted policy makes ' +
+          tool +
+          ' available to ' +
+          contract.id +
+          ', whose contract declares no ' +
+          (needs === 'fsWrite' ? 'filesystem write' : 'command execution'),
+        remedy:
+          'A grant implements a contract; it does not extend one. Narrow the grant, or change the contract deliberately.',
+        details: { agentId: contract.id, tool, tools: contract.tools },
+        specRef: '19 §5, SC-POL-026',
+      });
+    }
+    if (NEVER_AVAILABLE.includes(tool)) {
+      return fail({
+        code: 'E_CAPABILITY_NOT_ENABLED',
+        message: 'Granted policy makes ' + tool + ' available, which no governed run may have',
+        remedy:
+          'A run that could reach the network or spawn a subagent would be an ungoverned run inside a governed one.',
+        details: { agentId: contract.id, tool },
+        specRef: '19 §5',
+      });
+    }
+  }
+
+  if (policy.network !== 'NONE' && !surface.net) {
+    return fail({
+      code: 'E_CAPABILITY_NOT_ENABLED',
+      message:
+        'Granted policy allows network scope ' +
+        policy.network +
+        ' for ' +
+        contract.id +
+        ', whose contract declares none',
+      remedy: 'Network access is declared in the contract or it is not granted.',
+      details: { agentId: contract.id, networkScope: contract.networkScope },
+      specRef: '19 TR-1',
+    });
+  }
+
+  if (policy.filesystem.write.length > 0 && !surface.fsWrite) {
+    return fail({
+      code: 'E_CAPABILITY_NOT_ENABLED',
+      message: 'Granted policy gives ' + contract.id + ' a writable path with no contract for it',
+      remedy: 'Narrow the grant, or change the contract deliberately.',
+      details: { agentId: contract.id, write: policy.filesystem.write },
+      specRef: '19 §5',
+    });
+  }
+
+  for (const denied of NEVER_AVAILABLE) {
+    if (!policy.deny.includes(denied)) {
+      return fail({
+        code: 'E_CAPABILITY_NOT_ENABLED',
+        message: 'Granted policy does not deny ' + denied,
+        remedy:
+          'An unavailable tool must also be unapproved. Availability and permission are two mechanisms, and only denying both closes the gap.',
+        details: { agentId: contract.id, missing: denied },
+        specRef: '19 §5',
+      });
+    }
+  }
+
+  return policy;
+}
+
 export function resolveToolPolicy(contract: AgentContract, opts: ResolveOptions): ToolPolicy {
   const surface = parseToolSurface(contract);
   const root = resolve(opts.projectRoot);

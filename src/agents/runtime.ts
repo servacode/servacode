@@ -19,7 +19,11 @@ import {
   type ClaimAssessment,
   type OutputEnvelope,
 } from './envelope.js';
-import { assertPolicyNotWidened, resolveToolPolicy } from './toolPolicy.js';
+import {
+  assertGrantWithinContract,
+  assertPolicyNotWidened,
+  resolveToolPolicy,
+} from './toolPolicy.js';
 import {
   TerminationReason,
   ToolCallOutcome,
@@ -28,6 +32,7 @@ import {
   type InvocationRequest,
   type ObservedToolCall,
   type RunBudget,
+  type ToolPolicy,
 } from '../engine/types.js';
 import type { ContractRegistry } from './registry.js';
 import type { ContextBundle } from '../engine/types.js';
@@ -99,6 +104,32 @@ export interface AgentRunRequest {
   }[];
   readonly budget?: Partial<RunBudget>;
   readonly maxContextChars?: number;
+  /**
+   * An explicitly resolved capability grant, for a run on a qualified substrate.
+   *
+   * Phase 3's `resolveToolPolicy` refuses any contract declaring write, execute or
+   * network, because nothing could enforce them. When a qualified substrate exists the
+   * grant is computed by the capability gate that owns those conditions and passed in
+   * here — Serva still computes the policy, and the agent still never requests one.
+   *
+   * The runtime does not take the grant on trust: `assertGrantWithinContract` proves it
+   * does not exceed the contract before anything is bound, and the CAPABILITY_BOUND
+   * event records the grant that was actually used rather than the one that would have
+   * been derived.
+   */
+  readonly capability?: GrantedCapability;
+}
+
+/** A capability grant resolved outside the runtime, for a governed engineering run. */
+export interface GrantedCapability {
+  readonly policy: ToolPolicy;
+  /** The run's working directory. For engineering, its own worktree. */
+  readonly cwd: string;
+  /** Why this grant exists. Recorded alongside the policy. */
+  readonly basis: string;
+  /** Settings file governing the engine's sandbox for this run. */
+  readonly settingsPath?: string;
+  readonly sandboxProfileDigest?: string;
 }
 
 /**
@@ -205,12 +236,32 @@ export class AgentRuntime {
       ...req.budget,
     };
 
-    // Capability resolution happens BEFORE the run record exists: an agent that may
-    // not run at all should not leave a run behind claiming it was attempted.
-    const policy = resolveToolPolicy(contract, {
-      enabled: this.deps.enabledAgents,
-      projectRoot: this.deps.projectRoot,
-    });
+    /*
+     * Capability resolution happens BEFORE the run record exists: an agent that may not
+     * run at all should not leave a run behind claiming it was attempted.
+     *
+     * A supplied grant is validated against the CONTRACT rather than accepted. The
+     * enabled-set check still applies either way — a grant is not an enablement.
+     */
+    if (req.capability !== undefined && !this.deps.enabledAgents.has(contract.id)) {
+      return fail({
+        code: 'E_CAPABILITY_NOT_ENABLED',
+        message:
+          'Agent ' +
+          contract.id +
+          ' is not enabled for execution, and a supplied grant does not enable it',
+        remedy: 'Enabling an agent is a scope decision, not something a caller can pass in.',
+        details: { agentId: contract.id },
+        specRef: '19 §5, 33 PC-5',
+      });
+    }
+    const policy =
+      req.capability === undefined
+        ? resolveToolPolicy(contract, {
+            enabled: this.deps.enabledAgents,
+            projectRoot: this.deps.projectRoot,
+          })
+        : assertGrantWithinContract(contract, req.capability.policy);
 
     const runId = this.deps.ids.next('SC-RUN');
 
@@ -286,7 +337,17 @@ export class AgentRuntime {
           filesystem: policy.filesystem,
           network: policy.network,
           maxToolCalls: policy.maxToolCalls,
-          rationale: policy.rationale,
+          rationale: [
+            ...policy.rationale,
+            ...(req.capability === undefined
+              ? []
+              : [
+                  'grant basis: ' + req.capability.basis,
+                  ...(req.capability.sandboxProfileDigest === undefined
+                    ? []
+                    : ['sandbox profile: ' + req.capability.sandboxProfileDigest]),
+                ]),
+          ],
         },
       });
     });
@@ -301,7 +362,12 @@ export class AgentRuntime {
       tools: policy,
       sessionPolicy: 'NEW', // 19 SM-3: never reused across work items, tasks or days
       budget,
-      cwd: this.deps.projectRoot,
+      // The working directory of an engineering run is its own worktree, which is what
+      // makes every relative permission rule in the grant mean "inside this worktree".
+      cwd: req.capability?.cwd ?? this.deps.projectRoot,
+      ...(req.capability?.settingsPath === undefined
+        ? {}
+        : { settingsPath: req.capability.settingsPath }),
       determinismHint: 'LOW_VARIANCE',
     };
 

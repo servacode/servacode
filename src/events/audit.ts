@@ -41,6 +41,12 @@ export const AuditAction = {
   CHANGE_ACCEPTED: 'CHANGE_ACCEPTED',
   INTEGRATION_CONFLICT: 'INTEGRATION_CONFLICT',
   EXTERNAL_WORKSPACE_CHANGE: 'EXTERNAL_WORKSPACE_CHANGE',
+  /** A Producer AgentRun was dispatched into a worktree under a measured boundary. */
+  PRODUCER_DISPATCHED: 'PRODUCER_DISPATCHED',
+  /** An independent reviewer's verdict was validated and persisted. */
+  REVIEW_RECORDED: 'REVIEW_RECORDED',
+  /** A reviewer result was refused: it could not be tied to a real, independent run. */
+  REVIEW_REFUSED: 'REVIEW_REFUSED',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 

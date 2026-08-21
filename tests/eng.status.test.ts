@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { EnforcementClass } from '../src/vocab/index.js';
-import { FakeExecutionSubstrate } from '../src/substrate/fake.js';
-import { HostExecutionSubstrate } from '../src/substrate/host.js';
+import { SimulatedExecutionSubstrate } from '../src/substrate/fake.js';
+import { selectExecutionSubstrate } from '../src/substrate/host.js';
 import {
   EngineeringGovernance,
   PHASE4_CANDIDATE_PRODUCERS,
@@ -14,7 +14,6 @@ import { ContractRegistry } from '../src/agents/registry.js';
 import { producerContractRefusal } from '../src/engineering/capability.js';
 import { cleanup, freshRuntime } from './helpers.js';
 import type { ServaRuntime } from '../src/app/runtime.js';
-import type { CommandRunner } from '../src/substrate/host.js';
 
 /**
  * `serva engineering status | qualify | doctor | reconcile`.
@@ -36,16 +35,16 @@ function runtime(): ServaRuntime {
   return rt;
 }
 
-function layerWith(rt: ServaRuntime, enforcement: 'HARD' | 'SOFT' | 'NONE') {
+async function layerWith(rt: ServaRuntime, enforcement: 'HARD' | 'SOFT' | 'NONE') {
   return buildEngineeringLayer(rt, {
-    substrate: new FakeExecutionSubstrate({ clock: rt.clock, enforcement }),
+    substrate: new SimulatedExecutionSubstrate({ clock: rt.clock, enforcement }),
   });
 }
 
 describe('the status leads with the authority state', () => {
   it('a qualified substrate reports ACTIVE with the candidate Producers enabled', async () => {
     const rt = runtime();
-    const { view } = await engineeringStatus(layerWith(rt, 'HARD'));
+    const { view } = await engineeringStatus(await layerWith(rt, 'HARD'));
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.ACTIVE);
@@ -68,7 +67,7 @@ describe('the status leads with the authority state', () => {
 
   it('a SOFT substrate is DEGRADED and enables nobody', async () => {
     const rt = runtime();
-    const { view } = await engineeringStatus(layerWith(rt, 'SOFT'));
+    const { view } = await engineeringStatus(await layerWith(rt, 'SOFT'));
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.DEGRADED);
@@ -82,7 +81,7 @@ describe('the status leads with the authority state', () => {
 
   it('an unqualified substrate is BLOCKED, never ACTIVE-with-caveats', async () => {
     const rt = runtime();
-    const { view } = await engineeringStatus(layerWith(rt, 'NONE'));
+    const { view } = await engineeringStatus(await layerWith(rt, 'NONE'));
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.BLOCKED);
@@ -92,7 +91,7 @@ describe('the status leads with the authority state', () => {
 
   it('the reported recipe set is the registered one', async () => {
     const rt = runtime();
-    const { view } = await engineeringStatus(layerWith(rt, 'HARD'));
+    const { view } = await engineeringStatus(await layerWith(rt, 'HARD'));
     rt.close();
     expect(view.recipes).toContain('SC-RECIPE-UNIT-TEST');
     expect(view.recipes.every((r) => r.startsWith('SC-RECIPE-'))).toBe(true);
@@ -100,31 +99,23 @@ describe('the status leads with the authority state', () => {
 });
 
 describe('doctor reports what is missing without changing the machine', () => {
-  /** Records every command the probe issued, so the test can prove none of them wrote. */
-  function recordingRunner(seen: string[][]): CommandRunner {
-    return async (bin, args) => {
-      seen.push([bin, ...args]);
-      return { code: 1, stdout: '', stderr: 'not found', spawnFailed: true };
-    };
-  }
-
-  it('a native Windows host is BLOCKED with named prerequisites', async () => {
+  it('a Windows host with no WSL2 guest is BLOCKED with a satisfiable prerequisite', async () => {
     const rt = runtime();
-    const seen: string[][] = [];
-    const layer = buildEngineeringLayer(rt, {
-      substrate: new HostExecutionSubstrate({
-        clock: rt.clock,
-        engineVersion: '2.1.216',
-        platform: 'win32',
-        run: recordingRunner(seen),
-      }),
+    const { substrate } = await selectExecutionSubstrate({
+      clock: rt.clock,
+      engineVersion: '2.1.216',
+      projectRoot: rt.root,
+      platform: 'win32',
+      env: {},
+      listDistributions: async () => [],
     });
+    const layer = await buildEngineeringLayer(rt, { substrate });
     const { view, qualification } = await engineeringStatus(layer);
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.BLOCKED);
     expect(view.hostPlatform).toBe('win32');
-    expect(view.missingPrerequisites.length).toBeGreaterThan(0);
+    expect(view.missingPrerequisites.map((p) => p.id)).toEqual(['WSL_DISTRIBUTION']);
     // Each one names a remedy the owner can act on, rather than a bare "unsupported".
     for (const p of view.missingPrerequisites) {
       expect(p.remedy.length).toBeGreaterThan(0);
@@ -134,34 +125,42 @@ describe('doctor reports what is missing without changing the machine', () => {
     expect(qualification.tests.every((t) => t.outcome !== 'PASSED')).toBe(true);
   });
 
-  it('the probe never installs, enables or reboots anything', async () => {
+  it('the selection is read-only: it lists distributions and changes nothing', async () => {
     const rt = runtime();
-    const seen: string[][] = [];
-    const layer = buildEngineeringLayer(rt, {
-      substrate: new HostExecutionSubstrate({
-        clock: rt.clock,
-        engineVersion: '2.1.216',
-        platform: 'win32',
-        run: recordingRunner(seen),
-      }),
+    let listed = 0;
+    await selectExecutionSubstrate({
+      clock: rt.clock,
+      engineVersion: '2.1.216',
+      projectRoot: rt.root,
+      platform: 'win32',
+      env: {},
+      listDistributions: async () => {
+        listed += 1;
+        return [];
+      },
     });
-    await engineeringStatus(layer);
     rt.close();
-
     /*
      * Changing the machine a sandbox runs on is the owner's decision, not a side
-     * effect of asking for status (Phase 4 §5). The probe may only look.
+     * effect of asking for status (Phase 4 §5). Selection may only look, and the only
+     * thing it looks at is the distribution list.
      */
-    const forbidden =
-      /\b(install|enable|dism|shutdown|reboot|apt|apt-get|dnf|yum|choco|winget|sudo|setup)\b/i;
-    for (const cmd of seen) {
-      expect(cmd.join(' ')).not.toMatch(forbidden);
-    }
+    expect(listed).toBe(1);
   });
 
-  it('a doctor run on an unqualified host still exits with a non-zero-shaped state', async () => {
+  it('a simulated substrate is reported as such, next to the governance state', async () => {
     const rt = runtime();
-    const { view } = await engineeringStatus(layerWith(rt, 'NONE'));
+    const { view } = await engineeringStatus(await layerWith(rt, 'HARD'));
+    rt.close();
+    // ACTIVE-on-a-simulation and ACTIVE-on-a-boundary are very different facts, and a
+    // reader must not have to know which class was wired to tell them apart.
+    expect(view.simulated).toBe(true);
+    expect(view.governance).toBe(EngineeringGovernance.ACTIVE);
+  });
+
+  it('a doctor run on an unqualified substrate reports a non-ACTIVE state', async () => {
+    const rt = runtime();
+    const { view } = await engineeringStatus(await layerWith(rt, 'NONE'));
     rt.close();
     // The CLI maps ACTIVE to 0 and everything else to 1; the view is what it reads.
     expect(view.governance).not.toBe(EngineeringGovernance.ACTIVE);
@@ -203,7 +202,7 @@ describe('the contract half of the Producer gate', () => {
 describe('reconcile reports divergence and repairs nothing', () => {
   it('a project with no workspaces reports nothing to reconcile', async () => {
     const rt = runtime();
-    const layer = layerWith(rt, 'HARD');
+    const layer = await layerWith(rt, 'HARD');
     const report = await engineeringReconcile(rt, layer);
     rt.close();
 

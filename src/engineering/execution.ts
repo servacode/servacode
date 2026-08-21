@@ -8,7 +8,9 @@ import {
   type ExecutionSubstrate,
   type SubstrateQualification,
 } from '../substrate/types.js';
+import { join } from 'node:path';
 import { fail } from '../core/errors.js';
+import { SERVA_INTERNAL_DIR } from '../agents/toolPolicy.js';
 import type { Store, Transaction } from '../store/store.js';
 import type { Clock } from '../core/clock.js';
 import type { IdSource } from '../core/ids.js';
@@ -148,6 +150,11 @@ export async function runRecipe(
     // The worktree, and nothing else. A build that needs to write elsewhere is a
     // recipe that needs a stated reason, not a wider default.
     writeScope: [req.workspacePath],
+    // Readable: the worktree and the project it came from, so a build can resolve a
+    // shared config. NOT the store — a run must not be able to read the audit trail it
+    // is being judged by, or another run's prompt while that run is still in flight.
+    readScope: [req.workspacePath, req.projectRoot],
+    denyRead: [join(req.projectRoot, SERVA_INTERNAL_DIR)],
     networkAllowed: req.recipe.networkPolicy !== 'NONE',
   });
 

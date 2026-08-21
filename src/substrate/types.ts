@@ -72,6 +72,15 @@ export interface SubstrateProbe {
   /** Present when the engine runs inside a guest, e.g. a WSL2 distribution. */
   readonly guestPlatform?: string;
   readonly isolationMethod: IsolationMethod;
+  /**
+   * True when this substrate simulates rather than contains.
+   *
+   * A simulation's qualification outcomes are DECLARED by a fixture, not measured, so
+   * no security property may be concluded from them. Callers that report a boundary to
+   * an owner, or that are about to spend a model call on the strength of one, branch on
+   * this rather than on the substrate's name.
+   */
+  readonly simulated?: boolean;
   readonly engineVersion: string;
   readonly sandboxVersion?: string;
   readonly prerequisites: readonly Prerequisite[];
@@ -113,6 +122,30 @@ export interface SubstrateQualification {
   readonly qualifiedAt: string;
   /** A qualification is valid only for the engine version it was measured against. */
   readonly engineVersion: string;
+  /**
+   * What this qualification is a measurement OF: engine version, transport, guest
+   * kernel and distribution, launcher and its version.
+   *
+   * Compared rather than trusted. A qualification is a measurement of one machine in
+   * one configuration; when the configuration changes underneath it the measurement
+   * describes something that no longer exists, and `qualificationIsStale` is how a
+   * caller finds that out before running a Producer on the strength of it.
+   */
+  readonly fingerprint: string;
+}
+
+/**
+ * Has the machine changed since this qualification was measured?
+ *
+ * A timestamp would not answer this: a qualification an hour old on an unchanged
+ * machine is fine, and one a minute old is worthless if the kernel was upgraded in
+ * between.
+ */
+export function qualificationIsStale(
+  qualification: SubstrateQualification,
+  currentFingerprint: string,
+): boolean {
+  return qualification.fingerprint !== currentFingerprint;
 }
 
 export interface ExecuteRequest {
@@ -124,6 +157,15 @@ export interface ExecuteRequest {
   readonly maxOutputBytes: number;
   /** Paths the command may write. Anything else is refused by the substrate. */
   readonly writeScope: readonly string[];
+  /** Paths that must remain readable even where a default would mask them. */
+  readonly readScope?: readonly string[];
+  /**
+   * Paths masked entirely: the Serva store, credential directories, other runs.
+   *
+   * Masking rather than denying, because a denied directory that still exists is a
+   * directory whose contents can sometimes be reached another way.
+   */
+  readonly denyRead?: readonly string[];
   readonly networkAllowed: boolean;
 }
 

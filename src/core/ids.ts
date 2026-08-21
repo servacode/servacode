@@ -36,7 +36,9 @@ export type IdPrefix =
   | 'SC-EXEC'
   | 'SC-CS'
   | 'SC-WS'
-  | 'SC-EEV';
+  | 'SC-EEV'
+  /** A validated, persisted reviewer verdict. */
+  | 'SC-REV';
 
 const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 

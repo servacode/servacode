@@ -22,7 +22,7 @@ export async function cmdEngineering(args: ParsedArgs): Promise<number> {
   const sub = args.positionals[0] ?? 'status';
   const rt = openRuntime(args);
   try {
-    const layer = buildEngineeringLayer(rt);
+    const layer = await buildEngineeringLayer(rt);
 
     if (sub === 'status' || sub === 'doctor' || sub === 'qualify') {
       const { view, qualification } = await engineeringStatus(layer);
@@ -43,6 +43,12 @@ export async function cmdEngineering(args: ParsedArgs): Promise<number> {
       if (view.guestPlatform !== undefined)
         console.log('  Guest:                  ' + view.guestPlatform);
       console.log('  Isolation:              ' + view.isolationMethod);
+      console.log('  Chosen because:         ' + view.substrateBasis);
+      if (view.simulated) {
+        console.log('');
+        console.log('  SIMULATED SUBSTRATE — this is not a containment boundary.');
+        console.log('  Its qualification outcomes are declared by a fixture, not measured.');
+      }
       console.log('  Workspaces:             ' + String(view.workspaces));
       console.log('  Recipes:                ' + view.recipes.join(', '));
       if (view.blockedBy !== undefined) {
@@ -124,10 +130,10 @@ export async function cmdEngineering(args: ParsedArgs): Promise<number> {
 }
 
 /** `serva worktrees` — the isolated workspaces this project holds. */
-export function cmdWorktrees(args: ParsedArgs): number {
+export async function cmdWorktrees(args: ParsedArgs): Promise<number> {
   const rt = openRuntime(args);
   try {
-    const layer = buildEngineeringLayer(rt);
+    const layer = await buildEngineeringLayer(rt);
     const id = args.positionals[0];
     const all = layer.workspaces.list();
 
