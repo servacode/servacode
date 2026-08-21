@@ -161,6 +161,26 @@ export function runDoctor(rt: ServaRuntime | undefined, cwd: string): DoctorRepo
         }),
   });
 
+  // 08 KI-1 -- T-CANON envelope integrity. Detects an out-of-band edit or an
+  // accidentally corrupted record. Tamper-EVIDENCE, not tamper-proofing: an
+  // attacker with write access could recompute the digest as easily as we can.
+  const canon = rt.store.verifyCanon();
+  checks.push({
+    id: 'CANON_INTEGRITY',
+    title: 'Canon integrity (08 KI-1)',
+    status: canon.problems.length === 0 ? 'OK' : 'FAIL',
+    detail:
+      canon.problems.length === 0
+        ? String(canon.checked) + ' record(s) verified, digests and identity intact'
+        : canon.problems.map((p) => p.ref + ': ' + p.problem).join('; '),
+    ...(canon.problems.length === 0
+      ? {}
+      : {
+          remedy:
+            'A canon record does not match its recorded digest or its own path. Quarantine and restore from a verified backup (22 5.1).',
+        }),
+  });
+
   const journalPending = existsSync(rt.store.paths.journal);
   const recovered = rt.startupReport.recovered;
   checks.push({

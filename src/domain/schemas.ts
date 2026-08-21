@@ -1,7 +1,9 @@
 import { z } from 'zod';
 import {
+  ArtifactVerifierResultValue,
   CriterionBasis,
   CriterionResult,
+  EvidenceClass,
   GateVerdict,
   IndeterminateReason,
   QualificationKind,
@@ -39,6 +41,14 @@ export const ArtifactVersionRefSchema = z.object({
   artifactId: IdSchema,
   version: z.number().int().positive(),
   digest: z.string().min(1),
+});
+
+/** Mirrors the Finding interface in gates/types.ts. */
+export const FindingSchema = z.object({
+  id: z.string().min(1),
+  severity: z.enum(['BLOCKING', 'MAJOR', 'MINOR', 'SUGGESTION']),
+  statement: z.string().min(1),
+  location: z.string().optional(),
 });
 
 export const QualificationSchema = z.object({
@@ -189,14 +199,7 @@ export type ArtifactRef = z.infer<typeof ArtifactRefSchema>;
  */
 export const EvidenceSchema = z.object({
   id: IdSchema,
-  evidenceClass: z.enum([
-    'EXECUTION',
-    'OBSERVATION',
-    'ARTIFACT',
-    'ANALYSIS',
-    'JUDGMENT',
-    'ATTESTATION',
-  ]),
+  evidenceClass: enumOf(EvidenceClass),
   claim: z.string().min(1),
   provenance: z.object({
     capturedBy: z.enum(['RUNTIME', 'OWNER']),
@@ -238,6 +241,7 @@ export const CriterionEvaluationSchema = z
     artifactVersionsEvaluated: z.array(ArtifactVersionRefSchema).default([]),
     evaluatedAt: IsoSchema,
   })
+  .strict()
   // 08 KI-2b, enforced at the schema layer rather than by convention.
   .refine((v) => v.value !== CriterionResult.INDETERMINATE || v.reason !== undefined, {
     message: 'INDETERMINATE requires a reason (31 §2 TX-3b)',
@@ -249,52 +253,70 @@ export const CriterionEvaluationSchema = z
     message: 'JUDGED basis requires judgedBy (08 KI-2b)',
   });
 
+/**
+ * Full parity with the ArtifactVerifierResult interface in gates/types.ts.
+ * `.strict()` so a field added to the interface but not to the schema is caught
+ * by the parity test rather than silently stripped at the store boundary.
+ */
 export const ArtifactVerifierResultSchema = z
   .object({
     id: IdSchema,
     role: z.string().min(1),
-    // AV-1: ESCALATED is absent from this enum by construction.
-    value: z.enum(['PASS', 'PASS_WITH_QUALIFICATION', 'FAIL', 'NOT_VERIFIED', 'BLOCKED']),
+    subject: z.array(ArtifactVersionRefSchema).default([]),
+    // AV-1: ESCALATED is absent from this vocabulary by construction.
+    value: enumOf(ArtifactVerifierResultValue),
     cause: enumOf(IndeterminateReason).optional(),
     dimensionsChecked: z.array(z.string()).default([]),
     dimensionsNotChecked: z
       .array(z.object({ dimension: z.string(), reason: z.string() }))
       .default([]),
-    findings: z
-      .array(z.object({ id: z.string(), severity: z.string(), statement: z.string() }))
-      .default([]),
+    findings: z.array(FindingSchema).default([]),
     basisSummary: z.object({
       measured: z.array(z.string()).default([]),
       judged: z.array(z.string()).default([]),
       derived: z.array(z.string()).default([]),
     }),
     evidenceRefs: z.array(z.string()).default([]),
+    actor: z.object({
+      runRef: z.string(),
+      agentId: z.string(),
+      role: z.string(),
+    }),
+    criteriaApplied: z.array(z.string()).default([]),
+    confidence: z.enum(['HIGH', 'MEDIUM', 'LOW']).optional(),
     qualifications: z.array(QualificationSchema).default([]),
     artifactVersionsEvaluated: z.array(ArtifactVersionRefSchema).default([]),
     dependsOn: z.array(z.string()).default([]),
     evaluatedAt: IsoSchema,
   })
-  .refine((v) => (v.value !== 'NOT_VERIFIED' && v.value !== 'BLOCKED') || v.cause !== undefined, {
-    message: 'NOT_VERIFIED and BLOCKED require a cause (31 §4.3, MV-3/MV-4)',
-  });
+  .strict()
+  .refine(
+    (v) =>
+      (v.value !== ArtifactVerifierResultValue.NOT_VERIFIED &&
+        v.value !== ArtifactVerifierResultValue.BLOCKED) ||
+      v.cause !== undefined,
+    { message: 'NOT_VERIFIED and BLOCKED require a cause (31 §4.3, MV-3/MV-4)' },
+  );
 
-export const GateResultSchema = z.object({
-  id: IdSchema,
-  gateRef: z.string().min(1),
-  gateVersion: z.string(),
-  scope: z.string(),
-  verdict: enumOf(GateVerdict),
-  criterionEvaluationIds: z.array(z.string()).default([]),
-  evidenceRefs: z.array(z.string()).default([]),
-  artifactVersionsEvaluated: z.array(ArtifactVersionRefSchema).default([]),
-  qualifications: z.array(QualificationSchema).default([]),
-  findings: z
-    .array(z.object({ id: z.string(), severity: z.string(), statement: z.string() }))
-    .default([]),
-  evaluatedAt: IsoSchema,
-  evaluator: z.string(),
-  dependsOn: z.array(z.string()).default([]),
-});
+/** Full parity with the GateResult interface in gates/types.ts. */
+export const GateResultSchema = z
+  .object({
+    id: IdSchema,
+    gateRef: z.string().min(1),
+    gateVersion: z.string(),
+    scope: z.string(),
+    verdict: enumOf(GateVerdict),
+    criterionEvaluationIds: z.array(z.string()).default([]),
+    evidenceRefs: z.array(z.string()).default([]),
+    artifactVersionsEvaluated: z.array(ArtifactVersionRefSchema).default([]),
+    qualifications: z.array(QualificationSchema).default([]),
+    findings: z.array(FindingSchema).default([]),
+    evaluatedAt: IsoSchema,
+    evaluator: z.string(),
+    storeVersion: z.number().int().nonnegative(),
+    dependsOn: z.array(z.string()).default([]),
+  })
+  .strict();
 
 /* ------------------------------------------------------------ stage / ledger */
 

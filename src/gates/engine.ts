@@ -64,6 +64,74 @@ export function validateGate(gate: QualityGate): void {
   }
 }
 
+/**
+ * Gate completeness. Every criterion the gate defines must resolve to EXACTLY ONE
+ * CriterionEvaluation before a verdict may be produced.
+ *
+ * SPEC basis: 18 1 -- a gate evaluates the store against its DECLARED criteria.
+ * A criterion that was never evaluated has not been satisfied; it has not been
+ * looked at. Allowing an incomplete set would let a non-empty gate reach PASS by
+ * simply omitting the criteria that would have blocked it, which defeats
+ * SC-POL-005 at the one place it is supposed to bite.
+ *
+ * Deliberately NOT done here: converting an omitted criterion into FAIL. Absence
+ * of an evaluation is not proof of non-compliance (31 4.1.1). The evaluator must
+ * state what it found -- INDETERMINATE when it could not check, NOT_APPLICABLE
+ * when the criterion does not apply in this scope.
+ */
+export function assertEvaluationsComplete(
+  gate: QualityGate,
+  evaluations: readonly CriterionEvaluation[],
+): void {
+  // Every DEFINED criterion is expected, regardless of applicability. Applicability
+  // is not a licence to omit: it is expressed by the evaluator returning an explicit
+  // NOT_APPLICABLE, which keeps the record of what was considered complete.
+  const expected = new Set(gate.criteria.map((c) => c.id));
+
+  const seen = new Map<string, number>();
+  for (const e of evaluations) {
+    if (!expected.has(e.criterionRef)) {
+      fail({
+        code: 'E_GATE_DEFINITION',
+        message:
+          'Evaluation references criterion ' +
+          e.criterionRef +
+          ' which gate ' +
+          gate.id +
+          ' does not define',
+        remedy: 'Evaluate only criteria belonging to the gate under evaluation.',
+        details: { gateId: gate.id, criterionRef: e.criterionRef, defined: [...expected] },
+        specRef: '18 2',
+      });
+    }
+    seen.set(e.criterionRef, (seen.get(e.criterionRef) ?? 0) + 1);
+  }
+
+  const duplicated = [...seen.entries()].filter(([, n]) => n > 1).map(([id]) => id);
+  if (duplicated.length > 0) {
+    fail({
+      code: 'E_GATE_DEFINITION',
+      message:
+        'Gate ' + gate.id + ' received more than one evaluation for: ' + duplicated.join(', '),
+      remedy: 'Each criterion resolves to exactly one CriterionEvaluation.',
+      details: { gateId: gate.id, duplicated },
+      specRef: '18 2',
+    });
+  }
+
+  const missing = [...expected].filter((id) => !seen.has(id));
+  if (missing.length > 0) {
+    fail({
+      code: 'E_GATE_DEFINITION',
+      message: 'Gate ' + gate.id + ' has unevaluated criteria: ' + missing.join(', '),
+      remedy:
+        'Every criterion must resolve to exactly one CriterionEvaluation. Produce an explicit INDETERMINATE (with a reason) where the criterion could not be checked, or NOT_APPLICABLE where it does not apply. A criterion is never silently omitted.',
+      details: { gateId: gate.id, missing, supplied: [...seen.keys()] },
+      specRef: '18 1, SC-POL-005',
+    });
+  }
+}
+
 export interface EvaluateGateArgs {
   readonly gate: QualityGate;
   readonly scope: string;
@@ -82,22 +150,7 @@ export function evaluateGate(
 ): GateResult {
   validateGate(args.gate);
 
-  const known = new Set(args.gate.criteria.map((c) => c.id));
-  for (const e of args.evaluations) {
-    if (!known.has(e.criterionRef)) {
-      fail({
-        code: 'E_GATE_DEFINITION',
-        message:
-          'Evaluation references criterion ' +
-          e.criterionRef +
-          ' which gate ' +
-          args.gate.id +
-          ' does not define',
-        remedy: 'Evaluate only criteria belonging to the gate under evaluation.',
-        details: { gateId: args.gate.id, criterionRef: e.criterionRef },
-      });
-    }
-  }
+  assertEvaluationsComplete(args.gate, args.evaluations);
 
   const composed = composeGateVerdict(args.evaluations);
 

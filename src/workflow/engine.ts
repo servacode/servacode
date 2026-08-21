@@ -23,10 +23,20 @@ export interface StepDefinition {
   readonly name: string;
   readonly department: string;
   readonly dependsOn: readonly string[];
-  /** 07 §2.1 — evaluated against stored state, never satisfied by self-report. */
+  /**
+   * 07 §2.1 — evaluated against stored state, never satisfied by self-report.
+   * The engine calls this before permitting completion; a step cannot complete
+   * by assertion.
+   */
   readonly exitCondition: (store: Store, run: WorkflowRun) => boolean;
-  readonly optional?: boolean;
 }
+
+/**
+ * Removed in the Phase 2 blocker fix: `optional`. R4 (07 §2.1) defines optional
+ * steps with a `skip_condition`, and Phase 2 implements no skip semantics. A
+ * field that suggests behaviour the runtime ignores is worse than its absence,
+ * so optional-step execution is left to the capability that owns it (29 CF-2).
+ */
 
 export interface WorkflowDefinition {
   readonly id: string;
@@ -116,12 +126,110 @@ export function isTerminal(state: WorkflowRunState): boolean {
   );
 }
 
+/**
+ * Validate a workflow definition before any run can start.
+ *
+ * A malformed graph is a definition defect, and it is far cheaper to reject it
+ * here than to discover it as a stuck or impossible run later (04 OF-4).
+ */
+export function validateWorkflowDefinition(def: WorkflowDefinition): void {
+  if (def.steps.length === 0) {
+    fail({
+      code: 'E_VALIDATION',
+      message: 'Workflow ' + def.id + ' defines no steps',
+      remedy: 'A workflow with no steps cannot progress. Define at least one step.',
+      details: { workflowRef: def.id },
+      specRef: '07 §2',
+    });
+  }
+
+  const ids = new Set<string>();
+  for (const step of def.steps) {
+    if (ids.has(step.id)) {
+      fail({
+        code: 'E_VALIDATION',
+        message: 'Workflow ' + def.id + ' has duplicate step id: ' + step.id,
+        remedy: 'Step identifiers must be unique within a workflow.',
+        details: { workflowRef: def.id, stepId: step.id },
+        specRef: '07 §2.1',
+      });
+    }
+    ids.add(step.id);
+  }
+
+  for (const step of def.steps) {
+    for (const dep of step.dependsOn) {
+      if (dep === step.id) {
+        fail({
+          code: 'E_VALIDATION',
+          message: 'Step ' + step.id + ' in workflow ' + def.id + ' depends on itself',
+          remedy: 'Remove the self-dependency.',
+          details: { workflowRef: def.id, stepId: step.id },
+          specRef: '07 §2.1',
+        });
+      }
+      if (!ids.has(dep)) {
+        fail({
+          code: 'E_VALIDATION',
+          message:
+            'Step ' + step.id + ' depends on unknown step "' + dep + '" in workflow ' + def.id,
+          remedy: 'Every dependency must reference a step defined by the same workflow.',
+          details: { workflowRef: def.id, stepId: step.id, unknownDependency: dep },
+          specRef: '07 §2.1',
+        });
+      }
+    }
+  }
+
+  const cycle = findCycle(def);
+  if (cycle !== undefined) {
+    fail({
+      code: 'E_VALIDATION',
+      message: 'Workflow ' + def.id + ' has a dependency cycle: ' + cycle.join(' -> '),
+      remedy: 'Dependency graphs must be acyclic, or no step can ever become ready.',
+      details: { workflowRef: def.id, cycle },
+      specRef: '04 OF-4',
+    });
+  }
+}
+
+/** Depth-first cycle detection. Returns the offending path, or undefined. */
+function findCycle(def: WorkflowDefinition): string[] | undefined {
+  const byId = new Map(def.steps.map((s) => [s.id, s]));
+  const state = new Map<string, 'VISITING' | 'DONE'>();
+  const path: string[] = [];
+
+  const visit = (id: string): string[] | undefined => {
+    const st = state.get(id);
+    if (st === 'DONE') return undefined;
+    if (st === 'VISITING') return [...path.slice(path.indexOf(id)), id];
+    state.set(id, 'VISITING');
+    path.push(id);
+    for (const dep of byId.get(id)?.dependsOn ?? []) {
+      const found = visit(dep);
+      if (found !== undefined) return found;
+    }
+    path.pop();
+    state.set(id, 'DONE');
+    return undefined;
+  };
+
+  for (const step of def.steps) {
+    const found = visit(step.id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
 export class WorkflowEngine {
   constructor(
     private readonly store: Store,
     private readonly deps: WorkflowDeps,
     private readonly definitions: ReadonlyMap<string, WorkflowDefinition>,
-  ) {}
+  ) {
+    // Reject a malformed graph at construction rather than mid-run.
+    for (const def of definitions.values()) validateWorkflowDefinition(def);
+  }
 
   definition(ref: string): WorkflowDefinition {
     const d = this.definitions.get(ref);
@@ -153,6 +261,20 @@ export class WorkflowEngine {
       });
     }
     return run;
+  }
+
+  /** Membership check with an actionable message listing the real step ids. */
+  private requireStep(def: WorkflowDefinition, stepId: string, runId: string): StepDefinition {
+    const step = def.steps.find((s) => s.id === stepId);
+    if (step === undefined) {
+      return fail({
+        code: 'E_NOT_FOUND',
+        message: 'Step ' + stepId + ' is not part of workflow ' + def.id,
+        remedy: 'Known steps: ' + def.steps.map((s) => s.id).join(', ') + '.',
+        details: { runId, stepId, workflowRef: def.id },
+      });
+    }
+    return step;
   }
 
   private persist(
@@ -210,15 +332,10 @@ export class WorkflowEngine {
   completeStep(tx: Transaction, runId: string, stepId: string): WorkflowRun {
     const run = this.require(runId, tx);
     const def = this.definition(run.workflowRef);
-    if (def.steps.find((s) => s.id === stepId) === undefined) {
-      fail({
-        code: 'E_NOT_FOUND',
-        message: 'Step ' + stepId + ' is not part of workflow ' + def.id,
-        remedy: 'Check the step identifier against the workflow definition.',
-        details: { runId, stepId },
-      });
-    }
-    if (run.completedSteps.includes(stepId)) return run; // ID-1
+    const step = this.requireStep(def, stepId, runId);
+
+    if (run.completedSteps.includes(stepId)) return run; // ID-1 idempotent no-op
+
     if (isTerminal(run.state)) {
       fail({
         code: 'E_INVALID_TRANSITION',
@@ -226,6 +343,46 @@ export class WorkflowEngine {
         remedy: 'A terminal run cannot accept further step completions.',
         details: { runId, state: run.state },
         specRef: '31 V5b',
+      });
+    }
+
+    // HARD dependencies. The engine is the authority on control flow; it does not
+    // rely on the caller invoking completeStep in a sensible order (07 §2.1).
+    const unmet = step.dependsOn.filter((d) => !run.completedSteps.includes(d));
+    if (unmet.length > 0) {
+      fail({
+        code: 'E_INVALID_TRANSITION',
+        message: 'Step ' + stepId + ' has unmet dependencies: ' + unmet.join(', '),
+        remedy: 'Complete the prerequisite steps first. Dependencies are HARD (03 §1.2).',
+        details: { runId, stepId, unmet, completed: run.completedSteps },
+        specRef: '07 §2.1',
+      });
+    }
+
+    // Eligibility: the step must be one the run is currently able to advance.
+    if (!run.currentSteps.includes(stepId)) {
+      fail({
+        code: 'E_INVALID_TRANSITION',
+        message: 'Step ' + stepId + ' is not currently active for run ' + runId,
+        remedy:
+          'Active steps are ' +
+          (run.currentSteps.length === 0 ? '(none)' : run.currentSteps.join(', ')) +
+          '. Resume the run if it is waiting.',
+        details: { runId, stepId, currentSteps: run.currentSteps, state: run.state },
+        specRef: '07 §2.1',
+      });
+    }
+
+    // 07 §2.1 — the exit condition is evaluated against STORED STATE. A step
+    // cannot complete by assertion, which is the whole point of the rule.
+    if (!step.exitCondition(this.store, run)) {
+      fail({
+        code: 'E_INVALID_TRANSITION',
+        message: 'Exit condition for step ' + stepId + ' is not satisfied',
+        remedy:
+          'The step has not produced the state its exit condition requires. Complete the work, then retry.',
+        details: { runId, stepId },
+        specRef: '07 §2.1',
       });
     }
 
@@ -253,6 +410,7 @@ export class WorkflowEngine {
 
   failStep(tx: Transaction, runId: string, stepId: string, reason: string): WorkflowRun {
     const run = this.require(runId, tx);
+    this.requireStep(this.definition(run.workflowRef), stepId, runId);
     assertTransition(run.state, WorkflowRunState.REWORK);
     const next: WorkflowRun = {
       ...run,

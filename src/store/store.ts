@@ -1,8 +1,12 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  assertSafeSegment,
+  assertSafeStreamName,
   canonDir,
   canonVersionFile,
+  derivedFile,
+  isWithin,
   storePaths,
   traceFile,
   workingFile,
@@ -61,7 +65,13 @@ export interface WorkingEnvelope<T = unknown> {
 
 type PendingWrite =
   | { kind: 'FILE'; path: string; contents: string }
-  | { kind: 'TRACE'; stream: string; input: AppendInput };
+  /**
+   * `opId` is the stable identity of this operation within its transaction.
+   * It is what makes journal replay idempotent for append-only trace writes
+   * (22 §4.2). Without it a crash between the append and the journal removal
+   * would duplicate an authoritative event on restart.
+   */
+  | { kind: 'TRACE'; stream: string; opId: string; input: AppendInput };
 
 interface JournalPayload {
   readonly txId: string;
@@ -167,10 +177,16 @@ export class Transaction {
   /** The only way to write T-TRACE. Runtime-authored only (SC-POL-029). */
   appendTrace(stream: string, input: Omit<AppendInput, 'at' | 'actor'> & { actor?: string }): void {
     this.assertOpen();
+    assertSafeStreamName(stream);
+    // Operation identity is positional within the transaction and therefore
+    // stable across any number of replays.
+    const opId = this.id + '#' + String(this.writes.length);
     this.writes.push({
       kind: 'TRACE',
       stream,
+      opId,
       input: {
+        opId,
         at: this.store.deps.clock.now(),
         actor: input.actor ?? this.store.deps.actor,
         type: input.type,
@@ -314,13 +330,49 @@ export class Store {
     this.headCache.clear();
   }
 
-  private applyJournal(payload: JournalPayload): void {
+  /**
+   * Apply a committed journal. MUST be idempotent: recovery may replay a
+   * committed journal any number of times and must reach exactly one final state
+   * (22 4.2).
+   *
+   *  - FILE  writes are naturally idempotent: the journal carries absolute
+   *          contents, so rewriting produces the same bytes.
+   *  - TRACE writes are append-only and therefore NOT naturally idempotent;
+   *          they are applied through `appendIdempotent` keyed on `opId`.
+   */
+  private applyJournal(payload: JournalPayload): { fileWrites: number; traceAppends: number } {
+    let fileWrites = 0;
+    let traceAppends = 0;
     for (const w of payload.writes) {
       if (w.kind === 'FILE') {
+        // A journal is data on disk. Never write where it points without proving
+        // the destination belongs to this store (21 PI-1).
+        this.assertJournalDestination(w.path, payload.txId);
         writeFileAtomic(w.path, w.contents);
+        fileWrites += 1;
       } else {
-        new TraceLog(traceFile(this.paths, w.stream)).append(w.input);
+        assertSafeStreamName(w.stream);
+        const res = new TraceLog(traceFile(this.paths, w.stream)).appendIdempotent({
+          ...w.input,
+          opId: w.opId,
+        });
+        if (res.applied) traceAppends += 1;
       }
+    }
+    return { fileWrites, traceAppends };
+  }
+
+  /** A journalled FILE destination must lie inside this store's .serva subtree. */
+  private assertJournalDestination(path: string, txId: string): void {
+    if (!isWithin(this.paths.serva, path)) {
+      fail({
+        code: 'E_ISOLATION',
+        message: 'Journal ' + txId + ' targets a path outside the store: ' + path,
+        remedy:
+          'The journal is damaged or was tampered with. Quarantine the store and restore from a verified backup (22 5.1).',
+        details: { txId, path, serva: this.paths.serva },
+        specRef: '21 PI-1..PI-5',
+      });
     }
   }
 
@@ -374,10 +426,60 @@ export class Store {
     return max;
   }
 
+  /**
+   * Authoritative T-CANON read. Verifies envelope integrity before returning
+   * (08 KI-1): a record whose body no longer matches its recorded digest, or
+   * whose identity disagrees with its own path, is NOT silently trusted.
+   *
+   * Scope of the claim: this DETECTS out-of-band edits and accidental corruption.
+   * It is not a defence against an attacker with write access to the store, who
+   * could recompute the digest as easily as we can. Tamper-evidence, not
+   * tamper-proofing.
+   */
   getCanon<T>(type: string, id: string, version?: number): CanonEnvelope<T> | undefined {
     const v = version ?? this.canonHeadVersion(type, id);
     if (v === 0) return undefined;
-    return readJsonIfExists<CanonEnvelope<T>>(canonVersionFile(this.paths, type, id, v));
+    const path = canonVersionFile(this.paths, type, id, v);
+    const env = readJsonIfExists<CanonEnvelope<T>>(path);
+    if (env === undefined) return undefined;
+    const problem = canonEnvelopeProblem(env, type, id, v);
+    if (problem !== undefined) {
+      fail({
+        code: 'E_STORE_CORRUPT',
+        message:
+          'Canon record ' + type + '/' + id + '@v' + String(v) + ' failed integrity: ' + problem,
+        remedy:
+          'The record was modified outside Serva Code, or the store is damaged. Run `serva doctor` and restore from a verified backup (22 5.1).',
+        details: { type, id, version: v, path, problem },
+        specRef: '08 KI-1',
+      });
+    }
+    return env;
+  }
+
+  /** Non-throwing integrity sweep over every canon record. Used by `serva doctor`. */
+  verifyCanon(): { checked: number; problems: { ref: string; problem: string }[] } {
+    const problems: { ref: string; problem: string }[] = [];
+    let checked = 0;
+    if (!fileExists(this.paths.canon)) return { checked, problems };
+    for (const type of readdirSync(this.paths.canon)) {
+      for (const id of this.listCanonIds(type)) {
+        for (const v of this.listCanonVersions(type, id)) {
+          checked += 1;
+          const ref = type + '/' + id + '@v' + String(v);
+          const env = readJsonIfExists<CanonEnvelope<unknown>>(
+            canonVersionFile(this.paths, type, id, v),
+          );
+          if (env === undefined) {
+            problems.push({ ref, problem: 'unreadable' });
+            continue;
+          }
+          const problem = canonEnvelopeProblem(env, type, id, v);
+          if (problem !== undefined) problems.push({ ref, problem });
+        }
+      }
+    }
+    return { checked, problems };
   }
 
   listCanonVersions(type: string, id: string): number[] {
@@ -392,6 +494,7 @@ export class Store {
   }
 
   listCanonIds(type: string): string[] {
+    assertSafeSegment(type, 'canon type');
     const dir = join(this.paths.canon, type);
     if (!fileExists(dir)) return [];
     return readdirSync(dir).sort();
@@ -402,6 +505,7 @@ export class Store {
   }
 
   listWorkingIds(type: string): string[] {
+    assertSafeSegment(type, 'working type');
     const dir = join(this.paths.working, type);
     if (!fileExists(dir)) return [];
     return readdirSync(dir)
@@ -456,10 +560,41 @@ export class Store {
 
   /** T-DERIVED. Freely rewritable, never authoritative. */
   putDerived(name: string, value: unknown): void {
-    writeFileAtomic(join(this.paths.derived, name + '.json'), JSON.stringify(value, null, 2));
+    writeFileAtomic(derivedFile(this.paths, name), JSON.stringify(value, null, 2));
   }
 
   getDerived<T>(name: string): T | undefined {
-    return readJsonIfExists<T>(join(this.paths.derived, name + '.json'));
+    return readJsonIfExists<T>(derivedFile(this.paths, name));
   }
+}
+
+/**
+ * Integrity check for one canon envelope. Returns a description of the problem,
+ * or undefined when the envelope is coherent.
+ */
+export function canonEnvelopeProblem(
+  env: unknown,
+  type: string,
+  id: string,
+  version: number,
+): string | undefined {
+  if (env === null || typeof env !== 'object') return 'not an object';
+  const e = env as CanonEnvelope<unknown>;
+  if (typeof e.id !== 'string' || typeof e.type !== 'string' || typeof e.version !== 'number') {
+    return 'malformed envelope (missing id, type or version)';
+  }
+  if (typeof e.digest !== 'string' || e.digest.length === 0) return 'missing digest';
+  if (!('body' in e)) return 'missing body';
+  if (e.id !== id) return 'envelope id "' + e.id + '" does not match path id "' + id + '"';
+  if (e.type !== type) {
+    return 'envelope type "' + e.type + '" does not match path type "' + type + '"';
+  }
+  if (e.version !== version) {
+    return (
+      'envelope version ' + String(e.version) + ' does not match path version ' + String(version)
+    );
+  }
+  if (digestOf(e.body) !== e.digest)
+    return 'body digest mismatch (record was modified out of band)';
+  return undefined;
 }

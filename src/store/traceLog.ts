@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { appendLineDurable, fileExists } from './fsutil.js';
-import { GENESIS_DIGEST, chainDigest } from '../core/hash.js';
+import { GENESIS_DIGEST, canonicalJson, chainDigest } from '../core/hash.js';
 import { fail } from '../core/errors.js';
 
 /**
@@ -10,6 +10,10 @@ import { fail } from '../core/errors.js';
  * mutating operation the type system offers is append. The hash chain makes a
  * retroactive edit made outside this API detectable rather than merely forbidden
  * (08 KI-1).
+ *
+ * Each record carries an `opId` -- the stable identity of the transaction
+ * operation that produced it. Recovery uses it to make replay idempotent
+ * (see `appendIdempotent`).
  */
 
 export interface TraceRecord {
@@ -21,6 +25,8 @@ export interface TraceRecord {
   readonly payload: unknown;
   readonly prevDigest: string;
   readonly digest: string;
+  /** Stable transaction-operation identity: `<txId>#<index>`. */
+  readonly opId?: string;
   readonly correlationId?: string;
   readonly causationId?: string;
 }
@@ -30,8 +36,28 @@ export interface AppendInput {
   readonly actor: string;
   readonly type: string;
   readonly payload: unknown;
+  readonly opId?: string;
   readonly correlationId?: string;
   readonly causationId?: string;
+}
+
+/** The fields that define what an operation *asked* for, independent of chaining. */
+function logicalIdentity(r: {
+  at: string;
+  actor: string;
+  type: string;
+  payload: unknown;
+  correlationId?: string;
+  causationId?: string;
+}): string {
+  return canonicalJson({
+    at: r.at,
+    actor: r.actor,
+    type: r.type,
+    payload: r.payload,
+    correlationId: r.correlationId,
+    causationId: r.causationId,
+  });
 }
 
 export class TraceLog {
@@ -71,6 +97,10 @@ export class TraceLog {
     return { seq: last.seq, digest: last.digest };
   }
 
+  findByOpId(opId: string): TraceRecord | undefined {
+    return this.readAll().find((r) => r.opId === opId);
+  }
+
   /** The only mutating operation. Returns the record actually written. */
   append(input: AppendInput): TraceRecord {
     const { seq, digest: prevDigest } = this.head();
@@ -82,6 +112,7 @@ export class TraceLog {
       type: input.type,
       payload: input.payload,
       prevDigest,
+      ...(input.opId === undefined ? {} : { opId: input.opId }),
       ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
       ...(input.causationId === undefined ? {} : { causationId: input.causationId }),
     };
@@ -91,12 +122,53 @@ export class TraceLog {
   }
 
   /**
-   * Verify the chain. Returns the index of the first broken link, or -1 if intact.
-   * 08 KI-1 — this is what makes immutability checkable rather than assumed.
+   * Append exactly once for a given operation identity.
+   *
+   * A committed transaction may be replayed any number of times by crash recovery
+   * (22 §4.2). Without identity, a crash between "trace appended" and "journal
+   * removed" would duplicate an authoritative event on restart.
+   *
+   * Semantics:
+   *  - no record with this opId  -> append, return { applied: true }
+   *  - record exists, identical  -> no-op,  return { applied: false }
+   *  - record exists, different  -> E_STORE_CORRUPT (never silently skipped)
+   *
+   * The hash chain is unaffected: digests are still computed against the live head
+   * at the moment of the single real append.
+   */
+  appendIdempotent(input: AppendInput & { opId: string }): {
+    applied: boolean;
+    record: TraceRecord;
+  } {
+    const existing = this.findByOpId(input.opId);
+    if (existing === undefined) {
+      return { applied: true, record: this.append(input) };
+    }
+    if (logicalIdentity(existing) !== logicalIdentity(input)) {
+      return fail({
+        code: 'E_STORE_CORRUPT',
+        message:
+          'Trace operation ' +
+          input.opId +
+          ' already exists with different content in ' +
+          this.path,
+        remedy:
+          'The journal and the trace stream disagree about an applied operation. Quarantine the store and restore from a verified backup (22 §5.1).',
+        details: { opId: input.opId, path: this.path, existingSeq: existing.seq },
+        specRef: '08 KI-1, 22 §4.2',
+      });
+    }
+    return { applied: false, record: existing };
+  }
+
+  /**
+   * Verify the chain. Returns the index of the first broken link, or ok.
+   * 08 KI-1 -- this is what makes immutability checkable rather than assumed.
    */
   verify(): { ok: true } | { ok: false; brokenAt: number; detail: string } {
     const all = this.readAll();
     let prev = GENESIS_DIGEST;
+    const seenOpIds = new Set<string>();
     for (let i = 0; i < all.length; i++) {
       const r = all[i]!;
       if (r.prevDigest !== prev) {
@@ -108,6 +180,16 @@ export class TraceLog {
       }
       if (r.seq !== i + 1) {
         return { ok: false, brokenAt: i, detail: 'sequence gap at index ' + String(i) };
+      }
+      if (r.opId !== undefined) {
+        if (seenOpIds.has(r.opId)) {
+          return {
+            ok: false,
+            brokenAt: i,
+            detail: 'duplicate opId ' + r.opId + ' at seq ' + String(r.seq),
+          };
+        }
+        seenOpIds.add(r.opId);
       }
       const { digest, ...body } = r;
       const expected = chainDigest(prev, body);
