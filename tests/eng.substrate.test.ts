@@ -239,6 +239,10 @@ class StubTransport implements ExecTransport {
     return p.replace(/\\/g, '/');
   }
 
+  environmentFor(hostEnv: Readonly<Record<string, string>>): Record<string, string> {
+    return { ...hostEnv, PATH: '/usr/bin:/bin' };
+  }
+
   async fingerprint(): Promise<Record<string, string>> {
     return { transport: this.id, kind: this.kind, kernel: '6.6.0-stub', guestOs: 'Stub Linux' };
   }

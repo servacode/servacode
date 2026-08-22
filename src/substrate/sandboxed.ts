@@ -571,7 +571,10 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       executable: resolved,
       args: [...request.args],
       cwd: guestCwd,
-      env: { ...request.env },
+      // Translated for the execution environment, exactly as the paths are. A recipe's
+      // environment policy scrubs the HOST environment; handing those values to a guest
+      // process is how `PATH` became a Windows path inside Linux.
+      env: t.environmentFor(request.env),
       timeoutMs: request.timeoutMs,
       maxOutputBytes: request.maxOutputBytes,
     };

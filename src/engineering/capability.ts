@@ -5,6 +5,7 @@ import {
   ALWAYS_DENY_TOOLS,
   PHASE3_READ_TOOLS,
   SERVA_INTERNAL_DIR,
+  absoluteRule,
   parseToolSurface,
   relativeRule,
 } from '../agents/toolPolicy.js';
@@ -237,6 +238,14 @@ export interface ProducerPolicyOptions {
   readonly allowSimulatedBoundary?: boolean;
   /** Recipes the Producer may invoke through Bash. Empty is valid and common. */
   readonly allowedCommands?: readonly string[];
+  /**
+   * A host path as the ENGINE will name it.
+   *
+   * Needed because the grant is computed on the host and enforced in the execution
+   * environment. Without it the absolute rules would carry Windows paths, which the
+   * engine never sees and which do not survive the `//` anchor.
+   */
+  readonly toExecutionPath?: (hostPath: string) => string;
 }
 
 /**
@@ -278,10 +287,24 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
     });
   }
 
+  const map = opts.toExecutionPath ?? ((p: string): string => p);
+  const worktree = map(resolve(opts.workspace.path));
+  const servaDir = map(resolve(opts.projectRoot, SERVA_INTERNAL_DIR));
+
+  /*
+   * BOTH forms, for every granted tool.
+   *
+   * The relative rule governs a relative request; the absolute rule governs the same
+   * file named by its full path in the execution environment. A grant that covered only
+   * one of them is a grant the model can miss by phrasing its call differently.
+   */
   const approve = [
     ...PHASE3_READ_TOOLS.map((t) => relativeRule(t, '**')),
     relativeRule('Edit', '**'),
     relativeRule('Write', '**'),
+    ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, worktree + '/**')),
+    absoluteRule('Edit', worktree + '/**'),
+    absoluteRule('Write', worktree + '/**'),
     ...(opts.allowedCommands ?? []),
   ];
 
@@ -294,6 +317,12 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
     ...PHASE3_READ_TOOLS.map((t) => relativeRule(t, SERVA_INTERNAL_DIR + '/**')),
     relativeRule('Edit', SERVA_INTERNAL_DIR + '/**'),
     relativeRule('Write', SERVA_INTERNAL_DIR + '/**'),
+    // ...and the same denials in absolute form, because deny must cover every way the
+    // path can be written, not just the way the allow rule happened to be phrased.
+    ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, servaDir + '/**')),
+    absoluteRule('Edit', servaDir + '/**'),
+    absoluteRule('Write', servaDir + '/**'),
+    ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, worktree + '/' + SERVA_INTERNAL_DIR + '/**')),
   ];
 
   return {
@@ -330,10 +359,29 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
 export function resolveReviewerPolicy(
   workspace: EngineeringWorkspace,
   projectRoot: string,
+  opts: { readonly toExecutionPath?: (hostPath: string) => string } = {},
 ): ToolPolicy {
+  const map = opts.toExecutionPath ?? ((x: string): string => x);
+  const worktree = map(resolve(workspace.path));
+  const servaDir = map(resolve(projectRoot, SERVA_INTERNAL_DIR));
+
   return {
     available: [...PHASE3_READ_TOOLS],
-    approve: PHASE3_READ_TOOLS.map((t) => relativeRule(t, '**')),
+    /*
+     * Relative AND absolute, scoped to this worktree and nothing else.
+     *
+     * A reviewer given only `Read(**)` was refused every read: it names files by their
+     * absolute path in the execution environment, which a cwd-relative rule does not
+     * match, so under `dontAsk` every call was auto-denied. It then truthfully reported
+     * the denial and could not review the change it had been dispatched to review.
+     *
+     * The absolute grant covers the worktree subtree only — nothing above it, no
+     * sibling worktree, no project root.
+     */
+    approve: [
+      ...PHASE3_READ_TOOLS.map((t) => relativeRule(t, '**')),
+      ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, worktree + '/**')),
+    ],
     deny: [
       ...ALWAYS_DENY_TOOLS,
       'Edit',
@@ -341,6 +389,10 @@ export function resolveReviewerPolicy(
       'Bash',
       ...PRODUCER_DENIED_COMMANDS,
       ...PHASE3_READ_TOOLS.map((t) => relativeRule(t, SERVA_INTERNAL_DIR + '/**')),
+      // The same denials in absolute form: deny must cover every way the path can be
+      // written, not only the way the allow rule happened to be phrased.
+      ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, servaDir + '/**')),
+      ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, worktree + '/' + SERVA_INTERNAL_DIR + '/**')),
     ],
     filesystem: {
       read: [resolve(workspace.path)],
@@ -352,6 +404,7 @@ export function resolveReviewerPolicy(
     rationale: [
       'reviewer: read-only by construction, not by configuration',
       'worktree under review: ' + workspace.path,
+      'granted in the execution environment as: ' + worktree,
       'no write tool is available, so there is nothing to widen',
     ],
   };

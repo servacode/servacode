@@ -106,6 +106,21 @@ export interface DispatchDeps {
   readonly engineVersion: string;
   /** TEST ONLY. Permits a simulated boundary; no production caller sets it. */
   readonly allowSimulatedBoundary?: boolean;
+  /** A host path as the engine names it. Identity when the engine runs on this host. */
+  readonly toExecutionPath?: (hostPath: string) => string;
+  /**
+   * QUALIFICATION ONLY. Bash commands pre-approved so a probe can reach the OS boundary.
+   *
+   * A normal Producer pre-approves no Bash at all, so under `dontAsk` every Bash call is
+   * refused by the permission layer and the OS sandbox is never exercised. That is the
+   * right default and it is also why the boundary's second line of defence cannot be
+   * demonstrated by an ordinary run: the first line stops everything first.
+   *
+   * This grant names individual command shapes for a disposable qualification fixture.
+   * It is not the production Producer policy, nothing in the normal dispatch path sets
+   * it, and it never widens Bash to anything unbounded.
+   */
+  readonly qualificationCommands?: readonly string[];
 }
 
 export interface ProducerDispatch {
@@ -302,6 +317,10 @@ export async function dispatchProducer(
     reviewerAvailable: o.reviewerAvailable,
     executorsAvailable: o.executorsAvailable,
     actualBoundary,
+    ...(deps.qualificationCommands === undefined
+      ? {}
+      : { allowedCommands: deps.qualificationCommands }),
+    ...(deps.toExecutionPath === undefined ? {} : { toExecutionPath: deps.toExecutionPath }),
     ...(deps.allowSimulatedBoundary === undefined
       ? {}
       : { allowSimulatedBoundary: deps.allowSimulatedBoundary }),
@@ -468,7 +487,11 @@ export async function dispatchReviewer(
     });
   }
 
-  const policy = resolveReviewerPolicy(o.workspace, deps.projectRoot);
+  const policy = resolveReviewerPolicy(
+    o.workspace,
+    deps.projectRoot,
+    deps.toExecutionPath === undefined ? {} : { toExecutionPath: deps.toExecutionPath },
+  );
 
   const run = await deps.runtime.run({
     agentId: contract.id,

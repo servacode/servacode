@@ -171,6 +171,7 @@ async function harness(o: { passing?: boolean } = {}): Promise<Harness> {
     boundary: qualification.boundary,
     prerequisites: qualification.probe.prerequisites,
     basis: 'simulated boundary for an orchestration test',
+    toExecutionPath: (x: string) => x,
   };
 
   return {

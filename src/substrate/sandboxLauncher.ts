@@ -1,4 +1,4 @@
-import { GUEST_PATH } from './transport.js';
+import { GUEST_PATH, resolveGuestBinary } from './transport.js';
 import type { ExecTransport, TransportCommand } from './transport.js';
 
 /**
@@ -109,6 +109,14 @@ export interface BubblewrapOptions {
 export class BubblewrapLauncher implements SandboxLauncher {
   readonly id = 'bubblewrap';
   private readonly binary: string;
+  /**
+   * The absolute path detection found, used in place of the bare name.
+   *
+   * A bare `bwrap` is resolved against whatever PATH the command happens to carry, and
+   * a recipe's environment policy is free to scrub PATH down to something that cannot
+   * find it. The launcher must not depend on the environment of the thing it contains.
+   */
+  private resolved: string | undefined;
 
   constructor(opts: BubblewrapOptions = {}) {
     this.binary = opts.binary ?? 'bwrap';
@@ -136,11 +144,15 @@ export class BubblewrapLauncher implements SandboxLauncher {
       };
     }
     const version = r.stdout.replace(/\0/g, '').trim();
+    this.resolved = await resolveGuestBinary(transport, this.binary);
     return {
       available: true,
       version,
-      detail: 'bubblewrap responded: ' + version,
-      observations: { 'launcher:bubblewrap': version },
+      detail: 'bubblewrap responded: ' + version + ' at ' + (this.resolved ?? '(unresolved)'),
+      observations: {
+        'launcher:bubblewrap': version,
+        ...(this.resolved === undefined ? {} : { 'launcher:bubblewrap:path': this.resolved }),
+      },
     };
   }
 
@@ -180,7 +192,9 @@ export class BubblewrapLauncher implements SandboxLauncher {
     args.push('--chdir', command.cwd, '--', command.executable, ...command.args);
 
     return {
-      executable: this.binary,
+      // Absolute where detection could resolve it, so the launcher does not depend on
+      // the PATH of the command it is containing.
+      executable: this.resolved ?? this.binary,
       args,
       cwd: command.cwd,
       env: command.env,

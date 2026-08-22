@@ -88,6 +88,14 @@ export interface EngineeringEngine {
   /** Why no Producer may be dispatched, or undefined. */
   readonly refusal?: string;
   readonly basis: string;
+  /**
+   * A host path as the ENGINE will name it.
+   *
+   * Capability grants are computed on the host and enforced in the execution
+   * environment, so an absolute permission rule has to carry the path the engine
+   * actually sees.
+   */
+  readonly toExecutionPath: (hostPath: string) => string;
 }
 
 function unavailable(basis: string, prerequisites: readonly Prerequisite[]): EngineeringEngine {
@@ -98,6 +106,7 @@ function unavailable(basis: string, prerequisites: readonly Prerequisite[]): Eng
     qualification: undefined,
     boundary: undefined,
     prerequisites,
+    toExecutionPath: (x) => x,
     refusal:
       'PLATFORM_PREREQUISITE_REQUIRED: ' +
       prerequisites
@@ -309,6 +318,7 @@ export async function resolveEngineeringEngine(
     prerequisites: qualification.probe.prerequisites,
     ...(refusal === undefined ? {} : { refusal }),
     basis,
+    toExecutionPath: (hostPath) => transport.toGuestPath(hostPath),
   };
 }
 

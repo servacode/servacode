@@ -64,6 +64,18 @@ export const EvidenceClaimSchema = z
     /** The tool the agent says produced it, where applicable. */
     tool: z.string().optional(),
     reference: z.string().optional(),
+    /**
+     * What the agent says HAPPENED to that operation.
+     *
+     * Without this the runtime had one reading of every claim — "I did X" — and so a
+     * reviewer that honestly reported *"my Read of this file was denied"* was adjudicated
+     * against a record of a denied Read and marked CONTRADICTED. The claim and the record
+     * agreed; the vocabulary could not express agreement.
+     *
+     * Absent means SUCCEEDED. That preserves the meaning of every claim that does not say
+     * otherwise, so nothing a previous run asserted becomes easier to get away with.
+     */
+    expectedOutcome: z.enum(['SUCCEEDED', 'FAILED', 'DENIED']).optional(),
   })
   .strict();
 
@@ -195,6 +207,12 @@ export function envelopeJsonSchema(resultSchema: Record<string, unknown>): Recor
             statement: { type: 'string', minLength: 1 },
             tool: { type: 'string' },
             reference: { type: 'string' },
+            expectedOutcome: {
+              type: 'string',
+              enum: ['SUCCEEDED', 'FAILED', 'DENIED'],
+              description:
+                'What happened to the operation. Use DENIED when a tool call was refused: reporting a refusal honestly is not a failed claim, and omitting this defaults to SUCCEEDED.',
+            },
           },
         },
       },
@@ -299,6 +317,62 @@ export function verifyEvidenceClaims(
           '"' +
           named +
           '" is not a tool granted to this run, so the field describes something rather than naming a capability; the claim is recorded, not corroborated',
+      };
+    }
+
+    /*
+     * A claim about a NON-success outcome is corroborated by a record of that outcome.
+     *
+     * "My Read was denied" and "I read the file" are different claims about the same
+     * operation, and only one of them is corroborated by a successful call. Treating
+     * them alike is what turned an honest report of a refusal into an evidence
+     * violation that failed the run.
+     *
+     * This does not soften the fabrication check: a claim of SUCCEEDED still requires a
+     * SUCCEEDED record, and nothing here lets an agent turn a denial into a pass.
+     */
+    const expected = claim.expectedOutcome ?? 'SUCCEEDED';
+    if (expected !== 'SUCCEEDED' && named !== undefined) {
+      const want = expected === 'DENIED' ? ToolCallOutcome.DENIED : ToolCallOutcome.FAILED;
+      const ofTool = observed.filter((c) => c.tool === named);
+      const matching = ofTool.filter(
+        (c) => c.outcome === want && (subject === undefined || subjectsMatch(c.subject, subject)),
+      );
+
+      if (matching.length > 0) {
+        return {
+          claim,
+          verification: ClaimVerification.CORROBORATED,
+          reason:
+            'the runtime observed ' +
+            named +
+            ' ' +
+            String(want).toLowerCase() +
+            ', which is what the claim states',
+        };
+      }
+      if (ofTool.length === 0) {
+        return {
+          claim,
+          verification: ClaimVerification.UNVERIFIED,
+          reason:
+            'no ' +
+            named +
+            ' call was observed at all, so the claimed ' +
+            expected.toLowerCase() +
+            ' outcome is recorded rather than corroborated',
+        };
+      }
+      return {
+        claim,
+        verification: ClaimVerification.CONTRADICTED,
+        reason:
+          'the claim states ' +
+          named +
+          ' ' +
+          expected.toLowerCase() +
+          ', but the runtime observed ' +
+          ofTool.map((c) => String(c.outcome).toLowerCase()).join(', '),
       };
     }
 

@@ -201,6 +201,7 @@ export async function implementWorkItem(
     enabledProducers: deps.enabledProducers ?? PHASE4_CANDIDATE_PRODUCERS,
     engineCapabilities: engine.capabilities,
     engineVersion: engine.status.version,
+    toExecutionPath: engine.toExecutionPath,
     ...(deps.allowSimulatedBoundary === undefined
       ? {}
       : { allowSimulatedBoundary: deps.allowSimulatedBoundary }),

@@ -120,7 +120,22 @@ export function buildSandboxProfile(input: SandboxProfileInput): GeneratedSandbo
         allowRead: [worktree, project],
         denyRead: [join(project, SERVA_INTERNAL_DIR), ...CREDENTIAL_DENY_READ],
       },
-      network: { enabled: input.networkAllowed === true },
+      /*
+       * `allowedDomains`, not `{ enabled: false }`.
+       *
+       * The engine's network layer is an allowlist of domains; an empty list is the
+       * denial. `enabled` is not a key it validates, and a settings file that fails
+       * validation is silently ignored — so the WHOLE sandbox profile was dropped and
+       * the run fell back to defaults: writes confined to the working directory, reads
+       * open across the machine.
+       *
+       * Measured, not inferred. A real Producer with Bash reached
+       * `cat <project>/.serva/SECRET_MARKER.txt` and got the contents, while the same
+       * case refused under the standalone runtime. One malformed key had voided every
+       * read protection in the profile while the write protections — which come from
+       * the default policy — kept working and made it look fine.
+       */
+      network: { allowedDomains: input.networkAllowed === true ? ['*'] : [] },
     },
   };
 

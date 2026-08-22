@@ -52,6 +52,17 @@ export interface ExecTransport {
   readonly kind: TransportKind;
   /** A host path as the guest sees it. Identity for a local transport. */
   toGuestPath(hostPath: string): string;
+  /**
+   * A host environment as the execution environment should receive it.
+   *
+   * The counterpart of `toGuestPath`, and needed for the same reason. A recipe's
+   * environment policy scrubs the HOST environment, so on Windows it yields
+   * `PATH=C:\Users\…;C:\Program Files\Git\…` — which is not merely useless inside a
+   * Linux guest, it silently broke the sandbox: `env -i PATH=<windows path> bwrap …`
+   * could not resolve `bwrap`, and every recipe exited 127 with the failure attributed
+   * to the test rather than to the environment.
+   */
+  environmentFor(hostEnv: Readonly<Record<string, string>>): Record<string, string>;
   run(command: TransportCommand): Promise<TransportResult>;
   /**
    * Stable facts about this transport, hashed into the qualification fingerprint.
@@ -147,6 +158,11 @@ export class LocalPosixTransport implements ExecTransport {
 
   toGuestPath(hostPath: string): string {
     return resolve(hostPath);
+  }
+
+  /** Same machine: the host environment IS the execution environment. */
+  environmentFor(hostEnv: Readonly<Record<string, string>>): Record<string, string> {
+    return { ...hostEnv };
   }
 
   async run(command: TransportCommand): Promise<TransportResult> {
@@ -291,6 +307,32 @@ export class WslTransport implements ExecTransport {
     // qualification builds a guest-path layout and then hands those paths to
     // `execute`, which translates its own inputs.
     return isAbsolute(hostPath) || /^[A-Za-z]:/.test(hostPath) ? toWslPath(hostPath) : hostPath;
+  }
+
+  /**
+   * Windows values do not cross into the guest.
+   *
+   * `PATH` is replaced with the guest's own: a Windows PATH inside Linux resolves
+   * nothing, and that is not a cosmetic problem. A recipe's `MINIMAL` environment
+   * policy scrubs the HOST environment, so the guest received
+   * `PATH=C:\Users\...;C:\Program Files\Git\...`; `env -i PATH=<that> bwrap ...` could
+   * not find `bwrap`, and every recipe exited 127 — reported as a failing test suite
+   * rather than as a broken environment.
+   *
+   * Any other value that still looks like a Windows path is dropped rather than
+   * translated. `HOME=C:\Users\adzor` would point a tool at a directory that does not
+   * exist, and guessing its Linux equivalent would be inventing a fact about the guest.
+   */
+  environmentFor(hostEnv: Readonly<Record<string, string>>): Record<string, string> {
+    const windowsShaped = (v: string): boolean => /^[A-Za-z]:[\\/]/.test(v) || v.includes('\\');
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(hostEnv)) {
+      if (k === 'PATH') continue;
+      if (windowsShaped(v)) continue;
+      out[k] = v;
+    }
+    out['PATH'] = GUEST_PATH;
+    return out;
   }
 
   async run(command: TransportCommand): Promise<TransportResult> {

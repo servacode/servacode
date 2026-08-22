@@ -231,6 +231,26 @@ export function relativeRule(tool: string, relativePath: string): string {
 export const EVERYTHING_UNDER_CWD = '**';
 
 /**
+ * Build a permission rule anchored at an ABSOLUTE path in the execution environment.
+ *
+ * The counterpart to `relativeRule`, and both are needed. A cwd-relative rule governs
+ * a relative request; a model that names the same file by its absolute path matches
+ * neither the relative rule nor anything else, so under `dontAsk` the call is denied.
+ * That is exactly how a reviewer with `Read(**)` came to be refused every read of the
+ * worktree it was pointed at.
+ *
+ * The anchor is `//` followed by a POSIX path. The earlier finding that absolute rules
+ * "did not hold" was specific to Windows drive letters, which do not survive that
+ * anchor — the paths here are guest paths and are already POSIX. Measured directly
+ * against the engine: `Read(//tmp/x/**)` authorises an absolute read of `/tmp/x/a.txt`,
+ * and a `disallowedTools` rule on a subtree still refuses it.
+ */
+export function absoluteRule(tool: string, absolutePosixPath: string): string {
+  const clean = absolutePosixPath.replace(/\\/g, '/').replace(/^\/+/, '');
+  return tool + '(//' + clean + ')';
+}
+
+/**
  * Resolve the runtime capability grant for one agent.
  *
  * Throws rather than degrading to a smaller grant: an agent that needs to read and is
