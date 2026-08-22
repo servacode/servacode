@@ -43,6 +43,9 @@ import { checkDesign } from './checks/design.js';
 import { assessFreshness, staleSubjects } from './research/freshness.js';
 import { marketFreshnessSubjects } from './research/subjects.js';
 import { readOrchestratorRecord } from './execution/orchestrator.js';
+import { outstandingChanges } from './change.js';
+import { resolveApplicability, upstreamGatesFor } from './applicability.js';
+import { UPSTREAM_GATES } from './gates/definitions.js';
 import type { EngineeringReadinessPackage } from './artifacts/governance.js';
 import type { TraceFinding } from './checks/traceability.js';
 import type { Store } from '../store/store.js';
@@ -72,13 +75,22 @@ import type { IdSource } from '../core/ids.js';
  * hand over" answerable later.
  */
 
-/** Gates that must have accepted before implementation may begin. */
-const REQUIRED_GATES: readonly string[] = Object.freeze([
-  'SC-GATE-INTAKE',
-  'SC-GATE-DISCOVERY',
-  'SC-GATE-PRODUCT_VALIDATION',
-  'SC-GATE-REQUIREMENTS',
-]);
+/**
+ * The gates that must have accepted, DERIVED from the profile actually being run.
+ *
+ * Not a hand-kept list. A hand-kept list is a list that stops being updated: a gate gets
+ * defined, its stage gets wired, the run starts evaluating it — and readiness carries on
+ * ignoring it, so a FAIL verdict sits in the record while the status reads READY. Taking
+ * the profile's own gate sequence means a gate becomes mandatory at the moment its stage
+ * enters the plan, with nobody having to remember.
+ *
+ * A gate in the plan that this build cannot evaluate does not become optional. It has no
+ * result, so it blocks as "has not been evaluated" — which is the truth.
+ */
+function requiredGates(profileId: string): readonly string[] {
+  const blocking = new Set(UPSTREAM_GATES.filter((g) => g.blocking).map((g) => g.id));
+  return upstreamGatesFor(resolveApplicability(profileId)).filter((id) => blocking.has(id));
+}
 
 const ACCEPTING: readonly string[] = Object.freeze([
   GateVerdict.PASS,
@@ -206,7 +218,12 @@ export function assessReadiness(input: ReadinessInput): ReadinessAssessment {
 
   const record = readOrchestratorRecord(store, input.workItemId);
   const gateResults = record?.gateResults ?? [];
-  for (const gateId of REQUIRED_GATES) {
+  /*
+   * No record means no run: nothing has been gated, so nothing may be handed over. Saying
+   * so once is clearer than emitting a blocker per gate for a project that never started.
+   */
+  if (record === undefined) blockers.push('no intelligence run exists for ' + input.workItemId);
+  for (const gateId of record === undefined ? [] : requiredGates(record.profileId)) {
     if (input.waiveGates?.has(gateId) === true) continue;
     const result = gateResults.find((g) => g.gateId === gateId);
     if (result === undefined) {
@@ -223,6 +240,25 @@ export function assessReadiness(input: ReadinessInput): ReadinessAssessment {
   const open = decisions.filter((d) => d.state === 'OPEN');
   for (const d of open) {
     blockers.push('an owner decision is unanswered: ' + d.question.slice(0, 100));
+  }
+
+  /* ------------------------------------------- 2b. changes not yet carried through */
+
+  /*
+   * SPEC: §34. A raised change is a statement that the canon below is out of date. Handing
+   * over while one is outstanding hands over a description of a product somebody has
+   * already asked to alter — and the implementation would be correct against a
+   * specification the owner has stopped agreeing with.
+   */
+  for (const c of outstandingChanges(store)) {
+    blockers.push(
+      'change ' +
+        c.id +
+        ' is ' +
+        c.state +
+        ' and not carried through: ' +
+        c.description.slice(0, 80),
+    );
   }
 
   /* ------------------------------------------------------------- 3. staleness */

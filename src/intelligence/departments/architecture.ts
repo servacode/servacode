@@ -3,6 +3,7 @@ import { ARTIFACT_TYPES, repository } from '../repository.js';
 import { ConstraintSchema } from '../artifacts/framing.js';
 import { NfrSchema, RequirementSchema } from '../artifacts/requirements.js';
 import { BusinessRuleSchema } from '../artifacts/business.js';
+import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
 import {
   AdrSchema,
   ArchitectureModelSchema,
@@ -327,7 +328,54 @@ export const architectureDepartment: DepartmentConfig<typeof ArchitectureOutputS
     });
     ids.push(mappingId);
 
+    /*
+     * A SPECIFICATION GAP IS ESCALATED, NOT FILLED.
+     *
+     * This is the single place where an architect is most tempted to help. The
+     * requirements do not say what happens to an order placed after closing time, the
+     * design needs an answer, and inventing a reasonable one costs nothing and unblocks
+     * everything. It also silently makes a business decision on the owner's behalf — and
+     * by the time anyone reads the requirement back, it looks like something they asked
+     * for.
+     *
+     * So the gap becomes a blocking OwnerDecisionRequest, the orchestrator stops at
+     * WAITING_FOR_OWNER, and the answer comes back from a person. A note would not do
+     * this: a note is something the run emits and the lifecycle ignores.
+     */
+    const ownerDecisionIds: string[] = [];
+    const decisions = repository(
+      ctx.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    );
     for (const g of output.specificationGaps) {
+      const odrId = ctx.ids.next('SC-ODR');
+      decisions.put(tx, {
+        id: odrId,
+        createdAt: at,
+        question: 'The specification does not say: ' + g.what,
+        whyServaCannotDecide:
+          'Architecture can decide HOW the product is built. This is a question about WHAT it should do, and answering it here would put a business decision in a technical document where nobody would think to look for it.',
+        options: [
+          {
+            option: 'Answer it, and Serva records it as a requirement',
+            impact: g.whyItBlocksDesign,
+          },
+          {
+            option: 'Defer it, and Serva designs around the absence',
+            impact: 'the design leaves the behaviour unspecified rather than guessing at it',
+          },
+        ],
+        recommendation: 'Answer it',
+        recommendationRationale:
+          'The design is blocked either way; answering makes the blockage go away rather than moving it downstream.',
+        blocksWork: true,
+        blockedRefs: [{ id: modelId }],
+        state: 'OPEN',
+        meta: derived(ctx, ARCHITECT, [modelId], 'specification gap escalated upstream'),
+      });
+      ids.push(odrId);
+      ownerDecisionIds.push(odrId);
       notes.push('SPECIFICATION_GAP escalated upstream: ' + g.what + ' — ' + g.whyItBlocksDesign);
     }
 
@@ -335,6 +383,7 @@ export const architectureDepartment: DepartmentConfig<typeof ArchitectureOutputS
     return {
       artifactIds: ids,
       notes,
+      ownerDecisionIds,
       judgements: [
         {
           criterionRef: 'AR-1',

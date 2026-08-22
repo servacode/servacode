@@ -1,0 +1,486 @@
+import { StageLedgerDisposition } from '../vocab/index.js';
+import { fail } from '../core/errors.js';
+import { AuditAction, audit } from '../events/audit.js';
+import { appendLedgerEntry } from '../lifecycle/stages.js';
+import { getCatalogues } from '../catalogue/index.js';
+import { ARTIFACT_TYPES, canonExists, repository } from './repository.js';
+import {
+  ChangeRequestSchema,
+  IMPACT_DIMENSIONS,
+  ImpactAnalysisSchema,
+  OwnerDecisionRequestSchema,
+  unassessedDimensions,
+} from './artifacts/governance.js';
+import { readOrchestratorRecord, writeOrchestratorRecord } from './execution/orchestrator.js';
+import { resolveApplicability } from './applicability.js';
+import type { ChangeRequest, ImpactAnalysis } from './artifacts/governance.js';
+import type { Store } from '../store/store.js';
+import type { Clock } from '../core/clock.js';
+import type { IdSource } from '../core/ids.js';
+
+/**
+ * CHANGE, IMPACT AND RE-ENTRY.
+ *
+ * SPEC: §34, SC-POL-013, SC-WF-009.
+ *
+ * The failure this exists to prevent is the quiet one: the owner asks for something small,
+ * somebody edits a requirement, and eleven other things that depended on it are now wrong
+ * and nobody re-checked them. A change does not edit canon. It produces an assessment of
+ * what it touches, and re-entry re-derives the affected work THROUGH THE SAME GOVERNANCE
+ * that produced it the first time — same departments, same gates, same runner.
+ *
+ * Three rules make that mechanical rather than aspirational:
+ *
+ *   1. every mandated dimension must be assessed. UNKNOWN is not in the enum, and an
+ *      unassessed dimension is an unfinished analysis, not a finding.
+ *   2. re-entry is by STAGE, and re-entering invalidates that stage and everything after
+ *      it. You cannot re-run architecture and keep the design that was derived from the
+ *      old one.
+ *   3. a change that has been raised and not carried through BLOCKS readiness. Otherwise
+ *      the handover describes a product the owner has already changed their mind about.
+ *
+ * Nothing here calls a model. What a change affects is a judgement, and it arrives from
+ * the assessing department as data; what that judgement OBLIGES is arithmetic over the
+ * lifecycle, and arithmetic is Serva's.
+ */
+
+export interface ChangeDeps {
+  readonly store: Store;
+  readonly clock: Clock;
+  readonly ids: IdSource;
+}
+
+/** Raise a change. Recording it is not approving it, and it is not scope. */
+export function raiseChangeRequest(
+  deps: ChangeDeps,
+  o: {
+    readonly origin: string;
+    readonly description: string;
+    readonly magnitude: ChangeRequest['magnitude'];
+  },
+): ChangeRequest {
+  const at = deps.clock.now();
+  const cr = ChangeRequestSchema.parse({
+    id: deps.ids.next('SC-CR'),
+    createdAt: at,
+    origin: o.origin,
+    description: o.description,
+    magnitude: o.magnitude,
+    state: 'RAISED',
+    meta: {
+      provenance: { marking: 'OWNER_STATED', verbatim: o.description, statedAt: at },
+      attribution: { at },
+    },
+  });
+  const tx = deps.store.begin();
+  try {
+    repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema).put(tx, cr);
+    audit(tx, {
+      action: AuditAction.ARTIFACT_RECORDED,
+      subject: cr.id,
+      outcome: 'OK',
+      detail: { magnitude: o.magnitude, origin: o.origin },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return cr;
+}
+
+export interface ImpactInput {
+  readonly changeRequestId: string;
+  readonly dimensions: readonly {
+    readonly dimension: string;
+    readonly verdict: 'AFFECTED' | 'NOT_AFFECTED';
+    readonly rationale: string;
+    readonly affectedRefs?: readonly { readonly id: string; readonly version?: number }[];
+  }[];
+  readonly reentryStageId: string;
+  readonly assessedBy: string;
+}
+
+/**
+ * Record an impact analysis, refusing an incomplete one.
+ *
+ * The refusals are all about the same thing: an analysis that LOOKS complete because the
+ * dimensions it skipped are simply not mentioned. A missing dimension, a re-entry stage
+ * that is not a real stage, and an affected reference to canon that does not exist are
+ * each a way for a change to be waved through without anybody noticing it was.
+ */
+export function analyseImpact(deps: ChangeDeps, input: ImpactInput): ImpactAnalysis {
+  const crRepo = repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema);
+  const cr = crRepo.get(input.changeRequestId);
+  if (cr === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'No change request ' + input.changeRequestId + ' exists',
+      remedy: 'Raise the change before analysing it.',
+      specRef: '§34',
+    });
+  }
+
+  const at = deps.clock.now();
+  const draft = ImpactAnalysisSchema.parse({
+    id: deps.ids.next('SC-IA'),
+    createdAt: at,
+    changeRequestRef: { id: cr.id, version: cr.version },
+    magnitude: cr.magnitude,
+    dimensions: input.dimensions.map((d) => ({
+      dimension: d.dimension,
+      verdict: d.verdict,
+      rationale: d.rationale,
+      affectedRefs: [...(d.affectedRefs ?? [])],
+    })),
+    reentryStageId: input.reentryStageId,
+    meta: {
+      provenance: {
+        marking: 'DERIVED',
+        from: [cr.id],
+        rationale: 'assessed against every dimension SC-POL-013 mandates',
+      },
+      attribution: { at, agentId: input.assessedBy },
+    },
+  });
+
+  const unassessed = unassessedDimensions(draft);
+  if (unassessed.length > 0) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'The impact analysis did not assess: ' + unassessed.join(', '),
+      remedy:
+        'SC-POL-013 mandates every dimension. A dimension nobody looked at is not NOT_AFFECTED — it is unknown, and unknown is not an outcome a change may proceed on.',
+      details: { assessed: draft.dimensions.map((d) => d.dimension), unassessed },
+      specRef: 'SC-POL-013',
+    });
+  }
+
+  const stage = getCatalogues().stages.find((s) => s.id === draft.reentryStageId);
+  if (stage === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Re-entry stage ' + draft.reentryStageId + ' is not a canonical stage',
+      remedy:
+        'Stages are canonical in 03. Re-entry picks one of them; it does not get to name a new one.',
+      specRef: '03 §4',
+    });
+  }
+
+  const missing: string[] = [];
+  for (const d of draft.dimensions) {
+    for (const ref of d.affectedRefs) {
+      if (!canonExists(deps.store, ref.id)) missing.push(d.dimension + ':' + ref.id);
+    }
+  }
+  if (missing.length > 0) {
+    return fail({
+      code: 'E_VALIDATION',
+      message:
+        'The analysis says the change affects canon that does not exist: ' + missing.join(', '),
+      remedy:
+        'An affected reference must point at something real. A reference to nothing cannot be re-derived, so it would be dropped from the re-entry without anybody being told.',
+      details: { missing },
+      specRef: '§34',
+    });
+  }
+
+  const tx = deps.store.begin();
+  try {
+    repository(deps.store, ARTIFACT_TYPES.IMPACT_ANALYSIS, ImpactAnalysisSchema).put(tx, draft);
+    crRepo.put(tx, {
+      ...cr,
+      state: 'ANALYSED',
+      impactAnalysisRef: { id: draft.id, version: draft.version },
+    });
+    audit(tx, {
+      action: AuditAction.ARTIFACT_RECORDED,
+      subject: draft.id,
+      outcome: 'OK',
+      detail: {
+        changeRequest: cr.id,
+        reentryStageId: draft.reentryStageId,
+        affected: draft.dimensions.filter((d) => d.verdict === 'AFFECTED').map((d) => d.dimension),
+      },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return draft;
+}
+
+/**
+ * Approve a change. M3 and M4 need the owner, and nothing may stand in for them.
+ *
+ * The owner decision is looked up rather than asserted, and must be ANSWERED by somebody
+ * who is not an agent — the same rule the orchestrator applies, applied again here because
+ * this is a second door into the same authority and a second door is how the first one
+ * stops mattering.
+ */
+export function approveChange(
+  deps: ChangeDeps,
+  o: { readonly changeRequestId: string; readonly ownerDecisionId?: string },
+): ChangeRequest {
+  const crRepo = repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema);
+  const cr = crRepo.get(o.changeRequestId);
+  if (cr === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'No change request ' + o.changeRequestId + ' exists',
+      remedy: 'Raise it first.',
+      specRef: '§34',
+    });
+  }
+  if (cr.state !== 'ANALYSED') {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Change ' + cr.id + ' is ' + cr.state + ', not ANALYSED',
+      remedy:
+        'Approving a change nobody has assessed approves an unknown quantity. Run the impact analysis first.',
+      specRef: '§34',
+    });
+  }
+
+  const needsOwner = cr.magnitude === 'M3' || cr.magnitude === 'M4';
+  if (needsOwner) {
+    if (o.ownerDecisionId === undefined) {
+      return fail({
+        code: 'E_GATE_AUTHORITY',
+        message: 'A ' + cr.magnitude + ' change requires an owner decision',
+        remedy:
+          'M3 and M4 changes alter what the product IS. That is the owner’s call, and Serva has no way to make it on their behalf.',
+        specRef: 'SC-POL-013',
+      });
+    }
+    const decision = repository(
+      deps.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    ).get(o.ownerDecisionId);
+    if (decision === undefined || decision.state !== 'ANSWERED') {
+      return fail({
+        code: 'E_GATE_AUTHORITY',
+        message: 'Owner decision ' + o.ownerDecisionId + ' is not answered',
+        remedy: 'An unanswered question is not approval.',
+        specRef: '§32',
+      });
+    }
+    if (decision.answeredBy === undefined || decision.answeredBy.startsWith('SC-AGENT-')) {
+      return fail({
+        code: 'E_GATE_AUTHORITY',
+        message:
+          'Owner decision ' + o.ownerDecisionId + ' was answered by ' + String(decision.answeredBy),
+        remedy: 'An agent cannot approve a change on the owner’s behalf.',
+        specRef: '§32',
+      });
+    }
+  }
+
+  const next: ChangeRequest = { ...cr, state: 'APPROVED' };
+  const tx = deps.store.begin();
+  try {
+    crRepo.put(tx, next);
+    audit(tx, {
+      action: AuditAction.ARTIFACT_RECORDED,
+      subject: cr.id,
+      outcome: 'OK',
+      detail: { state: 'APPROVED', ownerDecision: o.ownerDecisionId ?? null },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return next;
+}
+
+export interface ReentryPlan {
+  readonly changeRequestId: string;
+  readonly reentryStageId: string;
+  /** Upstream stages that must run again, in lifecycle order. */
+  readonly stagesToRerun: readonly string[];
+  /** Canon the analysis says this change affects. */
+  readonly affectedRefs: readonly string[];
+  /** Stages that stand, so a reader can see that the delta really is a delta. */
+  readonly stagesRetained: readonly string[];
+}
+
+/**
+ * What re-entry obliges, computed from the lifecycle.
+ *
+ * Everything from the re-entry stage onward runs again. Not because every later stage is
+ * necessarily wrong, but because each was derived from the one before it: keeping a design
+ * that was justified by an architecture we are about to change is how a company ends up
+ * with canon that agrees with nothing.
+ */
+export function planReentry(
+  store: Store,
+  o: { readonly changeRequestId: string; readonly profileId: string },
+): ReentryPlan {
+  const cr = repository(store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema).get(
+    o.changeRequestId,
+  );
+  if (cr === undefined || cr.impactAnalysisRef === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Change ' + o.changeRequestId + ' has no impact analysis',
+      remedy:
+        'Analyse the change before planning re-entry. The analysis is what says where to re-enter.',
+      specRef: '§34',
+    });
+  }
+  const analysis = repository(store, ARTIFACT_TYPES.IMPACT_ANALYSIS, ImpactAnalysisSchema).get(
+    cr.impactAnalysisRef.id,
+  );
+  if (analysis === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Impact analysis ' + cr.impactAnalysisRef.id + ' is missing from the store',
+      remedy: 'Canon does not disappear. This store is inconsistent and should be verified.',
+      specRef: '§34',
+    });
+  }
+
+  const plan = resolveApplicability(o.profileId);
+  const order = plan.upstreamToRun.map((s) => s.stageId);
+  const from = order.indexOf(analysis.reentryStageId);
+  const stagesToRerun = from < 0 ? [] : order.slice(from);
+  const stagesRetained = from < 0 ? order : order.slice(0, from);
+
+  return {
+    changeRequestId: cr.id,
+    reentryStageId: analysis.reentryStageId,
+    stagesToRerun,
+    stagesRetained,
+    affectedRefs: analysis.dimensions.flatMap((d) => d.affectedRefs.map((r) => r.id)),
+  };
+}
+
+/**
+ * Re-open the orchestrator at the re-entry stage.
+ *
+ * Idempotent, because the operation is "these stages are no longer complete" rather than
+ * "undo one step". Applying the same approved change twice leaves the record in the same
+ * shape: the second application has nothing left to remove.
+ *
+ * The gate results for re-run stages are dropped too. A gate verdict is a statement about
+ * evidence that existed when it was evaluated; keeping it would let a change sail past a
+ * gate on the strength of the very artifacts it just invalidated.
+ */
+export function applyReentry(
+  deps: ChangeDeps,
+  o: { readonly workItemId: string; readonly changeRequestId: string },
+): ReentryPlan {
+  const record = readOrchestratorRecord(deps.store, o.workItemId);
+  if (record === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'No intelligence run exists for ' + o.workItemId,
+      remedy: 'There is nothing to re-enter. Run the company first.',
+      specRef: '§34',
+    });
+  }
+  const plan = planReentry(deps.store, {
+    changeRequestId: o.changeRequestId,
+    profileId: record.profileId,
+  });
+  const rerun = new Set(plan.stagesToRerun);
+
+  const gatesOfRerun = new Set(
+    resolveApplicability(record.profileId)
+      .upstreamToRun.filter((s) => rerun.has(s.stageId))
+      .flatMap((s) => (s.gate === undefined ? [] : [s.gate])),
+  );
+
+  const alreadyDone = record.completedStages.filter((s) => rerun.has(s));
+
+  const tx = deps.store.begin();
+  try {
+    writeOrchestratorRecord(tx, {
+      ...record,
+      state: 'RUNNING',
+      completedStages: record.completedStages.filter((s) => !rerun.has(s)),
+      ranStages: record.ranStages.filter((s) => !rerun.has(s)),
+      gateResults: record.gateResults.filter((g) => !gatesOfRerun.has(g.gateId)),
+      pendingOwnerDecisions: [],
+      updatedAt: deps.clock.now(),
+    });
+    /*
+     * Only stages that had actually completed are abandoned. A second application would
+     * otherwise write a ledger entry claiming to abandon work that was already abandoned,
+     * and the ledger would grow a step every time somebody re-ran the same command.
+     */
+    for (const stageId of alreadyDone) {
+      appendLedgerEntry(
+        tx,
+        { ids: deps.ids, clock: deps.clock, actor: 'SC-INTELLIGENCE' },
+        {
+          workItemId: o.workItemId,
+          stageId,
+          profileRef: record.profileId,
+          disposition: StageLedgerDisposition.ABANDONED,
+          attempt: 1,
+          reason:
+            'superseded by change ' +
+            plan.changeRequestId +
+            ', which re-enters the lifecycle at ' +
+            plan.reentryStageId,
+        },
+      );
+    }
+    audit(tx, {
+      action: AuditAction.ARTIFACT_RECORDED,
+      subject: plan.changeRequestId,
+      outcome: 'OK',
+      detail: { reentryStageId: plan.reentryStageId, stagesToRerun: plan.stagesToRerun },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return plan;
+}
+
+/** Mark a change carried through. Only then does it stop blocking readiness. */
+export function completeChange(deps: ChangeDeps, changeRequestId: string): ChangeRequest {
+  const repo = repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema);
+  const cr = repo.get(changeRequestId);
+  if (cr === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'No change request ' + changeRequestId + ' exists',
+      remedy: 'Nothing to complete.',
+      specRef: '§34',
+    });
+  }
+  if (cr.state !== 'APPROVED') {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Change ' + cr.id + ' is ' + cr.state + ', not APPROVED',
+      remedy: 'Only an approved change can be carried through.',
+      specRef: '§34',
+    });
+  }
+  const next: ChangeRequest = { ...cr, state: 'IMPLEMENTED' };
+  const tx = deps.store.begin();
+  try {
+    repo.put(tx, next);
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return next;
+}
+
+/** Changes raised and not yet carried through or rejected. Readiness blocks on these. */
+export function outstandingChanges(store: Store): readonly ChangeRequest[] {
+  return repository(store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema)
+    .list()
+    .filter((c) => c.state === 'RAISED' || c.state === 'ANALYSED' || c.state === 'APPROVED');
+}
+
+export { IMPACT_DIMENSIONS };

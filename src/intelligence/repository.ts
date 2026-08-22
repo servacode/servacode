@@ -255,3 +255,18 @@ export function repository<S extends z.ZodTypeAny>(
 ): ArtifactRepository<S> {
   return new ArtifactRepository(store, type, schema);
 }
+
+/**
+ * Does any artifact family hold this id?
+ *
+ * Used where a reference arrives from outside — an impact analysis naming what it affects,
+ * a handoff naming what it relies on. Scanning every family is the honest implementation:
+ * ids are unique across canon, and a caller that had to know the family in advance could
+ * not check a reference it did not already understand.
+ */
+export function canonExists(store: Store, id: string): boolean {
+  for (const type of Object.values(ARTIFACT_TYPES)) {
+    if (store.listCanonIds(type).includes(id)) return true;
+  }
+  return false;
+}

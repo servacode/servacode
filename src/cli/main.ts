@@ -16,6 +16,7 @@ import {
   cmdQualificationCatalogue,
 } from './commands/engineering.js';
 import { cmdImplement } from './commands/implement.js';
+import { cmdIntelligence, INTELLIGENCE_USAGE } from './commands/intelligence.js';
 import { SERVA_VERSION, SPEC_BASELINE } from '../app/runtime.js';
 
 /**
@@ -83,6 +84,9 @@ const USAGE = [
   '  run <SC-RUN-...>              One run event log',
   '  context <SC-RUN-...>          Exactly what that run was shown',
   '',
+  'Company intelligence:',
+  INTELLIGENCE_USAGE,
+  '',
   'Engineering factory:',
   '  implement <work-item-id>      Build a work item: producer, checks, review, commit',
   '  engineering status            Substrate class, governance state, enabled producers',
@@ -117,6 +121,7 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   context: cmdContext,
   engineering: cmdEngineering,
   implement: cmdImplement,
+  intelligence: cmdIntelligence,
   worktrees: cmdWorktrees,
   worktree: cmdWorktrees,
   changes: cmdChanges,

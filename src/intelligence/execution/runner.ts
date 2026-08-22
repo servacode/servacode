@@ -207,6 +207,35 @@ export async function runDepartment<S extends z.ZodTypeAny>(
   /* ------------------------------------------- 6b. context, deliberately narrow */
 
   const spec = config.buildContext(ctx);
+
+  /*
+   * INDEPENDENCE, SECOND HALF — enforced on the CONTEXT, not on the prompt.
+   *
+   * Being a different agent id is necessary and not sufficient. A reviewer handed the
+   * author's own run — its reasoning, its justification, its summary of why the work is
+   * good — is reading the case for the defence and will agree with it. Independence means
+   * reviewing the ARTIFACT: canon is sourced by artifact id and type, so a context element
+   * sourced from a forbidden ACTOR is the author's voice arriving by the back door.
+   *
+   * Refused rather than filtered. Silently dropping it would leave the department
+   * believing it had context it does not have, and the next reviewer to be written would
+   * make the same mistake with nothing to notice it.
+   */
+  const forbiddenActors = new Set(config.independentOf ?? []);
+  if (forbiddenActors.size > 0) {
+    const leaked = spec.canon.filter((c) => forbiddenActors.has(c.source));
+    if (leaked.length > 0) {
+      return refuse(
+        DepartmentOutcome.REFUSED,
+        config.title +
+          ' must be independent of ' +
+          [...forbiddenActors].join(', ') +
+          ', but its context carries that actor’s own run: ' +
+          leaked.map((c) => c.source + '/' + c.kind).join(', ') +
+          '. A reviewer reads the artifact, not the author’s account of it.',
+      );
+    }
+  }
   if (spec.excluded.length > 0) {
     const tx = deps.store.begin();
     try {

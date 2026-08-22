@@ -12,7 +12,7 @@ import { DepartmentOutcome } from './types.js';
 import type { DepartmentConfig, DepartmentContext, DepartmentResult, RunnerDeps } from './types.js';
 import type { ApplicabilityPlan } from '../applicability.js';
 import type { GatewayDeps } from '../research/gateway.js';
-import type { Store } from '../../store/store.js';
+import type { Store, Transaction } from '../../store/store.js';
 
 /**
  * THE INTELLIGENCE ORCHESTRATOR.
@@ -481,6 +481,18 @@ export class IntelligenceOrchestrator {
     record = this.write({ ...record, state: OrchestratorState.COMPLETE });
     return { state: OrchestratorState.COMPLETE, record, ran };
   }
+}
+
+/**
+ * Write the control record from outside the orchestrator.
+ *
+ * Exists for re-entry, which must be able to say "these stages are no longer complete"
+ * without instantiating a whole orchestrator and its department list. It takes the
+ * caller's transaction so the record change commits with the ledger entries that explain
+ * it — a store that recorded one without the other would be a store nobody could read.
+ */
+export function writeOrchestratorRecord(tx: Transaction, record: OrchestratorRecord): void {
+  tx.putCanon(ORCHESTRATOR_STATE_TYPE, record.workItemId, OrchestratorRecordSchema.parse(record));
 }
 
 /** Read the control record without constructing an orchestrator. Used by the CLI. */
