@@ -4,6 +4,8 @@ import { appendLedgerEntry, startStage, transitionStage } from '../../lifecycle/
 import { assertResearchAuthority } from '../research/gateway.js';
 import { resolveIntelligencePolicy } from '../research/capability.js';
 import { parseToolSurface } from '../../agents/toolPolicy.js';
+import { ARTIFACT_TYPES, repository } from '../repository.js';
+import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
 import { DepartmentOutcome } from './types.js';
 import type {
   DepartmentConfig,
@@ -41,6 +43,75 @@ import type { z } from 'zod';
 /** Everything the ledger needs to describe one attempt. */
 function ledgerActor(config: DepartmentConfig): string {
   return config.agentId;
+}
+
+/**
+ * Turn blocking escalations into owner decisions, in one transaction.
+ *
+ * The two options are the same every time, deliberately. Serva does not know enough about
+ * an arbitrary escalation to invent meaningful alternatives, and inventing them would be
+ * the same failure as inventing the answer — so the choice offered is the honest one:
+ * answer it, or say it is out of scope and accept that the behaviour stays unspecified.
+ */
+function raiseEscalationDecisions(
+  deps: RunnerDeps,
+  config: DepartmentConfig<z.ZodTypeAny>,
+  ctx: DepartmentContext,
+  escalations: readonly { readonly condition: string; readonly detail: string }[],
+): readonly string[] {
+  const at = deps.clock.now();
+  const ids: string[] = [];
+  const tx = deps.store.begin();
+  try {
+    const repo = repository(
+      deps.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    );
+    for (const e of escalations) {
+      const id = deps.ids.next('SC-ODR');
+      repo.put(tx, {
+        id,
+        createdAt: at,
+        question: e.condition + ': ' + e.detail,
+        whyServaCannotDecide:
+          config.title +
+          ' reached the edge of what it is allowed to decide. Answering this means choosing what the product does, which is yours to choose — and a plausible default here becomes a real behaviour nobody agreed to.',
+        options: [
+          {
+            option: 'Answer it, and Serva records the answer as company truth',
+            impact: 'the stage runs again with your answer and the work continues',
+          },
+          {
+            option: 'Declare it out of scope for now',
+            impact:
+              'Serva records the absence rather than guessing, and the affected behaviour stays unspecified',
+          },
+        ],
+        recommendation: 'Answer it',
+        recommendationRationale:
+          'The work is stopped either way. Answering removes the blockage; deferring moves it downstream, where it costs more to resolve.',
+        blocksWork: true,
+        blockedRefs: [],
+        state: 'OPEN',
+        meta: {
+          provenance: {
+            marking: 'SYSTEM',
+            component: 'intelligence-runner: blocking escalation from ' + config.agentId,
+          },
+          attribution: { agentId: config.agentId, at },
+          stageId: config.stageId,
+          workItemId: ctx.workItemId,
+        },
+      });
+      ids.push(id);
+    }
+    tx.commit();
+  } catch {
+    tx.rollback();
+    return [];
+  }
+  return ids;
 }
 
 export async function runDepartment<S extends z.ZodTypeAny>(
@@ -221,6 +292,45 @@ export async function runDepartment<S extends z.ZodTypeAny>(
    * believing it had context it does not have, and the next reviewer to be written would
    * make the same mistake with nothing to notice it.
    */
+  /*
+   * ANSWERS THE OWNER HAS ALREADY GIVEN.
+   *
+   * Added by the runner rather than by each department, because it is what makes an owner
+   * pause resumable at all: a department that escalated and is now running again must SEE
+   * the answer, and every department would otherwise have to remember to ask for it.
+   *
+   * Only decisions this department itself raised are included. An answer about pricing is
+   * not context for the design system, and a context bundle that grows every time anybody
+   * anywhere answers anything is the opposite of the minimisation §41 asks for.
+   */
+  const answeredForThisDepartment = repository(
+    deps.store,
+    ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+    OwnerDecisionRequestSchema,
+  )
+    .list()
+    .filter(
+      (d) =>
+        d.state === 'ANSWERED' &&
+        d.chosenOption !== undefined &&
+        d.meta.attribution.agentId === config.agentId &&
+        d.meta.workItemId === ctx.workItemId,
+    )
+    .map((d) => ({
+      source: 'OWNER',
+      kind: ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      version: String(d.version),
+      content:
+        'The owner was asked: ' +
+        d.question +
+        String.fromCharCode(10) +
+        'The owner answered: ' +
+        String(d.chosenOption) +
+        String.fromCharCode(10) +
+        'This is a decision, not a suggestion. Proceed on it, and do not re-open it.',
+      relevance: 1,
+    }));
+
   const forbiddenActors = new Set(config.independentOf ?? []);
   if (forbiddenActors.size > 0) {
     const leaked = spec.canon.filter((c) => forbiddenActors.has(c.source));
@@ -328,7 +438,7 @@ export async function runDepartment<S extends z.ZodTypeAny>(
         basis:
           'company intelligence run: no filesystem, no execution, no network; any external evidence was retrieved by Serva and is present as untrusted data',
       },
-      canon: [...spec.canon, ...prepared.canon].map((c) => ({
+      canon: [...spec.canon, ...prepared.canon, ...answeredForThisDepartment].map((c) => ({
         source: c.source,
         kind: c.kind,
         version: c.version,
@@ -348,10 +458,85 @@ export async function runDepartment<S extends z.ZodTypeAny>(
   /* ------------------------------------------------------- 8. Serva validates */
 
   if (run.outcome !== RunOutcome.COMPLETED || run.envelope === undefined) {
+    /*
+     * NO OUTPUT = NOTHING RECORDED still holds — no canon is written from a run that did
+     * not complete. But an ESCALATED run is not a silent failure: the agent said what it
+     * could not proceed without, and discarding that leaves an operator staring at a
+     * refusal with no way to act on it.
+     *
+     * Found by the live suite, where a real intake run escalated on a genuinely
+     * under-specified request and the only thing Serva reported was that it had escalated.
+     */
+    const escalations = run.envelope?.escalations ?? [];
+    for (const e of escalations) {
+      diagnostics.push(
+        (e.blocking ? 'BLOCKING escalation: ' : 'escalation: ') + e.condition + ' — ' + e.detail,
+      );
+    }
+    const said =
+      escalations.length === 0
+        ? ''
+        : ' The run escalated: ' +
+          escalations.map((e) => e.condition + ' (' + e.detail + ')').join('; ');
+    const unresolved = run.envelope?.unresolved ?? [];
+    const open = unresolved.length === 0 ? '' : ' Unresolved: ' + unresolved.join('; ');
+
+    /*
+     * A BLOCKING escalation is a question, and the honest response to a question is to
+     * ask it — not to report an error and stop.
+     *
+     * Serva writes the OwnerDecisionRequest, not the agent. The agent supplied the
+     * condition and the detail; the structure around them — why this is not Serva's to
+     * decide, what the options are, what happens either way — is Serva's, and an agent
+     * able to author the whole request would be an agent able to author its own approval.
+     */
+    const blocking = escalations.filter((e) => e.blocking);
+    if (blocking.length > 0) {
+      const raised = raiseEscalationDecisions(deps, config, ctx, blocking);
+      if (raised.length > 0) {
+        const ltx = deps.store.begin();
+        try {
+          appendLedgerEntry(ltx, stageDeps, {
+            workItemId: ctx.workItemId,
+            stageId: config.stageId,
+            profileRef: ctx.plan.profileId,
+            /*
+             * BLOCKED, not FAILED. Nothing went wrong: the department reached the edge of
+             * what it is allowed to decide and said so, which is the behaviour the whole
+             * authority boundary exists to produce.
+             */
+            disposition: StageLedgerDisposition.BLOCKED,
+            reason:
+              config.title +
+              ' escalated ' +
+              String(blocking.length) +
+              ' question(s) that are the owner’s to answer',
+            attempt,
+          });
+          ltx.commit();
+        } catch {
+          ltx.rollback();
+        }
+        return {
+          ...base,
+          outcome: DepartmentOutcome.ESCALATED_TO_OWNER,
+          runId: run.runId,
+          ownerDecisionIds: raised,
+          diagnostics,
+          reason: config.title + ' cannot proceed without the owner.' + said + open,
+        };
+      }
+    }
+
     return {
       ...refuse(
         DepartmentOutcome.FAILED,
-        config.title + ' run ended ' + run.outcome + '. NO OUTPUT = NOTHING RECORDED.',
+        config.title +
+          ' run ended ' +
+          run.outcome +
+          '. NO OUTPUT = NOTHING RECORDED.' +
+          said +
+          open,
       ),
       runId: run.runId,
     };

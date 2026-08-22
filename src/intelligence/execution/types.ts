@@ -183,6 +183,16 @@ export const DepartmentOutcome = {
   COMPLETED: 'COMPLETED',
   /** The department did its job and produced a question only the owner can answer. */
   OWNER_DECISION_REQUIRED: 'OWNER_DECISION_REQUIRED',
+  /**
+   * The run stopped BEFORE producing anything, on a blocking escalation.
+   *
+   * Distinct from OWNER_DECISION_REQUIRED because of what resuming must do. There, the
+   * department finished and its canon is written, so a resume continues at the gate. Here
+   * nothing was written, so the department must run AGAIN once the owner has answered —
+   * and treating the two the same would leave a stage permanently empty and a lifecycle
+   * that believed it ran.
+   */
+  ESCALATED_TO_OWNER: 'ESCALATED_TO_OWNER',
   /** A prerequisite artifact was absent. Deterministic, decided before any model call. */
   PREREQUISITE_MISSING: 'PREREQUISITE_MISSING',
   /** The run failed, produced an invalid payload, or was refused. */

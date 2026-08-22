@@ -339,3 +339,56 @@ describe('READY is derived from the profile, and cannot be reached by omission',
     ).toThrow();
   });
 });
+
+describe('a blocking escalation becomes a question, not an error', () => {
+  it('the runtime raises the owner decision; the agent writes no canon and no approval', async () => {
+    const f = setup();
+    /*
+     * A real live run produced exactly this: business analysis refused to invent a
+     * cancellation policy and a payment model, and escalated. Before this behaviour
+     * existed, Serva reported "run ended ESCALATED" and stopped — throwing away the only
+     * useful thing in the response, which was the question.
+     */
+    f.engine.script('SC-AGENT-052', {
+      structuredOutput: {
+        ...envelope({ note: 'unused' }),
+        status: 'ESCALATED',
+        escalations: [
+          {
+            condition: 'money-handling semantics requiring owner confirmation',
+            detail: 'Nothing states whether a reservation involves a deposit.',
+            blocking: true,
+          },
+          {
+            condition: 'AMBIGUITY',
+            detail: 'The baseline for the activity comparison is not in the context.',
+            blocking: false,
+          },
+        ],
+        unresolved: ['No-show handling is not specified.'],
+      },
+    });
+
+    const result = await runDepartment(runnerDeps(f, ['SC-AGENT-052']), department(), context(f));
+
+    expect(result.outcome).toBe(DepartmentOutcome.ESCALATED_TO_OWNER);
+
+    /* One decision, from the BLOCKING escalation only. A note is not a blockage. */
+    expect(result.ownerDecisionIds).toHaveLength(1);
+    const decision = repository(
+      f.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    ).get(result.ownerDecisionIds[0] as string);
+    expect(decision?.question).toContain('deposit');
+    expect(decision?.state).toBe('OPEN');
+    expect(decision?.blocksWork).toBe(true);
+    /* Raised by Serva, unanswered, and an agent cannot answer it. */
+    expect(decision?.answeredBy).toBeUndefined();
+    expect(decision?.meta.provenance.marking).toBe('SYSTEM');
+
+    /* The non-blocking escalation and the unresolved item are reported, not escalated. */
+    expect(result.diagnostics.join(' ')).toContain('AMBIGUITY');
+    expect(result.reason).toContain('No-show handling');
+  });
+});

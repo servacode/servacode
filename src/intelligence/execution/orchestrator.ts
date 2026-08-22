@@ -397,6 +397,12 @@ export class IntelligenceOrchestrator {
         };
 
         const pending: string[] = [];
+        /*
+         * True when a department stopped BEFORE writing anything. The stage then does not
+         * count as run: resuming must execute it again with the owner's answer in context,
+         * rather than step over it to the gate and leave the canon permanently missing.
+         */
+        let mustRerunStage = false;
         for (const config of configs) {
           const result = await runDepartment(this.deps, config, ctx);
           ran.push(result);
@@ -405,6 +411,11 @@ export class IntelligenceOrchestrator {
           if (result.outcome === DepartmentOutcome.OWNER_DECISION_REQUIRED) {
             pending.push(...result.ownerDecisionIds);
             continue;
+          }
+          if (result.outcome === DepartmentOutcome.ESCALATED_TO_OWNER) {
+            pending.push(...result.ownerDecisionIds);
+            mustRerunStage = true;
+            break;
           }
           if (result.outcome !== DepartmentOutcome.COMPLETED) {
             /*
@@ -460,7 +471,7 @@ export class IntelligenceOrchestrator {
          * marked as RUN even when a decision is outstanding. Resuming continues at the
          * gate rather than re-running the departments and writing their canon twice.
          */
-        alreadyRan.add(stage.stageId);
+        if (!mustRerunStage) alreadyRan.add(stage.stageId);
 
         if (pending.length > 0) {
           record = this.write({
@@ -480,7 +491,8 @@ export class IntelligenceOrchestrator {
               stage.name +
               ' because ' +
               String(pending.length) +
-              ' decision(s) are the owner\u2019s to make',
+              ' decision(s) are the owner\u2019s to make' +
+              (mustRerunStage ? '; the stage will run again once they are answered' : ''),
           };
         }
       }

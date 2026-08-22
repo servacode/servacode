@@ -136,3 +136,127 @@ not re-open them:
   implementation maps to both rather than inventing a tenth outcome.
 - **`30` §3 has six tiers, not five.** An early schema capped `tier` at 5. The
   specification is right; the schema was wrong and is fixed.
+
+---
+
+# Phase 5 findings
+
+Six more, found the same way: the implementation of company intelligence refused to
+proceed without an answer R4 does not give. As before, none was resolved by editing the
+specification.
+
+---
+
+## SF-6 — `03` §7 states lifecycle profiles in prose the stage table cannot express
+
+**Where:** `03_PROJECT_LIFECYCLE.md` §7 gives each profile a stage selection, and two
+entries are not stage lists: `045 + root-cause record` names a stage AND an obligation,
+and `013 or targeted research` names an alternative.
+
+**Why it matters:** a generator that keeps only the parseable stage numbers silently
+drops both. The obligation disappears, the alternative becomes a single fixed choice,
+and the profile means less than the specification says while looking complete.
+
+**Resolution in code:** `resolveApplicability` returns a TOTAL plan — every one of the
+26 stages carries a disposition, never an omission — and the unparsed prose terms are
+surfaced as `proseObligations` on the plan rather than discarded. The catalogue
+generator records them in `unparsedStageTerms`.
+
+**Proposed R5:** give the two prose entries a structured form — an `obligations` column
+and an `alternatives` column — so a profile is machine-readable without losing what it
+says.
+
+---
+
+## SF-7 — a stage may be selected by a profile with no department able to run it
+
+**Where:** `03` §4 defines 26 stages; `06` defines the departments. Nothing in R4
+states what happens when a profile selects a stage the build cannot execute.
+
+**Why it matters:** the tempting behaviour is to skip it and continue, which lets a
+lifecycle report COMPLETE while stages the profile selected never ran. That is the
+"looks finished, was not" failure the ledger exists to prevent.
+
+**Resolution in code:** an unwired stage BLOCKS, with a reason naming the stage and the
+profile that selected it. The orchestrator does not treat "nobody implemented this" as
+"this did not apply".
+
+**Proposed R5:** state the rule in `03` §4 — a selected stage with no executor is a
+BLOCKED lifecycle, not a SKIPPED stage.
+
+---
+
+## SF-8 — `31` §4 does not say whether a gate evaluates when its stage failed
+
+**Where:** the gate vocabulary defines `NOT_VERIFIED`, and `03` makes gates follow
+stages. R4 does not say what happens to the gate when the stage before it could not
+produce its evidence.
+
+**Why it matters:** blocking before the gate leaves no verdict in the record at all, so
+"the evidence says no" and "there was no evidence" become indistinguishable — and
+readiness, which blocks on gate verdicts, has nothing to block on.
+
+**Resolution in code:** the gate evaluates either way. A department that could not
+produce its evidence has not made the gate irrelevant; it has given the gate its
+answer, and the answer is `NOT_VERIFIED`. The department's own reason is recorded
+alongside the verdict: the verdict says what is missing, the reason says why.
+
+**Proposed R5:** state in `31` §4 that a gate guarding a failed stage is evaluated and
+returns `NOT_VERIFIED` rather than being skipped.
+
+---
+
+## SF-9 — `SC-POL-013` mandates impact dimensions but not which stage owns each
+
+**Where:** `SC-POL-013` requires every change to be assessed against fourteen
+dimensions. `03` §6 requires re-entry at the earliest affected stage. Neither states the
+mapping between them.
+
+**Why it matters:** without a mapping, re-entry can only be "everything from here
+onward" — which re-runs market research because the requirements changed, and bills a
+second project to the same client. With an unstated mapping, two implementations
+disagree about what a change costs.
+
+**Resolution in code:** an explicit `DIMENSION_STAGES` table, plus a validation that an
+affected dimension may not name a stage EARLIER than the re-entry point — which would
+mean affected canon that never gets re-derived. Stages Serva computes rather than
+reasons about (risk) are always re-derived, because doing so is free and not doing so
+leaves a register describing a product that has since changed.
+
+**Proposed R5:** publish the dimension→stage mapping in `SC-POL-013`.
+
+---
+
+## SF-10 — the canonical id pattern excludes digits from a prefix
+
+**Where:** `08` §3 fixes the id form as `SC-<PREFIX>-<SUFFIX>` with an alphabetic
+prefix.
+
+**Why it matters:** it is right, and it is worth recording that it was tested. The
+accessibility artifact wanted `SC-A11Y-…`, which the pattern rejects. Widening the
+pattern to admit it would have made every id harder to recognise as canon for the sake
+of one abbreviation.
+
+**Resolution in code:** the prefix is `SC-ACCESS`. The pattern is unchanged.
+
+**Proposed R5:** none. This is the specification working.
+
+---
+
+## SF-11 — R4 gives research no retriever, and Serva needs exactly one
+
+**Where:** `11` and `16` require external research to be captured, hashed and expiring.
+`19` gives agents no network. Nothing states where retrieval actually happens.
+
+**Why it matters:** the gap is load-bearing. If retrieval belongs to the agent, the
+agent needs a network tool, and `19`'s `NEVER_AVAILABLE` becomes a fiction. If it
+belongs to Serva, some component has to open the connection and R4 does not name one.
+
+**Resolution in code:** a single retriever behind the research gateway
+(`research/http.ts`). Agents keep `network: NONE` in their granted policy — including
+the Market Researcher, whose contract declares network scope purely to authorise Serva
+to retrieve on its behalf. It refuses redirects to another host, because a redirect is
+the approved host asking us to consult one nobody approved.
+
+**Proposed R5:** name the research gateway as the sole egress point in `11`, and state
+that a contract's network scope authorises Serva's retrieval rather than the agent's.
