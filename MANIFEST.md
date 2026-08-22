@@ -41,7 +41,7 @@ catalogue can be regenerated with `npm run generate` and diffed against them.
 |---|---|
 | `evidence/GIT_STATE.txt` | branch, HEAD, working-tree status, recent log |
 | `evidence/BASELINE_COMMIT.txt` | the exact commit this package was built from |
-| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 902 tests, build |
+| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 904 tests, build |
 | `evidence/OFFLINE_ACCEPTANCE.txt` | the five acceptance suites: E2E, scenarios B/C/D, security, authority, governance |
 | `evidence/LIVE_INTELLIGENCE.txt` | the opt-in live run against a real model and the real network — 9 tests, all passing, 1,250s |
 | `evidence/PHASE5_SURFACE.json` | catalogue counts, every wired department, every defined gate |
