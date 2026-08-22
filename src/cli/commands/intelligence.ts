@@ -10,7 +10,7 @@ import {
 import { readOrchestratorRecord } from '../../intelligence/execution/orchestrator.js';
 import { assessReadiness } from '../../intelligence/readiness.js';
 import { generateWorkItems } from '../../intelligence/handoff.js';
-import { outstandingChanges } from '../../intelligence/change.js';
+import { outstandingChanges, planReentry } from '../../intelligence/change.js';
 import { openProposals } from '../../intelligence/proposals.js';
 import { resolveApplicability } from '../../intelligence/applicability.js';
 import type { IntelligenceDeps } from '../../intelligence/app.js';
@@ -317,6 +317,54 @@ function proposals(args: ParsedArgs, rt: ServaRuntime): number {
   return 0;
 }
 
+/**
+ * `serva intelligence changes` — what has been asked for since, and where it stands.
+ *
+ * Read-only. Raising, analysing and approving a change are not one-flag operations: an
+ * impact analysis has to assess fourteen dimensions and an approval may need the owner,
+ * and a CLI that let either happen in a single command would be a CLI that let them
+ * happen without anybody looking. Those go through the API, or through a future guided
+ * flow — not through a flag.
+ */
+function changes(args: ParsedArgs, rt: ServaRuntime): number {
+  const outstanding = outstandingChanges(rt.store);
+  const workItemId = workItemFrom(args, rt);
+  const record =
+    workItemId === undefined ? undefined : readOrchestratorRecord(rt.store, workItemId);
+
+  const rows = outstanding.map((c) => {
+    const base = { id: c.id, state: c.state, magnitude: c.magnitude, description: c.description };
+    if (c.state !== 'APPROVED' || record === undefined) return base;
+    /* An approved change knows what it will cost, so show it before anybody commits. */
+    try {
+      const plan = planReentry(rt.store, {
+        changeRequestId: c.id,
+        profileId: record.profileId,
+      });
+      return { ...base, reentryStageId: plan.reentryStageId, stagesToRerun: plan.stagesToRerun };
+    } catch {
+      return base;
+    }
+  });
+
+  if (wantsJson(args)) {
+    emitJson({ outstandingChanges: rows });
+    return 0;
+  }
+  if (rows.length === 0) {
+    console.log('No outstanding changes.');
+    return 0;
+  }
+  for (const r of rows) {
+    console.log(r.id + '  ' + r.state.padEnd(10) + r.magnitude + '  ' + r.description);
+    if ('stagesToRerun' in r && r.stagesToRerun !== undefined) {
+      console.log('    re-enters at ' + String(r.reentryStageId));
+      console.log('    re-runs:     ' + r.stagesToRerun.join(', '));
+    }
+  }
+  return 0;
+}
+
 const SUBCOMMANDS = [
   '  intelligence status [<work-item>]      Where the company has got to, and what stops it',
   '  intelligence start "<idea>"            Record the idea and run the upstream lifecycle',
@@ -326,6 +374,7 @@ const SUBCOMMANDS = [
   '  intelligence readiness [<work-item>]   Derived readiness and every blocker',
   '  intelligence handoff --base <sha>      What engineering would be given',
   '  intelligence proposals                 Ideas raised, not yet scope',
+  '  intelligence changes                   Changes asked for, and what re-running costs',
 ].join('\n');
 
 export async function cmdIntelligence(args: ParsedArgs): Promise<number> {
@@ -349,6 +398,9 @@ export async function cmdIntelligence(args: ParsedArgs): Promise<number> {
         return handoff(args, rt);
       case 'proposals':
         return proposals(args, rt);
+      case 'changes':
+      case 'change':
+        return changes(args, rt);
       default:
         console.error('Unknown subcommand: intelligence ' + sub);
         console.error(SUBCOMMANDS);

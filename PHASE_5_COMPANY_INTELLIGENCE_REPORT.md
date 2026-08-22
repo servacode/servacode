@@ -204,6 +204,7 @@ serva intelligence answer <id> --option --by answer one, as yourself
 serva intelligence readiness [<work-item>]   derived readiness and every blocker
 serva intelligence handoff --base <sha>      what engineering would be given
 serva intelligence proposals                 ideas raised, not yet scope
+serva intelligence changes                   changes asked for, and what re-running costs
 ```
 
 Blockers come first and readiness reports reasons rather than a percentage. A status
@@ -270,8 +271,11 @@ to the agent, `19`'s `NEVER_AVAILABLE` becomes a fiction.
 4. **No live end-to-end through all 26 departments.** The live suite proves a vertical
    slice by design — running fifty-five agents to learn the same thing would be an
    expensive way to be thorough.
-5. **`serva intelligence` has no `change` subcommand yet.** The change runtime is complete
-   and tested; only the CLI surface for it is not written.
+5. **Raising and approving a change is API-only.** `serva intelligence changes` shows what
+   has been asked for and what re-running would cost, but raising, analysing and approving
+   go through the API. An impact analysis assesses fourteen dimensions and an approval may
+   need the owner; a CLI that let either happen behind a single flag would be a CLI that
+   let them happen without anybody looking.
 
 ## 44. Remaining Critical/High issues
 
