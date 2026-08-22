@@ -1,8 +1,7 @@
- M PHASE_5_COMPANY_INTELLIGENCE_REPORT.md
  M evidence/BASELINE_COMMIT.txt
  M evidence/GIT_STATE.txt
- M evidence/LIVE_INTELLIGENCE.txt
 --- log ---
+7340e7c docs: Phase 5 report, manifest and evidence
 05466e3 intelligence: a run that did not complete has its question asked, whatever it called it
 a421938 intelligence: an ESCALATED run is blocked whatever it ticked
 54aabb6 cli: serva intelligence changes
