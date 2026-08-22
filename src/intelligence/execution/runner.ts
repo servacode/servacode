@@ -490,19 +490,29 @@ export async function runDepartment<S extends z.ZodTypeAny>(
      * decide, what the options are, what happens either way — is Serva's, and an agent
      * able to author the whole request would be an agent able to author its own approval.
      *
-     * The `blocking` flag is NOT what decides this when the run itself ended ESCALATED.
-     * That status means "I cannot complete this", and a run that produced no output has
-     * blocked the stage whatever it ticked on the individual entries. A live run made the
-     * point: business analysis raised four escalations about undefined reservation
-     * statuses, uncollected holds and whether any money is involved — every one of them
-     * genuinely unanswerable without the owner — and marked none of them blocking. Hinging
-     * the lifecycle on that flag put the company behind a checkbox.
+     * WE ARE ALREADY IN THE NOT-COMPLETED BRANCH, so every escalation here is blocking by
+     * situation rather than by declaration. The stage produced nothing; the escalations
+     * are the agent's account of what it needed and did not have.
      *
-     * The flag still means something where it can: on a run that COMPLETED and flagged a
-     * concern alongside its output, only the blocking ones stop anything.
+     * Two live runs were needed to get this rule right, and both times the narrower
+     * version swallowed a real question:
+     *
+     *   business analysis raised four escalations — undefined reservation statuses,
+     *   uncollected holds, whether any money is involved at all — and marked none of them
+     *   `blocking`, so a flag-based rule dropped all four;
+     *
+     *   discovery then ended EVIDENCE_VIOLATION rather than ESCALATED, because what it
+     *   objected to was an unvalidated load-bearing assumption, so a status-based rule
+     *   dropped that one too.
+     *
+     * Both attempts were the same mistake: asking the agent to classify its own failure
+     * and then routing on the answer. What Serva actually knows is simpler and is not the
+     * agent's to characterise — the run did not complete, and it said why.
+     *
+     * The flag is still honoured where it can be: a run that COMPLETED does not come
+     * through here at all, so a concern noted alongside real output raises nothing.
      */
-    const escalatedOutright = run.outcome === RunOutcome.ESCALATED;
-    const blocking = escalatedOutright ? escalations : escalations.filter((e) => e.blocking);
+    const blocking = escalations;
     if (blocking.length > 0) {
       const raised = raiseEscalationDecisions(deps, config, ctx, blocking);
       if (raised.length > 0) {

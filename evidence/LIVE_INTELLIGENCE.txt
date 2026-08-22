@@ -1,0 +1,52 @@
+
+> serva-code@0.2.0 test:intelligence-live
+> vitest run --config vitest.intelligence.config.ts
+
+
+ RUN  v2.1.9 D:/SEVACODE
+
+stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > reached at least the competitive stage, or reported honestly why not
+ran: SC-AGENT-020:COMPLETED, SC-AGENT-030:FAILED
+  SC-AGENT-030 — Discovery run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. The run escalated: AMBIGUITY unresolvable within contract / before solution scope is finalized (The load-bearing assumption that customers skip visiting/calling (rather than phoning ahead) when assuming a book is out of stock is not validated by any direct research. Recommend a small number of interviews with the bookshop owner and a handful of customers before committing to build scope, since this assumption materially affects the size of the problem and the strength of the value proposition.) Unresolved: Whether customers who assume unavailability currently phone ahead at all, or skip contact entirely, is not confirmed by any direct research.; Whether the bookshop already uses any informal or digital tool (paper log, spreadsheet, POS feature) to track stock enquiries or holds is unknown.; The actual frequency/volume of lost sales due to assumed unavailability is not quantified in available context.
+    · contradicted evidence claims: Read the trusted client intake (SC-CIN-000001) and goal records (SC-GOAL-000001 through SC-GOAL-000004) provided in context for SC-WI-000950 and used them as the sole basis for segments, jobs, pains and alternatives. (the claim asserts FILE_READ but the runtime observed no completed tool call in this run)
+    · escalation: AMBIGUITY unresolvable within contract / before solution scope is finalized — The load-bearing assumption that customers skip visiting/calling (rather than phoning ahead) when assuming a book is out of stock is not validated by any direct research. Recommend a small number of interviews with the bookshop owner and a handful of customers before committing to build scope, since this assumption materially affects the size of the problem and the strength of the value proposition.
+BLOCKED — SC-GATE-DISCOVERY returned BLOCKED: Discovery run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. The run escalated: AMBIGUITY unresolvable within contract / before solution scope is finalized (The load-bearing assumption that customers skip visiting/calling (rather than phoning ahead) when assuming a book is out of stock is not validated by any direct research. Recommend a small number of interviews with the bookshop owner and a handful of customers before committing to build scope, since this assumption materially affects the size of the problem and the strength of the value proposition.) Unresolved: Whether customers who assume unavailability currently phone ahead at all, or skip contact entirely, is not confirmed by any direct research.; Whether the bookshop already uses any informal or digital tool (paper log, spreadsheet, POS feature) to track stock enquiries or holds is unknown.; The actual frequency/volume of lost sales due to assumed unavailability is not quantified in available context. — DI-1 NOT_MET: At least one user segment is identified; DI-2 INDETERMINATE (PRECONDITION_ABSENT): EVERY segment has at least one current alternative recorded; DI-3 INDETERMINATE (EVIDENCE_ABSENT): No user research is claimed that was not performed; DI-4 INDETERMINATE (EVIDENCE_ABSENT): Load-bearing inferences are recorded as Assumptions
+
+stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > 2/3. a real source was retrieved by Serva and captured with a digest
+NO CAPTURE — the network was unavailable; research must read UNAVAILABLE
+
+stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > 6. a downstream requirement consumed PERSISTED canon, not chat history
+the run did not reach requirements; nothing to assert here
+
+stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > 2/3. Serva fetched a real page and captured it, hashed and untrusted
+research ran: SC-AGENT-060:FAILED
+research state: BLOCKED
+  SC-GATE-COMPETITIVE returned NOT_VERIFIED: Market Research run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. Unresolved: Substantive competitor identities, features, and positioning for the click-and-collect / omnichannel retail market remain unknown; no source beyond the disambiguation stub was captured, and the owner has declared this out of scope for now rather than authorizing additional capture. — CO-4 INDETERMINATE (EVIDENCE_ABSENT): A competitive position states why anyone would switch, and why not
+captured 3 real source(s)
+
+stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > 5. every finding cites a capture that is actually in the store
+1 finding(s); 0 competitor profile(s); 0 differentiator(s)
+
+ ❯ tests/live/intelligence.live.test.ts (9 tests | 1 failed) 482435ms
+   × a real company run over a real problem > 1. discovery and product produced schema-valid canon from one owner sentence 6ms
+     → expected 0 to be greater than 0
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/live/intelligence.live.test.ts > a real company run over a real problem > 1. discovery and product produced schema-valid canon from one owner sentence
+AssertionError: expected 0 to be greater than 0
+ ❯ tests/live/intelligence.live.test.ts:239:75
+    237|     expect(goals.length).toBeGreaterThan(0);
+    238|     /* The Current Alternative is the discovery field that is never op…
+    239|     expect(store.listCanonIds(ARTIFACT_TYPES.CURRENT_ALTERNATIVE).leng…
+       |                                                                           ^
+    240|   });
+    241| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 passed (9)
+   Start at  00:01:29
+   Duration  483.82s (transform 658ms, setup 0ms, collect 1.13s, tests 482.44s, environment 0ms, prepare 78ms)
+

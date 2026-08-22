@@ -402,6 +402,43 @@ describe('a blocking escalation becomes a question, not an error', () => {
     expect(result.reason).toContain('No-show handling');
   });
 
+  it('a run that BLOCKED rather than escalated still gets its question asked', async () => {
+    const f = setup();
+    /*
+     * Discovery ended EVIDENCE_VIOLATION in a live run — it objected to an unvalidated
+     * load-bearing assumption rather than declaring itself escalated — and a rule that
+     * keyed on the status dropped the question. There are six terminal statuses and a
+     * runtime-assigned one on top; enumerating the ones that count is how the next
+     * question gets dropped. What Serva knows is that the run did not complete and said
+     * why, and how the agent classified its own failure is not the test.
+     */
+    f.engine.script('SC-AGENT-052', {
+      structuredOutput: {
+        ...envelope({ note: 'unused' }),
+        status: 'BLOCKED',
+        escalations: [
+          {
+            condition: 'AMBIGUITY unresolvable within contract',
+            detail: 'The load-bearing assumption about customer behaviour is unvalidated.',
+            blocking: false,
+          },
+        ],
+      },
+    });
+
+    const result = await runDepartment(runnerDeps(f, ['SC-AGENT-052']), department(), context(f));
+
+    expect(result.outcome).toBe(DepartmentOutcome.ESCALATED_TO_OWNER);
+    expect(result.ownerDecisionIds).toHaveLength(1);
+    const raised = repository(
+      f.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    ).list();
+    expect(raised[0]?.question).toContain('load-bearing assumption');
+    expect(raised[0]?.blocksWork).toBe(true);
+  });
+
   it('a run that COMPLETED and merely flagged a concern raises nothing', async () => {
     const f = setup();
     /*
