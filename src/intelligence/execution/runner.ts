@@ -482,15 +482,27 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     const open = unresolved.length === 0 ? '' : ' Unresolved: ' + unresolved.join('; ');
 
     /*
-     * A BLOCKING escalation is a question, and the honest response to a question is to
-     * ask it — not to report an error and stop.
+     * AN ESCALATION IS A QUESTION, AND THE HONEST RESPONSE TO A QUESTION IS TO ASK IT —
+     * not to report an error and stop.
      *
      * Serva writes the OwnerDecisionRequest, not the agent. The agent supplied the
      * condition and the detail; the structure around them — why this is not Serva's to
      * decide, what the options are, what happens either way — is Serva's, and an agent
      * able to author the whole request would be an agent able to author its own approval.
+     *
+     * The `blocking` flag is NOT what decides this when the run itself ended ESCALATED.
+     * That status means "I cannot complete this", and a run that produced no output has
+     * blocked the stage whatever it ticked on the individual entries. A live run made the
+     * point: business analysis raised four escalations about undefined reservation
+     * statuses, uncollected holds and whether any money is involved — every one of them
+     * genuinely unanswerable without the owner — and marked none of them blocking. Hinging
+     * the lifecycle on that flag put the company behind a checkbox.
+     *
+     * The flag still means something where it can: on a run that COMPLETED and flagged a
+     * concern alongside its output, only the blocking ones stop anything.
      */
-    const blocking = escalations.filter((e) => e.blocking);
+    const escalatedOutright = run.outcome === RunOutcome.ESCALATED;
+    const blocking = escalatedOutright ? escalations : escalations.filter((e) => e.blocking);
     if (blocking.length > 0) {
       const raised = raiseEscalationDecisions(deps, config, ctx, blocking);
       if (raised.length > 0) {

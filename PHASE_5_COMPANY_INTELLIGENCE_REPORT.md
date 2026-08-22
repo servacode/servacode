@@ -127,7 +127,8 @@ something "not present" rather than on something stale.
 
 ## 17–29. The rest of the company
 
-27 department configurations across 26 stages, all on **one** execution substrate
+27 department configurations over the 16 upstream stages of the 26-stage lifecycle (the
+remaining 10 are Phase 4 and later), all on **one** execution substrate
 ([`execution/runner.ts`](src/intelligence/execution/runner.ts)). A department is a
 configuration, not an engine: it declares which contract, what it may read, what it
 produces, who it may not be, and which gate follows. It cannot reorder, skip or soften any
@@ -215,7 +216,7 @@ little it says.
 
 | Scenario | Result |
 |---|---|
-| **A — new product** | 25 departments run; 12 gates evaluated; readiness READY; work item accepted by the real Phase 4 factory |
+| **A — new product** | 27 department runs across the 16 upstream stages; 11 gates evaluated; readiness READY; work item accepted by the real Phase 4 factory |
 | **B — major feature** | re-entry re-runs requirements/UX/tests and risk; intake, discovery, product validation and market research stand; upstream evidence byte-identical afterwards |
 | **C — research failure** | competitive gate `NOT_VERIFIED`; zero findings, captures, competitor profiles or positions written |
 | **D — owner authority** | financial ambiguity stops at `WAITING_FOR_OWNER`; answering resumes; resuming again re-runs nothing |
@@ -230,7 +231,7 @@ Results in **Appendix A**.
 | | |
 |---|---|
 | Before Phase 5 | 764 |
-| After Phase 5 | **901** |
+| After Phase 5 | **902** |
 | Pre-existing tests modified | 0 |
 | New intelligence test files | 9 offline + 1 live |
 
@@ -240,7 +241,7 @@ Results in **Appendix A**.
 format:check  PASS
 lint          PASS
 typecheck     PASS
-test          36 files, 901 tests, all green
+test          36 files, 902 tests, all green
 build         PASS
 ```
 
@@ -285,6 +286,7 @@ defects the acceptance scenarios were written to look for:
 - re-entry re-ran unrelated stages (Scenario B);
 - a failed stage left no gate verdict (Scenario C);
 - a blocking escalation was reported as an error and its question discarded (live run);
+- a discovery run reported interviews it had no capability to conduct (live run);
 - independence was checked on the actor but not on the context.
 
 ## 45. Git commit

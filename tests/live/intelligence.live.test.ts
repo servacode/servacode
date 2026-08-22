@@ -14,6 +14,10 @@ import { ARTIFACT_TYPES, repository } from '../../src/intelligence/repository.js
 import { ResearchFindingSchema } from '../../src/intelligence/artifacts/market.js';
 import { SourceCaptureSchema } from '../../src/intelligence/research/capture.js';
 import { RequirementSchema } from '../../src/intelligence/artifacts/requirements.js';
+import {
+  DiscoveryFindingsSchema,
+  UserSegmentSchema,
+} from '../../src/intelligence/artifacts/discovery.js';
 import { readGateResults } from '../../src/gates/engine.js';
 import { runStream } from '../../src/events/agentRun.js';
 import { cleanup, freshStore } from '../helpers.js';
@@ -326,5 +330,196 @@ describe('a real company run over a real problem', () => {
     );
     expect(runIds.size).toBeGreaterThan(3);
     for (const runId of runIds) expect(runStream(runId)).toBeTruthy();
+  });
+});
+
+/* ==================================================== THE RESEARCH SLICE, ON ITS OWN */
+
+/**
+ * §47 items 2–5, proved directly.
+ *
+ * The full-lifecycle run above is honest about how far it gets, and where it gets to is
+ * decided by a real model reading a real brief — on the recorded run it stopped at the
+ * requirements gate, which is the gate doing its job and also means market research never
+ * executed. Waiting for a lifecycle to reach stage 013 is an expensive and unreliable way
+ * to test stage 013.
+ *
+ * So this runs `PRF-RESEARCH`, which selects exactly that one stage, over a seeded
+ * discovery finding. Four model calls, one real fetch, and the whole research chain:
+ * retrieval by Serva, capture, INDEPENDENT verification that never re-fetches, competitive
+ * analysis and innovation.
+ */
+describe('the research chain, against the real web', () => {
+  let researchStore: Store;
+  let researchRoot: string;
+  let researchResult: AdvanceResult | undefined;
+
+  beforeAll(async () => {
+    if (skip !== undefined) return;
+
+    const f = freshStore();
+    researchStore = f.store;
+    researchRoot = f.root;
+
+    const engine = new ClaudeCliEngineAdapter({ clock: f.deps.clock, probeTtlMs: 30_000 });
+    configureResearchSeeds({ hosts: RESEARCH_HOSTS, urls: RESEARCH_URLS });
+
+    /* The one prerequisite stage 013 declares, seeded rather than earned. */
+    const at = f.deps.clock.now();
+    const segmentId = f.deps.ids.next('SC-SEG');
+    const tx = researchStore.begin();
+    repository(researchStore, ARTIFACT_TYPES.USER_SEGMENT, UserSegmentSchema).put(tx, {
+      id: segmentId,
+      createdAt: at,
+      name: 'Regular customers of an independent bookshop',
+      description: 'People who would visit if they knew a copy was actually held',
+      goals: ['get the book without a wasted trip'],
+      context: 'deciding whether the shop is worth walking to',
+      meta: { provenance: { marking: 'OWNER_STATED', statedAt: at }, attribution: { at } },
+    } as never);
+    repository(researchStore, ARTIFACT_TYPES.DISCOVERY_FINDINGS, DiscoveryFindingsSchema).put(tx, {
+      id: f.deps.ids.next('SC-DF'),
+      createdAt: at,
+      summary: 'Independent bookshops lose sales to customers who assume they are out of stock.',
+      segmentRefs: [{ id: segmentId }],
+      researchPerformed: { interviews: 0, surveys: 0, usabilityTests: 0, deskResearch: false },
+      limitations: ['No primary user research was performed.'],
+      meta: { provenance: { marking: 'OWNER_STATED', statedAt: at }, attribution: { at } },
+    } as never);
+    tx.commit();
+
+    const intel = {
+      store: researchStore,
+      clock: f.deps.clock,
+      ids: f.deps.ids,
+      engine,
+      projectRoot: researchRoot,
+      gateway: {
+        store: researchStore,
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        retriever: httpRetriever(),
+      },
+    };
+    /*
+     * The same owner loop. Market research can legitimately stop and ask — a research
+     * question that reaches the edge of what the brief says is exactly the case the
+     * escalation path exists for — and a slice that gave up at the first question would
+     * test one department instead of the chain.
+     */
+    const orchestrator = intelligenceOrchestrator(intel, 'SC-WI-000951', 'PRF-RESEARCH');
+    for (let round = 0; round < MAX_OWNER_ROUNDS; round += 1) {
+      researchResult = await orchestrator.advance();
+      if (researchResult.state !== OrchestratorState.WAITING_FOR_OWNER) break;
+      const open = openOwnerDecisions(researchStore);
+      if (open.length === 0) break;
+      for (const d of open) {
+        answerOwnerDecision(intel, {
+          decisionId: d.id,
+          chosenOption: 'Declare it out of scope for now',
+          answeredBy: 'live-test-owner',
+        });
+      }
+    }
+  }, 3_600_000);
+
+  afterAll(() => {
+    if (researchRoot !== undefined) cleanup(researchRoot);
+  });
+
+  it('2/3. Serva fetched a real page and captured it, hashed and untrusted', () => {
+    if (guard()) return;
+    console.log(
+      'research ran: ' +
+        (researchResult?.ran ?? []).map((r) => r.agentId + ':' + r.outcome).join(', '),
+    );
+    console.log('research state: ' + String(researchResult?.state));
+    if (researchResult?.reason !== undefined) console.log('  ' + researchResult.reason);
+
+    const captures = repository(
+      researchStore,
+      ARTIFACT_TYPES.SOURCE_CAPTURE,
+      SourceCaptureSchema,
+    ).list();
+
+    if (captures.length === 0) {
+      /*
+       * BLOCKED, honestly. The network was unavailable, and the correct consequence is a
+       * recorded absence — never an invented landscape.
+       */
+      console.log('BLOCKED — no source was retrieved; research is UNAVAILABLE');
+      expect(researchStore.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING)).toHaveLength(0);
+      expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITOR_PROFILE)).toHaveLength(0);
+      return;
+    }
+
+    for (const c of captures) {
+      expect(c.url.startsWith('https://en.wikipedia.org/')).toBe(true);
+      expect(c.contentDigest).toMatch(/^[0-9a-f]{64}$/);
+      expect(c.trust).toBe('UNTRUSTED');
+      expect(c.excerpt.length).toBeGreaterThan(200);
+      /* Attributed to the ONE agent whose canonical contract declares network scope. */
+      expect(c.retrievedByAgentId).toBe('SC-AGENT-060');
+    }
+    console.log('captured ' + String(captures.length) + ' real source(s)');
+  });
+
+  it('4. the verifier judged the captures and fetched nothing of its own', () => {
+    if (guard()) return;
+    const captures = repository(
+      researchStore,
+      ARTIFACT_TYPES.SOURCE_CAPTURE,
+      SourceCaptureSchema,
+    ).list();
+    if (captures.length === 0) return;
+
+    /*
+     * A verification exists, or the chain stopped before reaching the verifier — which is
+     * a real outcome and is reported rather than asserted away.
+     */
+    const verifications = researchStore.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION);
+    if (verifications.length === 0) {
+      console.log('the chain stopped before verification: state=' + String(researchResult?.state));
+      /* What must NOT happen is competitive truth built on unverified claims. */
+      expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITIVE_POSITION)).toHaveLength(0);
+      return;
+    }
+
+    /* Nothing it could have fetched with, and nothing attributed to it. */
+    for (const c of captures) expect(c.retrievedByAgentId).not.toBe('SC-AGENT-063');
+    expect(researchStore.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION).length).toBeGreaterThan(0);
+
+    /* And every capture is still exactly the capture that was verified. */
+    for (const c of captures) {
+      expect(researchStore.listCanonVersions(ARTIFACT_TYPES.SOURCE_CAPTURE, c.id)).toEqual([1]);
+    }
+  });
+
+  it('5. every finding cites a capture that is actually in the store', () => {
+    if (guard()) return;
+    const findings = repository(
+      researchStore,
+      ARTIFACT_TYPES.RESEARCH_FINDING,
+      ResearchFindingSchema,
+    ).list();
+    if (findings.length === 0) return;
+
+    const captureIds = new Set(researchStore.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE));
+    for (const f of findings) {
+      expect(f.meta.provenance.marking).toBe('RESEARCHED');
+      if (f.meta.provenance.marking !== 'RESEARCHED') continue;
+      expect(f.meta.provenance.sources.length).toBeGreaterThan(0);
+      for (const src of f.meta.provenance.sources) {
+        expect(captureIds.has(src.captureId), 'cites a capture that does not exist').toBe(true);
+      }
+    }
+    console.log(
+      String(findings.length) +
+        ' finding(s); ' +
+        String(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITOR_PROFILE).length) +
+        ' competitor profile(s); ' +
+        String(researchStore.listCanonIds(ARTIFACT_TYPES.DIFFERENTIATOR).length) +
+        ' differentiator(s)',
+    );
   });
 });

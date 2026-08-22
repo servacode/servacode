@@ -376,23 +376,57 @@ describe('a blocking escalation becomes a question, not an error', () => {
 
     expect(result.outcome).toBe(DepartmentOutcome.ESCALATED_TO_OWNER);
 
-    /* One decision, from the BLOCKING escalation only. A note is not a blockage. */
-    expect(result.ownerDecisionIds).toHaveLength(1);
-    const decision = repository(
+    /*
+     * BOTH escalations become questions. The run's status is ESCALATED — it produced
+     * nothing — so the stage is blocked whatever the agent ticked on the individual
+     * entries. A live run made the point by raising four genuinely unanswerable questions
+     * and marking none of them blocking; hinging the lifecycle on that flag would put the
+     * company behind a checkbox.
+     */
+    expect(result.ownerDecisionIds).toHaveLength(2);
+    const decisions = repository(
       f.store,
       ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
       OwnerDecisionRequestSchema,
-    ).get(result.ownerDecisionIds[0] as string);
-    expect(decision?.question).toContain('deposit');
-    expect(decision?.state).toBe('OPEN');
-    expect(decision?.blocksWork).toBe(true);
-    /* Raised by Serva, unanswered, and an agent cannot answer it. */
-    expect(decision?.answeredBy).toBeUndefined();
-    expect(decision?.meta.provenance.marking).toBe('SYSTEM');
+    ).list();
+    expect(decisions.map((d) => d.question).join(' ')).toContain('deposit');
+    expect(decisions.map((d) => d.question).join(' ')).toContain('baseline');
+    for (const d of decisions) {
+      expect(d.state).toBe('OPEN');
+      expect(d.blocksWork).toBe(true);
+      /* Raised by Serva, unanswered, and an agent cannot answer it. */
+      expect(d.answeredBy).toBeUndefined();
+      expect(d.meta.provenance.marking).toBe('SYSTEM');
+    }
 
-    /* The non-blocking escalation and the unresolved item are reported, not escalated. */
-    expect(result.diagnostics.join(' ')).toContain('AMBIGUITY');
     expect(result.reason).toContain('No-show handling');
+  });
+
+  it('a run that COMPLETED and merely flagged a concern raises nothing', async () => {
+    const f = setup();
+    /*
+     * Where the flag still decides. This run produced its payload and noted something
+     * alongside it, which is a remark rather than a blockage — and turning every remark
+     * into an owner decision would train the owner to dismiss them.
+     */
+    f.engine.script('SC-AGENT-052', {
+      structuredOutput: {
+        ...envelope({ note: 'two requirements are untestable as written' }),
+        escalations: [
+          {
+            condition: 'AMBIGUITY',
+            detail: 'The wording of the third requirement could be read two ways.',
+            blocking: false,
+          },
+        ],
+      },
+    });
+
+    const result = await runDepartment(runnerDeps(f, ['SC-AGENT-052']), department(), context(f));
+
+    expect(result.outcome).toBe(DepartmentOutcome.COMPLETED);
+    expect(result.ownerDecisionIds).toEqual([]);
+    expect(f.store.listCanonIds(ARTIFACT_TYPES.OWNER_DECISION_REQUEST)).toHaveLength(0);
   });
 });
 
