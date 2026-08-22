@@ -11,15 +11,20 @@ Company intelligence and product authority, packaged for independent verificatio
 | Repository root | `D:/SEVACODE` |
 | Branch | `phase-5-company-intelligence` |
 | Phase 4 baseline | `f4866b2` (unchanged; no Phase 1–4 invariant was weakened) |
-| Phase 5 HEAD | see `evidence/BASELINE_COMMIT.txt` |
-| Working tree | clean at packaging time — see `evidence/GIT_STATE.txt` |
+| Packaged tree | `7340e7c` — named in `evidence/BASELINE_COMMIT.txt` |
+| Packaging commit | `81d64e0`, one above it, adding only the evidence that describes it |
+| Working tree | clean — `git status --porcelain` returns nothing |
+
+A file cannot record its own hash, which is why there are two commits rather than one.
+Reproduce the implementation from `7340e7c`; the commit above it changes nothing under
+`src/` or `tests/`.
 
 ## What this package contains
 
 | Path | What it is |
 |---|---|
 | `src/` | the implementation, including `src/intelligence/` (55 files) |
-| `tests/` | 36 test files, 902 offline tests, plus three opt-in live suites |
+| `tests/` | 36 test files, 904 offline tests, plus three opt-in live suites |
 | `docs/` | ADRs, prior phase reports, `SPEC_IMPLEMENTATION_FINDINGS.md` |
 | `evidence/` | the outputs below, captured at packaging time |
 | `scripts/` | the catalogue and contract generators |
@@ -38,7 +43,7 @@ catalogue can be regenerated with `npm run generate` and diffed against them.
 | `evidence/BASELINE_COMMIT.txt` | the exact commit this package was built from |
 | `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 902 tests, build |
 | `evidence/OFFLINE_ACCEPTANCE.txt` | the five acceptance suites: E2E, scenarios B/C/D, security, authority, governance |
-| `evidence/LIVE_INTELLIGENCE.txt` | the opt-in live run against a real model and the real network |
+| `evidence/LIVE_INTELLIGENCE.txt` | the opt-in live run against a real model and the real network — 9 tests, all passing, 1,250s |
 | `evidence/PHASE5_SURFACE.json` | catalogue counts, every wired department, every defined gate |
 
 ## What is NOT in this package
@@ -54,7 +59,7 @@ the filesystem — so a credential cannot arrive by accident.
 
 ```
 npm ci
-npm run verify          # 902 tests, offline, free
+npm run verify          # 904 tests, offline, free
 npm run generate        # regenerate catalogues; diff against the committed ones
 ```
 
