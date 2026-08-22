@@ -1,21 +1,21 @@
 
  RUN  v2.1.9 D:/SEVACODE
 
- ✓ tests/intel.authority.test.ts (12 tests) 1072ms
- ✓ tests/intel.governance.test.ts (22 tests) 1842ms
- ✓ tests/intel.security.test.ts (15 tests) 8853ms
- ✓ tests/intel.scenarios.test.ts (3 tests) 20347ms
-   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 8861ms
-   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 2659ms
-   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 8825ms
- ✓ tests/intel.e2e.test.ts (4 tests) 42216ms
-   ✓ the whole company runs > takes an idea through every department to an engineering handoff 8677ms
-   ✓ the whole company runs > readiness is DERIVED, and READY is impossible while anything blocks 8410ms
-   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 12554ms
-   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 12572ms
+ ✓ tests/intel.governance.test.ts (22 tests) 1866ms
+ ✓ tests/intel.authority.test.ts (15 tests) 1739ms
+ ✓ tests/intel.security.test.ts (15 tests) 7886ms
+ ✓ tests/intel.scenarios.test.ts (3 tests) 17746ms
+   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 7817ms
+   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 2389ms
+   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 7538ms
+ ✓ tests/intel.e2e.test.ts (4 tests) 28635ms
+   ✓ the whole company runs > takes an idea through every department to an engineering handoff 7683ms
+   ✓ the whole company runs > readiness is DERIVED, and READY is impossible while anything blocks 7819ms
+   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 6730ms
+   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 6401ms
 
  Test Files  5 passed (5)
-      Tests  56 passed (56)
-   Start at  22:50:42
-   Duration  44.47s (transform 1.76s, setup 0ms, collect 6.45s, tests 74.33s, environment 1ms, prepare 840ms)
+      Tests  59 passed (59)
+   Start at  00:39:58
+   Duration  30.74s (transform 1.54s, setup 0ms, collect 5.74s, tests 57.87s, environment 1ms, prepare 743ms)
 

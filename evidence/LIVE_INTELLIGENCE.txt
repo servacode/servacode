@@ -6,47 +6,33 @@
  RUN  v2.1.9 D:/SEVACODE
 
 stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > reached at least the competitive stage, or reported honestly why not
-ran: SC-AGENT-020:COMPLETED, SC-AGENT-030:FAILED
-  SC-AGENT-030 — Discovery run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. The run escalated: AMBIGUITY unresolvable within contract / before solution scope is finalized (The load-bearing assumption that customers skip visiting/calling (rather than phoning ahead) when assuming a book is out of stock is not validated by any direct research. Recommend a small number of interviews with the bookshop owner and a handful of customers before committing to build scope, since this assumption materially affects the size of the problem and the strength of the value proposition.) Unresolved: Whether customers who assume unavailability currently phone ahead at all, or skip contact entirely, is not confirmed by any direct research.; Whether the bookshop already uses any informal or digital tool (paper log, spreadsheet, POS feature) to track stock enquiries or holds is unknown.; The actual frequency/volume of lost sales due to assumed unavailability is not quantified in available context.
-    · contradicted evidence claims: Read the trusted client intake (SC-CIN-000001) and goal records (SC-GOAL-000001 through SC-GOAL-000004) provided in context for SC-WI-000950 and used them as the sole basis for segments, jobs, pains and alternatives. (the claim asserts FILE_READ but the runtime observed no completed tool call in this run)
-    · escalation: AMBIGUITY unresolvable within contract / before solution scope is finalized — The load-bearing assumption that customers skip visiting/calling (rather than phoning ahead) when assuming a book is out of stock is not validated by any direct research. Recommend a small number of interviews with the bookshop owner and a handful of customers before committing to build scope, since this assumption materially affects the size of the problem and the strength of the value proposition.
-BLOCKED — SC-GATE-DISCOVERY returned BLOCKED: Discovery run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. The run escalated: AMBIGUITY unresolvable within contract / before solution scope is finalized (The load-bearing assumption that customers skip visiting/calling (rather than phoning ahead) when assuming a book is out of stock is not validated by any direct research. Recommend a small number of interviews with the bookshop owner and a handful of customers before committing to build scope, since this assumption materially affects the size of the problem and the strength of the value proposition.) Unresolved: Whether customers who assume unavailability currently phone ahead at all, or skip contact entirely, is not confirmed by any direct research.; Whether the bookshop already uses any informal or digital tool (paper log, spreadsheet, POS feature) to track stock enquiries or holds is unknown.; The actual frequency/volume of lost sales due to assumed unavailability is not quantified in available context. — DI-1 NOT_MET: At least one user segment is identified; DI-2 INDETERMINATE (PRECONDITION_ABSENT): EVERY segment has at least one current alternative recorded; DI-3 INDETERMINATE (EVIDENCE_ABSENT): No user research is claimed that was not performed; DI-4 INDETERMINATE (EVIDENCE_ABSENT): Load-bearing inferences are recorded as Assumptions
+ran: SC-AGENT-020:ESCALATED_TO_OWNER, SC-AGENT-020:COMPLETED, SC-AGENT-030:COMPLETED, SC-AGENT-020:COMPLETED, SC-AGENT-040:COMPLETED, SC-AGENT-050:COMPLETED, SC-AGENT-051:FAILED
+  SC-AGENT-020 — Intake cannot proceed without the owner. The run escalated: AMBIGUITY unresolvable within contract (Payment timing, online reservation versus in-store pickup payment, is a commercial policy decision the owner must make; the framing cannot fully define transaction success without it.); INSUFFICIENT_CONTEXT (Whether the bookshop has any existing stock or availability tracking system is unknown; this materially affects what availability can mean for a reservation and was not stated in the idea.) Unresolved: Owner's payment policy for reservations, pay online versus pay in store.; Whether an existing stock or inventory tracking system exists that reservations must reflect.; Reservation hold duration policy.; Whether an existing bookshop website or online presence should be connected to.; How the owner wants to measure success in reducing lost sales.
+    · BLOCKING escalation: AMBIGUITY unresolvable within contract — Payment timing, online reservation versus in-store pickup payment, is a commercial policy decision the owner must make; the framing cannot fully define transaction success without it.
+    · BLOCKING escalation: INSUFFICIENT_CONTEXT — Whether the bookshop has any existing stock or availability tracking system is unknown; this materially affects what availability can mean for a reservation and was not stated in the idea.
+  SC-AGENT-051 — NFR Specification run ended FAILED. NO OUTPUT = NOTHING RECORDED.
+    · terminated: TIMEOUT
+BLOCKED — SC-GATE-REQUIREMENTS returned FAIL: NFR Specification run ended FAILED. NO OUTPUT = NOTHING RECORDED. — RQ-5 NOT_MET: Every project goal is covered by a requirement or explicitly deferred; RQ-2 INDETERMINATE (EVIDENCE_ABSENT): Every NFR states a measurable target and how it will be measured; RQ-4 INDETERMINATE (EVIDENCE_ABSENT): An INDEPENDENT verifier judged the requirements acceptable
+owner round 1:
+    ? AMBIGUITY unresolvable within contract: Payment timing, online reservation versus in-store pickup payment, is a commerci
+    ? INSUFFICIENT_CONTEXT: Whether the bookshop has any existing stock or availability tracking system is unknown; this mater
 
 stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > 2/3. a real source was retrieved by Serva and captured with a digest
 NO CAPTURE — the network was unavailable; research must read UNAVAILABLE
 
-stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > 6. a downstream requirement consumed PERSISTED canon, not chat history
-the run did not reach requirements; nothing to assert here
-
 stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > 2/3. Serva fetched a real page and captured it, hashed and untrusted
-research ran: SC-AGENT-060:FAILED
+research ran: SC-AGENT-060:COMPLETED, SC-AGENT-063:COMPLETED, SC-AGENT-061:COMPLETED, SC-AGENT-062:PREREQUISITE_MISSING
 research state: BLOCKED
-  SC-GATE-COMPETITIVE returned NOT_VERIFIED: Market Research run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. Unresolved: Substantive competitor identities, features, and positioning for the click-and-collect / omnichannel retail market remain unknown; no source beyond the disambiguation stub was captured, and the owner has declared this out of scope for now rather than authorizing additional capture. — CO-4 INDETERMINATE (EVIDENCE_ABSENT): A competitive position states why anyone would switch, and why not
+  SC-GATE-COMPETITIVE returned NOT_VERIFIED: Innovation Strategy cannot run: no intel.tableStakes exists yet. The stage that produces it has not completed. — CO-4 INDETERMINATE (EVIDENCE_ABSENT): A competitive position states why anyone would switch, and why not
 captured 3 real source(s)
 
 stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > 5. every finding cites a capture that is actually in the store
-1 finding(s); 0 competitor profile(s); 0 differentiator(s)
+3 finding(s); 0 competitor profile(s); 0 differentiator(s)
 
- ❯ tests/live/intelligence.live.test.ts (9 tests | 1 failed) 482435ms
-   × a real company run over a real problem > 1. discovery and product produced schema-valid canon from one owner sentence 6ms
-     → expected 0 to be greater than 0
+ ✓ tests/live/intelligence.live.test.ts (9 tests) 1248478ms
 
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
-
- FAIL  tests/live/intelligence.live.test.ts > a real company run over a real problem > 1. discovery and product produced schema-valid canon from one owner sentence
-AssertionError: expected 0 to be greater than 0
- ❯ tests/live/intelligence.live.test.ts:239:75
-    237|     expect(goals.length).toBeGreaterThan(0);
-    238|     /* The Current Alternative is the discovery field that is never op…
-    239|     expect(store.listCanonIds(ARTIFACT_TYPES.CURRENT_ALTERNATIVE).leng…
-       |                                                                           ^
-    240|   });
-    241| 
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
-
- Test Files  1 failed (1)
-      Tests  1 failed | 8 passed (9)
-   Start at  00:01:29
-   Duration  483.82s (transform 658ms, setup 0ms, collect 1.13s, tests 482.44s, environment 0ms, prepare 78ms)
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  00:16:32
+   Duration  1249.91s (transform 675ms, setup 0ms, collect 1.13s, tests 1248.48s, environment 0ms, prepare 86ms)
 

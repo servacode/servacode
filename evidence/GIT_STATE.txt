@@ -1,6 +1,12 @@
-?? PHASE_5_COMPANY_INTELLIGENCE_REPORT.md
-?? evidence/
+ M PHASE_5_COMPANY_INTELLIGENCE_REPORT.md
+ M evidence/BASELINE_COMMIT.txt
+ M evidence/GIT_STATE.txt
+ M evidence/LIVE_INTELLIGENCE.txt
 --- log ---
+05466e3 intelligence: a run that did not complete has its question asked, whatever it called it
+a421938 intelligence: an ESCALATED run is blocked whatever it ticked
+54aabb6 cli: serva intelligence changes
+c6055f7 intelligence: Serva states what research happened, not the agent
 9eef627 intelligence: a blocking escalation is a question, not an error
 cac65d5 intelligence: security acceptance, the real retriever, live intelligence suite
 3a2a62a intelligence: scenarios B, C and D; re-entry is a delta, not a suffix
@@ -13,7 +19,5 @@ fd3e970 serva: Phase 5 research chain — gather, verify, interpret, propose
 d36dea1 serva: Phase 5 artifact schemas and the canon repository
 42c1fc5 serva: Phase 5 foundation — profiles, applicability, provenance, first artifacts
 f4866b2 serva: Phase 4 final baseline report
-7101ca2 serva: Phase 4 HARD baseline — the sandbox is measured, not asserted
-06124ce serva: activation closure — reviewer read scope, denial claims, guest env, sandbox profile
 --- branch ---
 phase-5-company-intelligence

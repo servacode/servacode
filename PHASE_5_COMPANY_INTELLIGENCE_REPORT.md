@@ -223,15 +223,25 @@ little it says.
 
 ## 38. Live intelligence result
 
-`npm run test:intelligence-live` — excluded from `npm run verify`, run deliberately.
-Results in **Appendix A**.
+`npm run test:intelligence-live` — excluded from `npm run verify`, run deliberately against
+real Claude and the real public web. **9 tests, all passing.**
+
+Three real sources retrieved by Serva, captured with digests and marked UNTRUSTED;
+independent source verification; five departments producing schema-valid canon from one
+owner sentence; and an intake run that stopped and asked about payment policy rather than
+inventing one.
+
+Four live runs were made during Phase 5 and **three of them exposed a real defect** — all
+three in the same place, the authority boundary, which is precisely where a pre-written
+test cannot look. Full account, including what the live suite does **not** prove, in
+**Appendix A**.
 
 ## 39. Test count
 
 | | |
 |---|---|
 | Before Phase 5 | 764 |
-| After Phase 5 | **902** |
+| After Phase 5 | **904** |
 | Pre-existing tests modified | 0 |
 | New intelligence test files | 9 offline + 1 live |
 
@@ -241,7 +251,7 @@ Results in **Appendix A**.
 format:check  PASS
 lint          PASS
 typecheck     PASS
-test          36 files, 902 tests, all green
+test          36 files, 904 tests, all green
 build         PASS
 ```
 
@@ -269,14 +279,20 @@ to the agent, `19`'s `NEVER_AVAILABLE` becomes a fiction.
    wall that protects it is implemented and tested now.
 3. **The impact→stage mapping is Serva's, not R4's** (SF-9). Two implementations could
    disagree until R5 publishes it.
-4. **No live end-to-end through all 26 departments.** The live suite proves a vertical
-   slice by design — running fifty-five agents to learn the same thing would be an
-   expensive way to be thorough.
+4. **No live end-to-end through all 26 departments.** The live suite proves two vertical
+   slices by design — the framing chain and the research chain. Architecture, design,
+   admin operability and planning are covered offline only. See Appendix A.3.
 5. **Raising and approving a change is API-only.** `serva intelligence changes` shows what
    has been asked for and what re-running would cost, but raising, analysing and approving
    go through the API. An impact analysis assesses fourteen dimensions and an approval may
    need the owner; a CLI that let either happen behind a single flag would be a CLI that
    let them happen without anybody looking.
+6. **The 180-second per-run wall-clock budget is inherited from Phase 3 and is tight for
+   some intelligence departments.** A live NFR run was terminated by it. Serva handled the
+   termination correctly — no output, nothing recorded, gate FAIL — so this costs a re-run
+   rather than correctness. It is left alone deliberately: one observation is not enough
+   evidence to choose a better number, and raising a global ceiling so that one live run
+   passes would be tuning the system to the test.
 
 ## 44. Remaining Critical/High issues
 
@@ -285,7 +301,9 @@ defects the acceptance scenarios were written to look for:
 
 - re-entry re-ran unrelated stages (Scenario B);
 - a failed stage left no gate verdict (Scenario C);
-- a blocking escalation was reported as an error and its question discarded (live run);
+- an escalation from a run that produced no output had its question discarded — twice,
+  because the first fix enumerated which statuses counted instead of using the fact that
+  the run did not complete (live runs);
 - a discovery run reported interviews it had no capability to conduct (live run);
 - independence was checked on the actor but not on the context.
 
@@ -308,4 +326,92 @@ and it has not been built.
 
 ## Appendix A — live intelligence run
 
-_Filled in below from the actual run._
+`npm run test:intelligence-live`, against real Claude and the real public web.
+**9 tests, all passing, 1,250 seconds.** Full transcript: `evidence/LIVE_INTELLIGENCE.txt`.
+
+The brief was one sentence from a bookshop owner: *"I want a simple way for customers to
+reserve a book online and collect it in store, so I stop losing sales to people who assume
+we are out of stock."* No client data, no proprietary problem.
+
+### A.1 The lifecycle run
+
+```
+SC-AGENT-020  ESCALATED_TO_OWNER   intake
+SC-AGENT-020  COMPLETED            intake, after the owner answered
+SC-AGENT-030  COMPLETED            discovery
+SC-AGENT-020  COMPLETED            product validation
+SC-AGENT-040  COMPLETED            business analysis
+SC-AGENT-050  COMPLETED            requirements
+SC-AGENT-051  FAILED               NFRs — terminated: TIMEOUT
+→ BLOCKED at SC-GATE-REQUIREMENTS (FAIL)
+```
+
+Intake stopped and asked before writing anything, about two things a one-sentence brief
+genuinely does not contain:
+
+> **AMBIGUITY unresolvable within contract** — Payment timing, online reservation versus
+> in-store pickup payment, is a commercial policy decision the owner must make; the framing
+> cannot fully define transaction success without it.
+>
+> **INSUFFICIENT_CONTEXT** — Whether the bookshop has any existing stock or availability
+> tracking system is unknown; this materially affects what availability can mean for a
+> reservation.
+
+That is the governing principle working in the direction that matters. The model was not
+asked which framework or which database — it never raised one. It stopped on payment policy
+and on a fact about the owner's shop, which are exactly the two things it could not know and
+could very easily have invented.
+
+The run then blocked at the requirements gate, which **is the correct outcome**, for a
+reason that is not a governance defect: the NFR run exceeded the 180-second wall-clock
+budget and was terminated. Serva recorded `NO OUTPUT = NOTHING RECORDED` and the gate
+returned FAIL rather than passing a requirement baseline with no NFRs in it. See
+limitation 6.
+
+### A.2 The research chain
+
+```
+SC-AGENT-060  COMPLETED              market research — 3 real sources captured
+SC-AGENT-063  COMPLETED              INDEPENDENT source verification
+SC-AGENT-061  COMPLETED              competitive analysis
+SC-AGENT-062  PREREQUISITE_MISSING   innovation — no table stakes exist to build on
+→ BLOCKED at SC-GATE-COMPETITIVE (NOT_VERIFIED)
+```
+
+| §47 item | Proved |
+|---|---|
+| 1. a real Discovery/Product reasoning chain | yes — five departments produced schema-valid canon |
+| 2. real external research via an authorised agent | yes — 3 pages fetched from `en.wikipedia.org` |
+| 3. source capture | yes — each with a `sha256` digest, `UNTRUSTED`, attributed to `SC-AGENT-060` |
+| 4. independent Source Verifier | yes — ran, verified, and no capture is attributed to it |
+| 5. Competitive Analyst / Innovation output | partly — the analyst ran; innovation had nothing to build on |
+| 6. downstream decision consuming PERSISTED canon | yes — requirements trace to feature ids their run never saw |
+
+Item 5 is the honest half-result and it is worth reading carefully. The analyst completed
+and produced **no** table stakes and **no** differentiators, because three Wikipedia pages
+about click-and-collect contain no competitor data. Innovation was then refused
+deterministically, before any model call, for want of a prerequisite.
+
+Nothing was invented to fill the gap. The competitive gate returned `NOT_VERIFIED` and said
+why. A system that produced a plausible competitor landscape from those three pages would
+have looked far better and been worthless.
+
+### A.3 What the live suite does NOT prove
+
+- **No live run reached architecture, design, admin operability or planning.** Those are
+  covered offline only.
+- **No live run produced an Engineering Readiness Package.** The Phase 4 handoff is proved
+  against the real factory, but with scripted intelligence.
+- **The competitive chain has never completed end to end against real sources**, because
+  the chosen public pages carry no competitor data. Proving it would need a research
+  question whose answer really is on the open web in competitor form — a deliberate choice
+  not made here, since the alternative was to pick a real company's page and reason about
+  it in a test.
+
+### A.4 Runs are not reproducible
+
+A live run is a sample, not a fixture. Four runs against the same brief blocked in four
+different places — intake, business analysis, discovery, and the NFR timeout — because the
+model is not deterministic. Three of those four exposed a real defect in Serva, which is
+the argument for running it at all; none of them is a regression test, which is the
+argument for the 904 offline tests that are.
