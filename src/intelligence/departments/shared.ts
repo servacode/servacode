@@ -107,3 +107,25 @@ export function readAll<S extends z.ZodTypeAny>(
 ): readonly z.output<S>[] {
   return repository(store, type, schema).list();
 }
+
+/**
+ * The exact versions of everything in these families, right now.
+ *
+ * Used by reviewers to record WHAT they reviewed. A review that names only its verdict is
+ * a review nobody can re-examine: it stays true forever, including after the artifact it
+ * approved has been rewritten twice.
+ */
+export function currentSubjects(
+  store: Store,
+  types: readonly string[],
+): readonly { readonly id: string; readonly version: number }[] {
+  const out: { id: string; version: number }[] = [];
+  for (const type of types) {
+    for (const id of store.listCanonIds(type)) {
+      const versions = store.listCanonVersions(type, id);
+      const head = versions.length === 0 ? undefined : Math.max(...versions);
+      if (head !== undefined) out.push({ id, version: head });
+    }
+  }
+  return out;
+}

@@ -13,6 +13,7 @@ import { generateWorkItems } from '../src/intelligence/handoff.js';
 import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
 import { FeatureSchema } from '../src/intelligence/artifacts/product.js';
 import { RequirementSchema } from '../src/intelligence/artifacts/requirements.js';
+import { DataModelSchema } from '../src/intelligence/artifacts/data.js';
 import { AdminOperabilityReviewSchema } from '../src/intelligence/artifacts/admin.js';
 import { RiskSchema } from '../src/intelligence/artifacts/governance.js';
 import { EngineeringFactory } from '../src/engineering/factory.js';
@@ -25,7 +26,7 @@ import {
   removeFixtureDir,
 } from '../src/substrate/fake.js';
 import { readLedger } from '../src/lifecycle/stages.js';
-import { readGateResults } from '../src/gates/engine.js';
+import { readCriterionEvaluations, readGateResults } from '../src/gates/engine.js';
 import { cleanup, freshStore } from './helpers.js';
 import { E2E_SCRIPT, resolvingEngine, seedRetriever } from './fixtures/intelE2E.js';
 
@@ -177,31 +178,46 @@ describe('the whole company runs', () => {
     expect(new Set(ledger.map((e) => e.stageId)).size).toBeGreaterThanOrEqual(16);
   }, 180_000);
 
-  it('readiness is DERIVED, and READY is impossible while anything blocks', async () => {
+  it('readiness is DERIVED from the Store, with nothing handed to it', async () => {
     const f = setup();
     recordIdea(f.intel, 'bakery order capture');
     await intelligenceOrchestrator(f.intel, WORK_ITEM, 'PRF-NEW-PRODUCT').advance();
 
-    /* Without the independent reviews recorded, readiness refuses. */
-    const withoutReviews = assessReadiness({
-      store: f.store,
-      clock: f.deps.clock,
-      ids: f.deps.ids,
-      workItemId: WORK_ITEM,
-    });
-    expect(withoutReviews.status).not.toBe('READY');
-    expect(withoutReviews.blockers.join(' ')).toContain('no independent review');
-
-    /* With them, and with nothing else outstanding, it becomes READY. */
+    /*
+     * NOTHING IS INJECTED. This is the production call, exactly as the CLI makes it.
+     *
+     * The previous version of this test passed a set of completed review criteria and
+     * then asserted READY — which proved only that readiness believes what it is told.
+     * The reviews are now reconstructed from immutable gate evidence, so a caller has
+     * nothing to contribute and no way to contribute it.
+     */
     const ready = assessReadiness({
       store: f.store,
       clock: f.deps.clock,
       ids: f.deps.ids,
       workItemId: WORK_ITEM,
-      reviews: new Set(['RQ-4', 'AR-2', 'DA-1', 'UX-2', 'DS-1']),
     });
     expect(ready.blockers, ready.blockers.join(' | ')).toEqual([]);
     expect(ready.status).toBe('READY');
+
+    /* --- and the evidence it read is real, attributable and independent --- */
+    const evaluations = readCriterionEvaluations(f.store);
+    for (const [criterion, reviewer] of [
+      ['RQ-4', 'SC-AGENT-052'],
+      ['AR-2', 'SC-AGENT-072'],
+      ['DA-1', 'SC-AGENT-082'],
+      ['UX-2', 'SC-AGENT-123'],
+      ['DS-1', 'SC-AGENT-133'],
+    ] as const) {
+      const matching = evaluations.filter((e) => e.criterionRef === criterion);
+      const latest = matching[matching.length - 1];
+      expect(latest, criterion + ' was never evaluated').toBeDefined();
+      expect(latest?.basis).toBe('JUDGED');
+      expect(latest?.judgedBy?.role).toBe(reviewer);
+      expect(latest?.value).toBe('MET');
+      /* It names what it judged, at the version it judged. */
+      expect(latest?.artifactVersionsEvaluated.length).toBeGreaterThan(0);
+    }
 
     /* The package is REFERENCES into canon, with versions pinned. */
     expect(
@@ -212,6 +228,44 @@ describe('the whole company runs', () => {
     for (const ref of ready.package.refs.nfrs) expect(ref.version).toBeGreaterThan(0);
     // Nothing was copied: the package holds no requirement text of its own.
     expect(JSON.stringify(ready.package.refs)).not.toContain('shall');
+  }, 180_000);
+
+  it('a review stops counting once the thing it reviewed changes', async () => {
+    const f = setup();
+    recordIdea(f.intel, 'bakery order capture');
+    await intelligenceOrchestrator(f.intel, WORK_ITEM, 'PRF-NEW-PRODUCT').advance();
+    expect(
+      assessReadiness({
+        store: f.store,
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        workItemId: WORK_ITEM,
+      }).status,
+    ).toBe('READY');
+
+    /*
+     * Rewrite the data model. Nobody has reviewed THIS version — SC-AGENT-082 accepted
+     * the one before it — and a review that survives the artifact it reviewed is not a
+     * review, it is a rubber stamp with a long memory.
+     */
+    const dataModels = repository(f.store, ARTIFACT_TYPES.DATA_MODEL, DataModelSchema).list();
+    const model = dataModels[0];
+    expect(model).toBeDefined();
+    const tx = f.store.begin();
+    repository(f.store, ARTIFACT_TYPES.DATA_MODEL, DataModelSchema).put(tx, {
+      ...(model as NonNullable<typeof model>),
+    });
+    tx.commit();
+
+    const after = assessReadiness({
+      store: f.store,
+      clock: f.deps.clock,
+      ids: f.deps.ids,
+      workItemId: WORK_ITEM,
+    });
+    expect(after.status).not.toBe('READY');
+    expect(after.blockers.join(' | ')).toContain('DA-1');
+    expect(after.blockers.join(' | ')).toContain('has since changed');
   }, 180_000);
 
   it('an unanswered owner decision makes READY unreachable', async () => {
@@ -250,7 +304,6 @@ describe('the whole company runs', () => {
       clock: f.deps.clock,
       ids: f.deps.ids,
       workItemId: WORK_ITEM,
-      reviews: new Set(['RQ-4', 'AR-2', 'DA-1', 'UX-2', 'DS-1']),
     });
     expect(assessment.status).toBe('BLOCKED');
     expect(assessment.blockers.join(' ')).toContain('owner decision is unanswered');
@@ -273,7 +326,6 @@ describe('Phase 5 satisfies the Phase 4 contract', () => {
       clock: f.deps.clock,
       ids: f.deps.ids,
       workItemId: WORK_ITEM,
-      reviews: new Set(['RQ-4', 'AR-2', 'DA-1', 'UX-2', 'DS-1']),
     });
     expect(readiness.status).toBe('READY');
 

@@ -94,6 +94,8 @@ export interface CriterionJudgement {
   readonly met: boolean;
   readonly by: string;
   readonly note: string;
+  /** The exact artifact versions judged. Absent means the judgement is uncheckable. */
+  readonly subjects?: readonly { readonly id: string; readonly version: number }[];
 }
 
 /** A gate evaluation, injected so the orchestrator does not own gate mechanics. */

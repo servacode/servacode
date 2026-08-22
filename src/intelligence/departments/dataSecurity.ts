@@ -21,7 +21,7 @@ import {
   TrustBoundarySchema,
 } from '../artifacts/security.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
-import { contextFrom, derived } from './shared.js';
+import { contextFrom, currentSubjects, derived } from './shared.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -354,7 +354,7 @@ export const dataReviewDepartment: DepartmentConfig<typeof DataReviewOutputSchem
     return 'Review only. Do not redesign the model.';
   },
 
-  persist(_tx, output) {
+  persist(_tx, output, ctx) {
     return {
       artifactIds: [],
       notes: [
@@ -367,6 +367,7 @@ export const dataReviewDepartment: DepartmentConfig<typeof DataReviewOutputSchem
           met: output.verdict === 'ACCEPTABLE',
           by: DATA_REVIEWER,
           note: output.summary,
+          subjects: currentSubjects(ctx.store, [ARTIFACT_TYPES.DATA_MODEL]),
         },
       ],
     };

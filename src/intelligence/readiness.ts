@@ -1,4 +1,4 @@
-import { GateVerdict, ValidityState } from '../vocab/index.js';
+import { CriterionBasis, CriterionResult, GateVerdict, ValidityState } from '../vocab/index.js';
 import { ARTIFACT_TYPES, repository } from './repository.js';
 import { ProjectGoalSchema } from './artifacts/framing.js';
 import { FeatureSchema, ProductScopeSchema } from './artifacts/product.js';
@@ -43,12 +43,14 @@ import { checkDesign } from './checks/design.js';
 import { assessFreshness, staleSubjects } from './research/freshness.js';
 import { marketFreshnessSubjects } from './research/subjects.js';
 import { readOrchestratorRecord } from './execution/orchestrator.js';
+import { readCriterionEvaluations } from '../gates/engine.js';
 import { outstandingChanges } from './change.js';
 import { resolveApplicability, upstreamGatesFor } from './applicability.js';
 import { UPSTREAM_GATES } from './gates/definitions.js';
 import type { EngineeringReadinessPackage } from './artifacts/governance.js';
 import type { TraceFinding } from './checks/traceability.js';
 import type { Store } from '../store/store.js';
+import type { CriterionEvaluation } from '../gates/types.js';
 import type { Clock } from '../core/clock.js';
 import type { IdSource } from '../core/ids.js';
 
@@ -97,28 +99,172 @@ const ACCEPTING: readonly string[] = Object.freeze([
   GateVerdict.PASS_WITH_QUALIFICATION,
 ]);
 
-/** Reviews whose absence means nobody independent looked. */
-const REQUIRED_REVIEWS: readonly { readonly criterion: string; readonly what: string }[] =
-  Object.freeze([
-    { criterion: 'RQ-4', what: 'requirements' },
-    { criterion: 'AR-2', what: 'architecture' },
-    { criterion: 'DA-1', what: 'the data model' },
-    { criterion: 'UX-2', what: 'the user experience' },
-    { criterion: 'DS-1', what: 'the design system' },
-  ]);
+/**
+ * Reviews whose absence means nobody independent looked.
+ *
+ * `reviewer` is the canonical actor whose judgement counts. It is checked rather than
+ * assumed: a criterion marked MET by the author of the thing it judges is not an
+ * independent review, and without this the only thing stopping that is the department
+ * configuration that produced it.
+ */
+const REQUIRED_REVIEWS: readonly {
+  readonly criterion: string;
+  readonly what: string;
+  readonly reviewer: string;
+  readonly gate: string;
+}[] = Object.freeze([
+  {
+    criterion: 'RQ-4',
+    what: 'requirements',
+    reviewer: 'SC-AGENT-052',
+    gate: 'SC-GATE-REQUIREMENTS',
+  },
+  {
+    criterion: 'AR-2',
+    what: 'architecture',
+    reviewer: 'SC-AGENT-072',
+    gate: 'SC-GATE-ARCHITECTURE',
+  },
+  {
+    criterion: 'DA-1',
+    what: 'the data model',
+    reviewer: 'SC-AGENT-082',
+    gate: 'SC-GATE-ARCHITECTURE',
+  },
+  {
+    criterion: 'UX-2',
+    what: 'the user experience',
+    reviewer: 'SC-AGENT-123',
+    gate: 'SC-GATE-DESIGN',
+  },
+  {
+    criterion: 'DS-1',
+    what: 'the design system',
+    reviewer: 'SC-AGENT-133',
+    gate: 'SC-GATE-DESIGN',
+  },
+]);
+
+/**
+ * Why a required review does not count, or undefined if it does.
+ *
+ * DERIVED FROM THE STORE, which is the whole point. Readiness previously took the set of
+ * completed reviews as an argument, and the only caller that supplied one was a test — so
+ * the test reached READY by handing readiness information the production path never
+ * reconstructs. That is not a readiness check; it is a readiness check with the answer
+ * written on it.
+ *
+ * Everything below is a fact about persisted, immutable gate evidence:
+ *
+ *   the criterion was evaluated at all
+ *   the evaluation was JUDGED, not measured or assumed
+ *   the judge was the canonical INDEPENDENT reviewer for that criterion
+ *   the verdict was MET
+ *   the gate that owns the criterion currently holds an accepting verdict
+ *   every artifact version the reviewer judged is still the current version
+ *
+ * The last two are what make a review perishable. Re-entry drops the gate result, so the
+ * review stops counting; a later version of the reviewed artifact makes the acceptance a
+ * statement about something that no longer exists.
+ */
+function reviewRefusal(
+  o: {
+    readonly criterion: string;
+    readonly what: string;
+    readonly reviewer: string;
+    readonly gate: string;
+  },
+  ctx: {
+    readonly evaluations: readonly CriterionEvaluation[];
+    readonly acceptedGates: ReadonlySet<string>;
+    readonly store: Store;
+  },
+): string | undefined {
+  /* The most recent evaluation of this criterion. Earlier ones were superseded. */
+  const forCriterion = ctx.evaluations.filter((e) => e.criterionRef === o.criterion);
+  const evaluation = forCriterion[forCriterion.length - 1];
+
+  if (evaluation === undefined) {
+    return 'no independent review of ' + o.what + ' is recorded (' + o.criterion + ')';
+  }
+  if (evaluation.basis !== CriterionBasis.JUDGED) {
+    return (
+      o.criterion +
+      ' was recorded as ' +
+      evaluation.basis +
+      ' rather than JUDGED: a review is somebody\u2019s judgement, not a measurement'
+    );
+  }
+  if (evaluation.judgedBy?.role !== o.reviewer) {
+    return (
+      o.criterion +
+      ' was judged by ' +
+      String(evaluation.judgedBy?.role) +
+      ', not by the independent reviewer ' +
+      o.reviewer
+    );
+  }
+  if (evaluation.value !== CriterionResult.MET) {
+    return (
+      'the independent review of ' +
+      o.what +
+      ' returned ' +
+      evaluation.value +
+      ' (' +
+      o.criterion +
+      ')'
+    );
+  }
+  if (!ctx.acceptedGates.has(o.gate)) {
+    return (
+      o.criterion +
+      ' was accepted, but ' +
+      o.gate +
+      ' does not currently hold an accepting verdict, so the review no longer stands'
+    );
+  }
+  if (evaluation.artifactVersionsEvaluated.length === 0) {
+    return (
+      o.criterion +
+      ' records no artifact versions, so there is no way to tell whether it reviewed what exists now'
+    );
+  }
+  for (const ref of evaluation.artifactVersionsEvaluated) {
+    const versions = versionsAnywhere(ctx.store, ref.artifactId);
+    if (versions.length === 0) {
+      return o.criterion + ' reviewed ' + ref.artifactId + ', which no longer exists';
+    }
+    const head = Math.max(...versions);
+    if (head !== ref.version) {
+      return (
+        o.criterion +
+        ' reviewed ' +
+        ref.artifactId +
+        ' at version ' +
+        String(ref.version) +
+        ', and version ' +
+        String(head) +
+        ' now exists: the review is about something that has since changed'
+      );
+    }
+  }
+  return undefined;
+}
+
+/** Every stored version of an id, whichever family holds it. */
+function versionsAnywhere(store: Store, id: string): readonly number[] {
+  for (const type of Object.values(ARTIFACT_TYPES)) {
+    const versions = store.listCanonVersions(type, id);
+    if (versions.length > 0) return versions;
+  }
+  return [];
+}
 
 export interface ReadinessInput {
   readonly store: Store;
   readonly clock: Clock;
   readonly ids: IdSource;
   readonly workItemId: string;
-  /**
-   * Independent reviews recorded this cycle, by criterion.
-   *
-   * Passed rather than re-derived, for the same reason a gate takes them: a judgement
-   * belongs to the run that made it. Absent means nobody looked, which blocks.
-   */
-  readonly reviews?: ReadonlySet<string>;
   /** Gates whose evidence Phase 5 does not yet produce may be excused, explicitly. */
   readonly waiveGates?: ReadonlySet<string>;
 }
@@ -306,9 +452,13 @@ export function assessReadiness(input: ReadinessInput): ReadinessAssessment {
 
   /* ---------------------------------------------------- 5. independent reviews */
 
+  const acceptedGates = new Set(
+    gateResults.filter((g) => ACCEPTING.includes(g.verdict)).map((g) => g.gateId),
+  );
+  const evaluations = readCriterionEvaluations(store);
   for (const r of REQUIRED_REVIEWS) {
-    if (input.reviews?.has(r.criterion) === true) continue;
-    blockers.push('no independent review of ' + r.what + ' is recorded (' + r.criterion + ')');
+    const refusal = reviewRefusal(r, { evaluations, acceptedGates, store });
+    if (refusal !== undefined) blockers.push(refusal);
   }
 
   /* ------------------------------------------------- 6. the minimum canon must exist */

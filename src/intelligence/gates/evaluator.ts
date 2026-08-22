@@ -104,7 +104,13 @@ export interface UpstreamGateDeps {
    */
   readonly judgements?: ReadonlyMap<
     string,
-    { readonly met: boolean; readonly by: string; readonly note: string }
+    {
+      readonly met: boolean;
+      readonly by: string;
+      readonly note: string;
+      /** The exact artifact versions judged, so readiness can tell whether they still are. */
+      readonly subjects?: readonly { readonly id: string; readonly version: number }[];
+    }
   >;
 }
 
@@ -181,6 +187,22 @@ export function evaluationsFor(
          * evidence is "somebody decided" cannot later be checked for independence.
          */
         judgedBy: { role: j.by, criteriaApplied: [j.note], confidence: 'MEDIUM' },
+        /*
+         * And WHAT was judged, at which version.
+         *
+         * This is what readiness reads. Without it a review is a permanent fact about a
+         * project rather than a statement about a version of it, and rewriting the
+         * architecture would leave last month's acceptance still standing.
+         *
+         * The digest is empty because these are Store-resident artifacts identified by
+         * (type, id, version) rather than content-addressed blobs; the version is the
+         * currency check, and the Store is authoritative for the content at it.
+         */
+        artifactVersionsEvaluated: (j.subjects ?? []).map((sub) => ({
+          artifactId: sub.id,
+          version: sub.version,
+          digest: '',
+        })),
       },
     );
   };

@@ -29,7 +29,7 @@ import {
   ProtectedRuleSchema,
 } from '../artifacts/admin.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
-import { contextFrom, derived } from './shared.js';
+import { contextFrom, currentSubjects, derived } from './shared.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -372,7 +372,7 @@ export const uxReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
     return 'Review only. Do not redesign flows.';
   },
 
-  persist(_tx, output) {
+  persist(_tx, output, ctx) {
     return {
       artifactIds: [],
       notes: [
@@ -385,6 +385,10 @@ export const uxReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
           met: output.verdict === 'ACCEPTABLE',
           by: UX_REVIEWER,
           note: output.summary,
+          subjects: currentSubjects(ctx.store, [
+            ARTIFACT_TYPES.FLOW,
+            ARTIFACT_TYPES.STATE_COVERAGE,
+          ]),
         },
       ],
     };
@@ -795,7 +799,7 @@ export const designReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
     return 'Review only. Do not change tokens or components.';
   },
 
-  persist(_tx, output) {
+  persist(_tx, output, ctx) {
     return {
       artifactIds: [],
       notes: [
@@ -808,6 +812,10 @@ export const designReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
           met: output.verdict === 'ACCEPTABLE',
           by: DESIGN_REVIEWER,
           note: output.summary,
+          subjects: currentSubjects(ctx.store, [
+            ARTIFACT_TYPES.DESIGN_TOKEN_SET,
+            ARTIFACT_TYPES.COMPONENT_SPEC,
+          ]),
         },
       ],
     };

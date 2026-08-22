@@ -11,7 +11,7 @@ import {
   nfrMeasurabilityRefusal,
 } from '../artifacts/requirements.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
-import { contextFrom, derived } from './shared.js';
+import { contextFrom, currentSubjects, derived } from './shared.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -463,6 +463,11 @@ export const requirementsVerifierDepartment: DepartmentConfig<typeof VerifierOut
           met: output.verdict === 'ACCEPTABLE',
           by: VERIFIER_AGENT,
           note: output.summary,
+          subjects: currentSubjects(ctx.store, [
+            ARTIFACT_TYPES.REQUIREMENT,
+            ARTIFACT_TYPES.NFR,
+            ARTIFACT_TYPES.ACCEPTANCE_CRITERION,
+          ]),
         },
       ],
     };

@@ -19,7 +19,7 @@ import {
   evaluationRefusal,
 } from '../artifacts/architecture.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
-import { contextFrom, derived } from './shared.js';
+import { contextFrom, currentSubjects, derived } from './shared.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -677,7 +677,7 @@ export const architectureReviewDepartment: DepartmentConfig<typeof ArchitectureR
       return 'Review only. Do not redesign, and do not add requirements.';
     },
 
-    persist(_tx, output, _ctx) {
+    persist(_tx, output, ctx) {
       const notes = [
         output.summary,
         ...output.findings.map(
@@ -693,6 +693,11 @@ export const architectureReviewDepartment: DepartmentConfig<typeof ArchitectureR
             met: output.verdict === 'ACCEPTABLE',
             by: REVIEWER,
             note: output.summary,
+            subjects: currentSubjects(ctx.store, [
+              ARTIFACT_TYPES.ARCHITECTURE_MODEL,
+              ARTIFACT_TYPES.ADR,
+              ARTIFACT_TYPES.COMPLEXITY_JUSTIFICATION,
+            ]),
           },
         ],
       };

@@ -92,14 +92,20 @@ export interface PersistResult {
   /**
    * Judgements this department made about gate criteria.
    *
-   * A verifier does not write canon — its output IS a judgement, and this is how it
+   * A verifier does not write canon - its output IS a judgement, and this is how it
    * reaches the gate as evidence attributable to the actor that made it.
+   *
+   * `subjects` is what makes the judgement checkable later. "Somebody accepted the
+   * architecture" cannot be re-examined; "SC-AGENT-072 accepted SC-ARCH-000001 at version
+   * 2" can, and readiness refuses it once version 3 exists. Without the versions, a review
+   * survives the thing it reviewed.
    */
   readonly judgements?: readonly {
     readonly criterionRef: string;
     readonly met: boolean;
     readonly by: string;
     readonly note: string;
+    readonly subjects?: readonly { readonly id: string; readonly version: number }[];
   }[];
 }
 
@@ -216,6 +222,7 @@ export interface DepartmentResult {
     readonly met: boolean;
     readonly by: string;
     readonly note: string;
+    readonly subjects?: readonly { readonly id: string; readonly version: number }[];
   }[];
   /** Present when the outcome is not COMPLETED. */
   readonly reason?: string;
