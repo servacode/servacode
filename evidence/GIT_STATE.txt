@@ -1,0 +1,19 @@
+?? PHASE_5_COMPANY_INTELLIGENCE_REPORT.md
+?? evidence/
+--- log ---
+9eef627 intelligence: a blocking escalation is a question, not an error
+cac65d5 intelligence: security acceptance, the real retriever, live intelligence suite
+3a2a62a intelligence: scenarios B, C and D; re-entry is a delta, not a suffix
+73d2862 intelligence: change, proposals, learning, owner CLI, authority proofs
+61425a2 intelligence: all 26 departments execute, 12 gates, readiness, Phase 4 handoff
+c4b5fc1 serva: Phase 5 design authority — architecture through admin operability
+fd3e970 serva: Phase 5 research chain — gather, verify, interpret, propose
+41b1c57 serva: Phase 5 intelligence execution core
+00af7d3 serva: Phase 5 research trust boundary and deterministic checkers
+d36dea1 serva: Phase 5 artifact schemas and the canon repository
+42c1fc5 serva: Phase 5 foundation — profiles, applicability, provenance, first artifacts
+f4866b2 serva: Phase 4 final baseline report
+7101ca2 serva: Phase 4 HARD baseline — the sandbox is measured, not asserted
+06124ce serva: activation closure — reviewer read scope, denial claims, guest env, sandbox profile
+--- branch ---
+phase-5-company-intelligence

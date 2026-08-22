@@ -290,27 +290,70 @@ export const discoveryDepartment: DepartmentConfig<typeof DiscoveryOutputSchema>
       ids.push(id);
     }
 
+    /*
+     * WHAT RESEARCH ACTUALLY HAPPENED IS SERVA'S TO STATE, NOT THE AGENT'S.
+     *
+     * A discovery run has no tools. It cannot interview anybody, cannot run a survey, and
+     * cannot sit behind a person using something. So any non-zero count it reports is
+     * fabricated by construction — not by dishonesty, but because a model asked how much
+     * research it did will describe the reasoning it performed in those terms.
+     *
+     * Detecting that afterwards and recording a note was not enough. A live run against a
+     * real model reported zero interviews, left `limitations` empty, and the Discovery
+     * gate correctly FAILED on DI-3 — "no user research is claimed that was not
+     * performed" — leaving the company stuck behind a field the agent was never in a
+     * position to fill in honestly.
+     *
+     * So Serva fills it in. The counts are zero because they cannot be anything else, and
+     * the limitation saying so is recorded whether or not the agent remembered it. This
+     * STRENGTHENS DI-3 rather than satisfying it: a fabricated interview count is now
+     * impossible to persist, where before it was merely detectable.
+     */
+    const claimed = output.researchPerformed;
+    const actualResearch = {
+      interviews: 0,
+      surveys: 0,
+      usabilityTests: 0,
+      /* True only if Serva captured something. Discovery has no gateway, so normally false. */
+      deskResearch: ctx.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE).length > 0,
+    };
+    const NO_PRIMARY_RESEARCH =
+      'No primary user research was performed: no interviews, surveys or usability tests. ' +
+      'Every segment claim rests on the owner’s own account and on inference from it.';
+    const honestLimitations = output.limitations.some((l) => /interview|survey|research/i.test(l))
+      ? output.limitations
+      : [NO_PRIMARY_RESEARCH, ...output.limitations];
+
+    const notes: string[] = [NO_PRIMARY_RESEARCH];
+    if (claimed.interviews > 0 || claimed.surveys > 0 || claimed.usabilityTests > 0) {
+      /*
+       * Worth surfacing loudly. The run claimed research it had no way to perform, and a
+       * reader of the trace should see that it was overridden rather than believed.
+       */
+      notes.push(
+        'the run reported ' +
+          String(claimed.interviews) +
+          ' interview(s), ' +
+          String(claimed.surveys) +
+          ' survey(s) and ' +
+          String(claimed.usabilityTests) +
+          ' usability test(s); it has no capability to perform any, and the counts were recorded as zero',
+      );
+    }
+
     const findingsId = ctx.ids.next('SC-DF');
     findings.put(tx, {
       id: findingsId,
       createdAt: at,
       summary: output.summary,
       segmentRefs: segmentIds.map((id) => ({ id })),
-      researchPerformed: output.researchPerformed,
-      limitations: output.limitations,
+      researchPerformed: actualResearch,
+      limitations: honestLimitations,
       openQuestionRefs: [],
       assumptionRefs: [],
       meta: derived(ctx, AGENT, segmentIds, 'discovery summary over the identified segments'),
     });
     ids.push(findingsId);
-
-    const notes: string[] = [];
-    const r = output.researchPerformed;
-    if (r.interviews === 0 && r.surveys === 0 && r.usabilityTests === 0) {
-      notes.push(
-        'no primary user research was performed; every segment claim rests on desk research or inference and the gate should read it that way',
-      );
-    }
 
     return {
       artifactIds: ids,

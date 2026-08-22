@@ -1,0 +1,318 @@
+{
+  "catalogue": {
+    "stages": 26,
+    "gates": 19,
+    "workflows": 15,
+    "agents": 55,
+    "policies": 35,
+    "profiles": 13
+  },
+  "artifactTypes": 110,
+  "departments": [
+    {
+      "stage": "SC-STAGE-002",
+      "agent": "SC-AGENT-020",
+      "title": "Intake",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-003",
+      "agent": "SC-AGENT-030",
+      "title": "Discovery",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-004",
+      "agent": "SC-AGENT-020",
+      "title": "Product Validation",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-010",
+      "agent": "SC-AGENT-040",
+      "title": "Business Analysis",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-011",
+      "agent": "SC-AGENT-050",
+      "title": "Requirements Engineering",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-011",
+      "agent": "SC-AGENT-051",
+      "title": "NFR Specification",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-011",
+      "agent": "SC-AGENT-052",
+      "title": "Requirements Quality Verification",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-050",
+        "SC-AGENT-051"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-013",
+      "agent": "SC-AGENT-060",
+      "title": "Market Research",
+      "deterministic": false,
+      "usesResearchGateway": true,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-013",
+      "agent": "SC-AGENT-063",
+      "title": "Source Verification",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-060",
+        "SC-AGENT-061",
+        "SC-AGENT-062"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-013",
+      "agent": "SC-AGENT-061",
+      "title": "Competitive Analysis",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-063"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-013",
+      "agent": "SC-AGENT-062",
+      "title": "Innovation Strategy",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-063"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-020",
+      "agent": "SC-AGENT-070",
+      "title": "Software Architecture",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-020",
+      "agent": "SC-AGENT-072",
+      "title": "Architecture Review",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-070",
+        "SC-AGENT-071"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-023",
+      "agent": "SC-AGENT-071",
+      "title": "Technology Selection",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-021",
+      "agent": "SC-AGENT-080",
+      "title": "Data Architecture",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-021",
+      "agent": "SC-AGENT-082",
+      "title": "Data Model Review",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-080"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-022",
+      "agent": "SC-AGENT-090",
+      "title": "Security & Privacy Architecture",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-024",
+      "agent": "SC-AGENT-120",
+      "title": "UX Design",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-024",
+      "agent": "SC-AGENT-123",
+      "title": "UX Review",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-120"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-025",
+      "agent": "SC-AGENT-130",
+      "title": "Design System",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-025",
+      "agent": "SC-AGENT-131",
+      "title": "UI Composition",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-025",
+      "agent": "SC-AGENT-133",
+      "title": "Design System Review",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": [
+        "SC-AGENT-130",
+        "SC-AGENT-131"
+      ]
+    },
+    {
+      "stage": "SC-STAGE-026",
+      "agent": "SC-AGENT-140",
+      "title": "Admin Operability",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-016",
+      "agent": "SC-AGENT-001",
+      "title": "Risk Aggregation",
+      "deterministic": true,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-015",
+      "agent": "SC-AGENT-110",
+      "title": "Cost Engineering",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-020",
+      "agent": "SC-AGENT-100",
+      "title": "Infrastructure Architecture",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    },
+    {
+      "stage": "SC-STAGE-030",
+      "agent": "SC-AGENT-210",
+      "title": "Test Strategy and Cases",
+      "deterministic": false,
+      "usesResearchGateway": false,
+      "independentOf": []
+    }
+  ],
+  "gatesDefined": [
+    {
+      "id": "SC-GATE-INTAKE",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 3
+    },
+    {
+      "id": "SC-GATE-DISCOVERY",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 4
+    },
+    {
+      "id": "SC-GATE-PRODUCT_VALIDATION",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 3
+    },
+    {
+      "id": "SC-GATE-REQUIREMENTS",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 5
+    },
+    {
+      "id": "SC-GATE-COMPETITIVE",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 4
+    },
+    {
+      "id": "SC-GATE-FEASIBILITY",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 3
+    },
+    {
+      "id": "SC-GATE-ARCHITECTURE",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 4
+    },
+    {
+      "id": "SC-GATE-SECURITY_DESIGN",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 4
+    },
+    {
+      "id": "SC-GATE-TECHNOLOGY",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 3
+    },
+    {
+      "id": "SC-GATE-DESIGN",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 6
+    },
+    {
+      "id": "SC-GATE-PLAN",
+      "blocking": true,
+      "waivable": false,
+      "criteria": 2
+    }
+  ]
+}

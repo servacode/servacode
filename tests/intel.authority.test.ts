@@ -6,9 +6,12 @@ import { FakeEngineAdapter } from '../src/engine/fake.js';
 import { runDepartment } from '../src/intelligence/execution/runner.js';
 import { DepartmentOutcome } from '../src/intelligence/execution/types.js';
 import { resolveApplicability } from '../src/intelligence/applicability.js';
+import { discoveryDepartment } from '../src/intelligence/departments/discovery.js';
+import { DiscoveryFindingsSchema } from '../src/intelligence/artifacts/discovery.js';
 import { jsonSchemaFor } from '../src/intelligence/execution/jsonSchema.js';
 import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
 import { OwnerDecisionRequestSchema } from '../src/intelligence/artifacts/governance.js';
+import { ClientInputSchema } from '../src/intelligence/artifacts/framing.js';
 import { answerOwnerDecision } from '../src/intelligence/app.js';
 import { sanitizeForContext } from '../src/intelligence/research/capture.js';
 import { assessReadiness } from '../src/intelligence/readiness.js';
@@ -390,5 +393,95 @@ describe('a blocking escalation becomes a question, not an error', () => {
     /* The non-blocking escalation and the unresolved item are reported, not escalated. */
     expect(result.diagnostics.join(' ')).toContain('AMBIGUITY');
     expect(result.reason).toContain('No-show handling');
+  });
+});
+
+describe('research nobody could have performed is recorded as not performed', () => {
+  it('a discovery run claiming interviews has the claim overridden, not believed', async () => {
+    const { store, root, deps } = freshStore();
+    roots.push(root);
+    const engine = new FakeEngineAdapter({ clock: deps.clock });
+
+    /* Discovery reads the intake, so the intake has to exist. */
+    const at = deps.clock.now();
+    const tx = store.begin();
+    repository(store, ARTIFACT_TYPES.CLIENT_INPUT, ClientInputSchema).put(tx, {
+      id: deps.ids.next('SC-CIN'),
+      createdAt: at,
+      ideaRef: { id: deps.ids.next('SC-IDEA') },
+      problem: 'Customers assume the shop is out of stock and buy elsewhere.',
+      audience: 'Regular local customers of an independent bookshop',
+      successDefinition: 'A customer can reserve a book and collect it.',
+      commercialRequirements: [],
+      meta: { provenance: { marking: 'OWNER_STATED', statedAt: at }, attribution: { at } },
+    } as never);
+    tx.commit();
+
+    /* The payload a real model produced: research it has no capability to perform. */
+    engine.script('SC-AGENT-030', {
+      structuredOutput: {
+        ...envelope({
+          summary: 'Independent bookshops lose sales to assumed stock-outs.',
+          segments: [
+            {
+              name: 'Regular local customers',
+              description: 'People who would come in if they knew the book was there',
+              goals: ['get the book today'],
+              context: 'walking past the shop, or deciding whether it is worth the trip',
+              jobs: [
+                {
+                  statement: 'Find out whether a copy is actually in the shop',
+                  currentSolution: 'phone and ask',
+                },
+              ],
+              pains: [{ statement: 'assuming the shop has nothing', severity: 'MAJOR' }],
+              alternatives: [
+                {
+                  kind: 'MANUAL_PROCESS',
+                  description: 'Phoning the shop to ask',
+                  whyUsed: 'it works and needs nothing new',
+                  weaknesses: ['nobody answers during a rush'],
+                },
+              ],
+            },
+          ],
+          researchPerformed: { interviews: 12, surveys: 3, usabilityTests: 2, deskResearch: true },
+          limitations: [],
+          assumptions: [],
+        }),
+      },
+    });
+
+    const result = await runDepartment(
+      runnerDeps({ store, deps, engine }, ['SC-AGENT-030']),
+      discoveryDepartment,
+      {
+        workItemId: 'SC-WI-000801',
+        store,
+        clock: deps.clock,
+        ids: deps.ids,
+        plan: resolveApplicability('PRF-NEW-PRODUCT'),
+        stage: resolveApplicability('PRF-NEW-PRODUCT').stages[1] as never,
+      },
+    );
+
+    expect(result.outcome, result.reason ?? '').toBe(DepartmentOutcome.COMPLETED);
+
+    const findings = repository(
+      store,
+      ARTIFACT_TYPES.DISCOVERY_FINDINGS,
+      DiscoveryFindingsSchema,
+    ).list();
+    expect(findings).toHaveLength(1);
+    const finding = findings[0];
+
+    /* Zero, because zero is the only count a tool-less run could honestly report. */
+    expect(finding?.researchPerformed.interviews).toBe(0);
+    expect(finding?.researchPerformed.surveys).toBe(0);
+    expect(finding?.researchPerformed.usabilityTests).toBe(0);
+    /* And the absence is stated, so the gate reads a limitation rather than a silence. */
+    expect(finding?.limitations.join(' ')).toMatch(/No primary user research/);
+    /* The attempted claim is visible in the trace rather than quietly dropped. */
+    expect(result.diagnostics.join(' ')).toContain('12 interview(s)');
   });
 });

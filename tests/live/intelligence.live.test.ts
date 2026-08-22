@@ -73,6 +73,20 @@ let root: string;
 let result: AdvanceResult | undefined;
 let skip: string | undefined;
 const ownerRounds: string[][] = [];
+/**
+ * Every department result across every round.
+ *
+ * `advance()` returns only what THAT call ran, and the owner loop calls it several times.
+ * Asserting against the last one asks whether intake ran in the final round, which it
+ * did not and should not have — it ran in the first.
+ */
+const allRuns: {
+  agentId: string;
+  outcome: string;
+  runId?: string;
+  reason?: string;
+  diagnostics: readonly string[];
+}[] = [];
 
 beforeAll(async () => {
   const f = freshStore();
@@ -123,6 +137,15 @@ beforeAll(async () => {
   const orchestrator = intelligenceOrchestrator(intel, WORK_ITEM, 'PRF-NEW-PRODUCT');
   for (let round = 0; round < MAX_OWNER_ROUNDS; round += 1) {
     result = await orchestrator.advance();
+    allRuns.push(
+      ...result.ran.map((r) => ({
+        agentId: r.agentId,
+        outcome: r.outcome as string,
+        ...(r.runId === undefined ? {} : { runId: r.runId }),
+        ...(r.reason === undefined ? {} : { reason: r.reason }),
+        diagnostics: r.diagnostics,
+      })),
+    );
     if (result.state !== OrchestratorState.WAITING_FOR_OWNER) break;
 
     const open = openOwnerDecisions(store);
@@ -156,9 +179,8 @@ describe('a real company run over a real problem', () => {
   it('reached at least the competitive stage, or reported honestly why not', () => {
     if (guard()) return;
     expect(result).toBeDefined();
-    const ran = (result?.ran ?? []).map((r) => r.agentId + ':' + r.outcome);
-    console.log('ran: ' + ran.join(', '));
-    for (const r of result?.ran ?? []) {
+    console.log('ran: ' + allRuns.map((r) => r.agentId + ':' + r.outcome).join(', '));
+    for (const r of allRuns) {
       if (r.outcome === 'COMPLETED') continue;
       console.log('  ' + r.agentId + ' — ' + (r.reason ?? 'no reason'));
       for (const d of r.diagnostics) console.log('    · ' + d);
@@ -178,7 +200,7 @@ describe('a real company run over a real problem', () => {
      * invented answer — and that one is impossible to reach from here, because canon is
      * only written by a run that completed.
      */
-    const intake = (result?.ran ?? []).filter((r) => r.agentId === 'SC-AGENT-020');
+    const intake = allRuns.filter((r) => r.agentId === 'SC-AGENT-020');
     expect(intake.length, 'intake never ran').toBeGreaterThan(0);
     expect(
       intake.some((r) => r.outcome === 'COMPLETED' || r.outcome === 'ESCALATED_TO_OWNER'),
@@ -237,7 +259,7 @@ describe('a real company run over a real problem', () => {
     const captures = store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE);
     if (captures.length === 0) return;
 
-    const verifierRun = (result?.ran ?? []).find((r) => r.agentId === 'SC-AGENT-063');
+    const verifierRun = allRuns.find((r) => r.agentId === 'SC-AGENT-063');
     expect(verifierRun, 'the source verifier did not run').toBeDefined();
 
     /*
@@ -300,7 +322,7 @@ describe('a real company run over a real problem', () => {
 
     /* And the runs really were separate sessions. */
     const runIds = new Set(
-      (result?.ran ?? []).map((r) => r.runId).filter((id): id is string => id !== undefined),
+      allRuns.map((r) => r.runId).filter((id): id is string => id !== undefined),
     );
     expect(runIds.size).toBeGreaterThan(3);
     for (const runId of runIds) expect(runStream(runId)).toBeTruthy();

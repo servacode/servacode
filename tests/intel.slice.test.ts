@@ -28,6 +28,7 @@ import {
 } from '../src/intelligence/artifacts/requirements.js';
 import { readLedger } from '../src/lifecycle/stages.js';
 import { readGateResults } from '../src/gates/engine.js';
+import { DiscoveryFindingsSchema } from '../src/intelligence/artifacts/discovery.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { parseToolSurface } from '../src/agents/toolPolicy.js';
 import { cleanup, freshStore } from './helpers.js';
@@ -397,7 +398,24 @@ describe('the intelligence execution core runs the upstream company', () => {
     const result = await o.advance();
 
     const discovery = result.ran.find((r) => r.agentId === 'SC-AGENT-030');
-    expect(discovery?.diagnostics.join(' ')).toContain('no primary user research was performed');
+    expect(discovery?.diagnostics.join(' ')).toContain('No primary user research was performed');
+
+    /*
+     * And it is on the ARTIFACT, not only in the diagnostics. Serva states the counts
+     * rather than believing them, because a run with no tools cannot interview anybody.
+     */
+    const findings = repository(
+      f.store,
+      ARTIFACT_TYPES.DISCOVERY_FINDINGS,
+      DiscoveryFindingsSchema,
+    ).list();
+    expect(findings[0]?.researchPerformed.interviews).toBe(0);
+    /*
+     * The absence is stated. Serva prepends its own sentence only when the run did not
+     * already say it — here the run did, in its own words, and duplicating it would make
+     * the artifact read like a system that does not trust its own departments.
+     */
+    expect(findings[0]?.limitations.join(' ')).toMatch(/interview|research/i);
 
     // ...and the discovery gate still passes, because saying so is the requirement.
     const gates = readGateResults(f.store);
