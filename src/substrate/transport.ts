@@ -246,11 +246,17 @@ export function selectWslDistribution(
  * exactly the scrubbing policy the recipe already asked for; and it keeps every value
  * in its own argv element instead of a delimited variable the guest has to re-split.
  *
- * A caveat stated rather than hidden: `wsl.exe` receives a single Windows command line
- * and re-parses it, so argument fidelity across this boundary is an assumption. It is
- * not a load-bearing one — the qualification's positive control (Q-A) runs through this
- * exact path, so a transport that mangles arguments fails to qualify and the substrate
- * never reaches HARD. The failure direction is refusal, not false confidence.
+ * `--exec` rather than `--`, and that is not a stylistic choice. With `--`, `wsl.exe`
+ * hands the remainder of the command line to the guest's default shell, which re-parses
+ * it: an argument containing `(`, `{` or a quote becomes syntax. Measured directly —
+ * `wsl.exe -d D -- /bin/echo 'a(b)'` fails with a bash syntax error, and the same
+ * command with `--exec` prints `a(b)`. `--exec` bypasses the shell and preserves argv.
+ *
+ * This was previously written up as an assumption that was "not load-bearing because
+ * Q-A runs through the same path". Q-A does run through this path and did pass, because
+ * its arguments happen to be shell-clean. The engine launcher, whose argv carries a JSON
+ * schema, hit it immediately. An assumption that only holds for the inputs you happened
+ * to test is not a mitigated risk.
  */
 export class WslTransport implements ExecTransport {
   readonly kind = TransportKind.WSL2;
@@ -273,7 +279,7 @@ export class WslTransport implements ExecTransport {
    * The warmup runs `true`, which is the smallest thing that forces a boot.
    */
   private warm(): Promise<void> {
-    this.started ??= runProcess('wsl.exe', ['-d', this.distro, '--', 'true'], {
+    this.started ??= runProcess('wsl.exe', ['-d', this.distro, '--exec', '/bin/true'], {
       timeoutMs: 120_000,
       maxOutputBytes: 4_000,
     }).then(() => undefined);
@@ -299,7 +305,9 @@ export class WslTransport implements ExecTransport {
         this.distro,
         '--cd',
         command.cwd,
-        '--',
+        // `--exec`, never `--`: see the class comment. `--` would re-parse this in a
+        // shell and turn a JSON argument into syntax.
+        '--exec',
         'env',
         ...envArgs,
         command.executable,
@@ -312,7 +320,7 @@ export class WslTransport implements ExecTransport {
   /** One simple command per fact; see WSL_REQUIRED_BINARIES for why never a script. */
   async raw(args: readonly string[], timeoutMs = 30_000): Promise<TransportResult> {
     await this.warm();
-    return runProcess('wsl.exe', ['-d', this.distro, '--', ...args], {
+    return runProcess('wsl.exe', ['-d', this.distro, '--exec', ...args], {
       timeoutMs,
       maxOutputBytes: 200_000,
     });

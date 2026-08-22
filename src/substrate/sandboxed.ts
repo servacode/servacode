@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, digestOf } from '../core/hash.js';
 import { EnforcementClass } from '../vocab/index.js';
@@ -158,14 +158,31 @@ interface CaseProgram {
   readonly network?: boolean;
 }
 
-/** Paths the qualification fixture lays out, as the guest will see them. */
-interface FixtureLayout {
+/**
+ * The qualification fixture, in BOTH conventions.
+ *
+ * `host` paths are what `execute()` takes — it is the single place translation happens,
+ * and every caller hands it host paths, production and qualification alike. `guest`
+ * paths are interpolated into the adversarial programs, which run inside and can only
+ * name what the guest sees.
+ *
+ * Keeping one convention per boundary is not tidiness. When qualification passed guest
+ * paths to `execute()` and production passed host paths, an existence check meant to
+ * skip a missing mask silently skipped every real one, and both boundaries quietly
+ * dropped from HARD to SOFT.
+ */
+interface FixturePaths {
   readonly root: string;
   readonly worktree: string;
   readonly checkout: string;
   readonly outside: string;
   readonly serva: string;
   readonly otherRun: string;
+}
+
+interface FixtureLayout {
+  readonly host: FixturePaths;
+  readonly guest: FixturePaths;
 }
 
 const q = (s: string): string => JSON.stringify(s);
@@ -178,7 +195,7 @@ const q = (s: string): string => JSON.stringify(s);
  * script and every argument containing a space is a fidelity risk on that boundary;
  * a file path is one token and a program that reads its own constants has none.
  */
-function programs(f: FixtureLayout, kind: TransportKind): CaseProgram[] {
+function programs(f: FixturePaths, kind: TransportKind): CaseProgram[] {
   const fsHead = 'const fs = require("fs");\n';
   return [
     {
@@ -532,10 +549,21 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
         ...(request.readScope ?? []).map((p) => t.toGuestPath(p)),
         ...request.writeScope.map((p) => t.toGuestPath(p)),
       ],
-      denyRead: [
-        ...(request.denyRead ?? []).map((p) => t.toGuestPath(p)),
-        ...(this.opts.alwaysDenyRead ?? []).map((p) => t.toGuestPath(p)),
-      ],
+      /*
+       * Only mask paths that EXIST.
+       *
+       * bubblewrap has to create a mount point before it can put a tmpfs there, and
+       * everything is read-only by default, so `--tmpfs` on a path that is not there
+       * fails the whole sandbox: `Can't mkdir …: Read-only file system`. The command
+       * then dies for a reason that has nothing to do with what it tried to do.
+       *
+       * Skipping them costs nothing. A directory that does not exist has no contents
+       * to leak, and if a command creates one it lands inside the write scope, which is
+       * the only place it is allowed to create anything.
+       */
+      denyRead: [...(request.denyRead ?? []), ...(this.opts.alwaysDenyRead ?? [])]
+        .filter((p) => existsSync(p))
+        .map((p) => t.toGuestPath(p)),
       networkAllowed: request.networkAllowed,
     };
 
@@ -618,7 +646,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       });
     };
 
-    for (const program of programs(layout, this.opts.transport.kind)) {
+    for (const program of programs(layout.guest, this.opts.transport.kind)) {
       const scriptHost = join(fixtureDir, 'programs', program.id + '.js');
       writeFileSync(scriptHost, program.source, 'utf8');
       const scriptGuest = this.opts.transport.toGuestPath(scriptHost);
@@ -626,15 +654,16 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       const result = await this.execute({
         executable: 'node',
         args: [scriptGuest],
-        cwd: layout.worktree,
+        // Host paths: `execute` is the one place translation happens.
+        cwd: layout.host.worktree,
         env: { PATH: GUEST_PATH },
         timeoutMs: 60_000,
         maxOutputBytes: 200_000,
-        writeScope: [layout.worktree],
+        writeScope: [layout.host.worktree],
         // The fixture root must be readable or the program cannot be loaded; the
         // masked subtrees below are re-masked after the grant, so deny still wins.
-        readScope: [layout.root],
-        denyRead: [layout.serva, layout.otherRun],
+        readScope: [layout.host.root],
+        denyRead: [layout.host.serva, layout.host.otherRun],
         networkAllowed: program.network === true,
       });
 
@@ -710,14 +739,14 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     const before = this.transportCalls;
     const result = await this.execute({
       executable: 'node',
-      args: ['-e', 'require("fs").writeFileSync(' + q(layout.outside + '/qk.txt') + ', "x")'],
-      cwd: layout.worktree,
+      args: ['-e', 'require("fs").writeFileSync(' + q(layout.guest.outside + '/qk.txt') + ', "x")'],
+      cwd: layout.host.worktree,
       env: { PATH: GUEST_PATH },
       timeoutMs: 30_000,
       maxOutputBytes: 50_000,
-      writeScope: [layout.worktree],
-      readScope: [layout.root],
-      denyRead: [layout.serva, layout.otherRun],
+      writeScope: [layout.host.worktree],
+      readScope: [layout.host.root],
+      denyRead: [layout.host.serva, layout.host.otherRun],
       networkAllowed: false,
     });
     const attempts = this.transportCalls - before;
@@ -759,13 +788,24 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     writeFileSync(join(dirs.serva, 'secret.txt'), 'audit trail and other runs\n', 'utf8');
     writeFileSync(join(dirs.otherRun, 'prompt.txt'), "another run's instructions\n", 'utf8');
 
+    const host: FixturePaths = {
+      root: fixtureDir,
+      worktree: dirs.worktree,
+      checkout: dirs.checkout,
+      outside: dirs.outside,
+      serva: dirs.serva,
+      otherRun: dirs.otherRun,
+    };
     return {
-      root: t.toGuestPath(fixtureDir),
-      worktree: t.toGuestPath(dirs.worktree),
-      checkout: t.toGuestPath(dirs.checkout),
-      outside: t.toGuestPath(dirs.outside),
-      serva: t.toGuestPath(dirs.serva),
-      otherRun: t.toGuestPath(dirs.otherRun),
+      host,
+      guest: {
+        root: t.toGuestPath(host.root),
+        worktree: t.toGuestPath(host.worktree),
+        checkout: t.toGuestPath(host.checkout),
+        outside: t.toGuestPath(host.outside),
+        serva: t.toGuestPath(host.serva),
+        otherRun: t.toGuestPath(host.otherRun),
+      },
     };
   }
 
@@ -774,13 +814,34 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     return unenforced();
   }
 
-  /** The identity of the boundary this substrate is. Compared before every dispatch. */
+  /**
+   * The identity of the boundary this substrate is. Compared before every dispatch.
+   *
+   * `guest` is the ADDRESSABLE name of the execution environment — the WSL distribution
+   * Serva will target — and not the guest's OS release. Both were called "guest" and
+   * populated from different sources: qualification read `/etc/os-release` and got
+   * "Ubuntu 26.04 LTS", while dispatch read the launcher and got "Ubuntu". They could
+   * never match, so a Producer could never be dispatched however well the machine was
+   * qualified. The comparison was working; the field meant two things.
+   *
+   * The OS release has not stopped mattering — an in-place distro upgrade must still
+   * invalidate a measurement. It travels in `SubstrateQualification.fingerprint`
+   * alongside the kernel and the launcher version, which `qualificationIsStale` checks.
+   * The two identities answer different questions and both are asked:
+   *
+   *   boundary.fingerprint      am I about to run in the environment that was qualified?
+   *   qualification.fingerprint is that qualification still describing this machine?
+   */
   boundaryOf(probe: SubstrateProbe): ExecutionBoundary {
+    void probe;
+    const guest = this.opts.transport.id.startsWith('wsl:')
+      ? this.opts.transport.id.slice('wsl:'.length)
+      : undefined;
     return executionBoundary({
       boundaryId: this.opts.boundaryId,
       purpose: this.opts.purpose,
       transport: this.opts.transport.id,
-      ...(probe.guestPlatform === undefined ? {} : { guest: probe.guestPlatform }),
+      ...(guest === undefined ? {} : { guest }),
       ...(this.engineLocation === undefined ? {} : { engineLocation: this.engineLocation }),
       engineVersion: this.opts.engineVersion,
       sandboxMechanism: this.opts.launcher.id,

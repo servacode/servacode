@@ -18,6 +18,7 @@ import {
   SandboxedExecutionSubstrate,
 } from '../src/substrate/sandboxed.js';
 import { ClaudeSandboxLauncher, srtConfigFrom } from '../src/substrate/claudeSandbox.js';
+import { WslProcessLauncher } from '../src/engine/processLauncher.js';
 import { BoundaryPurpose, boundaryMismatch, executionBoundary } from '../src/substrate/boundary.js';
 import {
   BubblewrapLauncher,
@@ -420,6 +421,40 @@ describe('Windows delegates execution into a WSL2 guest', () => {
       { name: 'Ubuntu', version: 2, isDefault: true },
       { name: 'Legacy', version: 1, isDefault: false },
     ]);
+  });
+
+  it('the WSL invocation bypasses the guest shell, so argv survives', () => {
+    /*
+     * `wsl.exe -d D -- cmd args` hands the remainder to the guest's default shell,
+     * which re-parses it. Measured: `-- /bin/echo 'a(b)'` dies with
+     * `bash: syntax error near unexpected token '('`; `--exec /bin/echo 'a(b)'` prints
+     * `a(b)`. The engine's argv carries a JSON schema, so every real invocation failed
+     * before the engine started.
+     *
+     * This had been written up as an assumption that was not load-bearing because Q-A
+     * runs through the same path. Q-A does, and passed — its arguments happen to be
+     * shell-clean. An assumption that only holds for the inputs you tested is not a
+     * mitigated risk, so it is asserted here instead.
+     */
+    const spawned: { args: readonly string[] }[] = [];
+    const launcher = new WslProcessLauncher({
+      distro: 'Ubuntu',
+      guestBin: '/usr/bin/claude',
+      spawnFn: ((_bin: string, args: readonly string[]) => {
+        spawned.push({ args });
+        return { on: () => undefined } as never;
+      }) as never,
+    });
+    launcher.spawn('/usr/bin/claude', ['--json-schema', '{"a":(1)}'], {
+      cwd: 'C:\w',
+      env: {},
+    });
+
+    const args = spawned[0]?.args ?? [];
+    expect(args).toContain('--exec');
+    expect(args).not.toContain('--');
+    // The metacharacter-bearing argument survives as its own argv element.
+    expect(args[args.length - 1]).toBe('{"a":(1)}');
   });
 
   it('translation is idempotent, because it is applied twice in practice', () => {
@@ -966,6 +1001,35 @@ describe('a qualification is a measurement OF something', () => {
 
   it('the identical boundary matches', () => {
     expect(boundaryMismatch(wsl(), wsl())).toBeUndefined();
+  });
+
+  it('guest is the ADDRESSABLE environment, so both sides can populate it', async () => {
+    /*
+     * The two sides once meant different things by `guest`: qualification read
+     * /etc/os-release and got "Ubuntu 26.04 LTS", dispatch read the launcher and got
+     * "Ubuntu". They could never be equal, so a Producer could never be dispatched
+     * however well the machine qualified. The comparison was right; the field was not.
+     *
+     * `guest` is now the WSL distribution name — the thing a launcher can actually
+     * name. The OS release still invalidates a measurement, through the qualification
+     * fingerprint rather than through this field.
+     */
+    const q = await sandboxed(new StubTransport(healthyGuest(), CONTAINED), {
+      purpose: BoundaryPurpose.PRODUCER,
+      boundaryId: 'SC-BOUNDARY-PRODUCER',
+      requiresEngine: true,
+    }).qualify(fixture());
+
+    // The stub transport is `stub`, not `wsl:…`, so there is no addressable guest.
+    expect(q.boundary.guest).toBeUndefined();
+    // ...and the OS release is still reported for humans, and still in the
+    // qualification fingerprint.
+    expect(q.probe.guestPlatform).toBe('Stub Linux');
+
+    const viaWsl = new WslTransport('Ubuntu');
+    expect(viaWsl.id).toBe('wsl:Ubuntu');
+    // Which is exactly what WslProcessLauncher reports as its location guest.
+    expect(new WslProcessLauncher({ distro: 'Ubuntu' }).location.guest).toBe('Ubuntu');
   });
 
   it('the qualification carries the boundary it measured', async () => {

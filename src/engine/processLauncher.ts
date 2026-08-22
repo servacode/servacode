@@ -98,6 +98,11 @@ export interface WslLauncherOptions {
  *
  * `WSLENV` is left unset for exactly that reason: WSL forwards nothing by default, and
  * that default is the safe one.
+ *
+ * `--exec` rather than `--`. With `--`, `wsl.exe` passes the remainder to the guest's
+ * default shell, which re-parses it. The engine's argv carries a JSON schema full of
+ * `{`, `(` and quotes, so every invocation died with `bash: syntax error near
+ * unexpected token '('` before the engine ever started. `--exec` bypasses the shell.
  */
 export class WslProcessLauncher implements ProcessLauncher {
   readonly id: string;
@@ -118,7 +123,7 @@ export class WslProcessLauncher implements ProcessLauncher {
     const guestBin = this.opts.guestBin ?? bin;
     return this.spawnFn(
       'wsl.exe',
-      ['-d', this.opts.distro, '--cd', this.toExecutionPath(o.cwd), '--', guestBin, ...argv],
+      ['-d', this.opts.distro, '--cd', this.toExecutionPath(o.cwd), '--exec', guestBin, ...argv],
       {
         shell: false,
         windowsHide: true,
