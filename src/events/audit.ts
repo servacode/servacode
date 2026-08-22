@@ -47,6 +47,16 @@ export const AuditAction = {
   REVIEW_RECORDED: 'REVIEW_RECORDED',
   /** A reviewer result was refused: it could not be tied to a real, independent run. */
   REVIEW_REFUSED: 'REVIEW_REFUSED',
+  /** A canonical intelligence artifact was written, at a specific version (08 §3). */
+  ARTIFACT_RECORDED: 'ARTIFACT_RECORDED',
+  /** An intelligence artifact was refused: malformed, or laundering a guess as a fact. */
+  ARTIFACT_REFUSED: 'ARTIFACT_REFUSED',
+  /** An owner decision was requested, because the answer was never Serva's to give. */
+  OWNER_DECISION_REQUESTED: 'OWNER_DECISION_REQUESTED',
+  /** An owner answered. Durable, attributable, and never synthesised by an agent. */
+  OWNER_DECISION_ANSWERED: 'OWNER_DECISION_ANSWERED',
+  /** External content was retrieved and captured as evidence. Always UNTRUSTED. */
+  SOURCE_CAPTURED: 'SOURCE_CAPTURED',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 
