@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { EnforcementClass, EvidenceClass } from '../../src/vocab/index.js';
 import { selectExecutionSubstrate } from '../../src/substrate/host.js';
 import { describeBoundary } from '../../src/substrate/boundary.js';
+import { qualifyOsSandbox } from '../../src/engineering/osQualification.js';
 import { makeFixtureDir, removeFixtureDir } from '../../src/substrate/fake.js';
 import { resolveEngineeringEngine, type EngineeringEngine } from '../../src/engineering/engine.js';
 import {
@@ -266,7 +267,13 @@ describe('PHASE 4 — live acceptance', () => {
       }),
       recipes,
       registry: ContractRegistry.shared(),
-      qualification: recipeQ,
+      /*
+       * The factory's own qualification governs opening a PRODUCER worktree, so it is
+       * the producer qualification — not the recipe one. They are different boundaries
+       * and neither authorises the other; `executorDeps` below keeps the recipe
+       * qualification, because that is what the deterministic commands run under.
+       */
+      qualification: e.qualification ?? recipeQ,
       executorDeps: {
         store: rt.store,
         clock: rt.clock,
@@ -284,6 +291,10 @@ describe('PHASE 4 — live acceptance', () => {
       gateDeps: { ids: rt.ids, clock: rt.clock, evaluator: 'ENGINEERING_GATE_LIVE' },
       projectRoot: repo,
       enabledProducers: new Set([PRODUCER]),
+      // The worktree this factory opens is one a PRODUCER will run in, so the factory
+      // has to know which boundary that is. Without it a workspace cannot be opened at
+      // all, which is the correct refusal: authority travels with its subject.
+      ...(e.boundary === undefined ? {} : { producerBoundary: e.boundary }),
     });
 
     const item = factory.recordWorkItem({
@@ -310,6 +321,150 @@ describe('PHASE 4 — live acceptance', () => {
         projectRoot: repo,
       })
     ).substrate;
+
+    /* ------------------------------------ measure the sandbox before trusting it */
+
+    /*
+     * The Producer gate refuses a policy Serva has not MEASURED on this machine, so the
+     * acceptance begins by measuring one. This is not ceremony: the previous activation
+     * reached HARD with a settings file the engine had silently discarded, and nothing
+     * in the chain noticed because nothing in the chain had ever asked the operating
+     * system a question it could get wrong.
+     *
+     * The measurement runs adversarially under the real policy and is recorded against
+     * that policy's digest, so the acceptance below either runs on evidence or refuses.
+     */
+    let qualified: Awaited<ReturnType<typeof qualifyOsSandbox>> | undefined;
+    if (e.boundary !== undefined && e.qualification !== undefined) {
+      const probeItem = factory.recordWorkItem({
+        workItemId: 'SC-WI-000899',
+        title: 'OS sandbox qualification',
+        requirements: ['Run each listed probe script exactly once.'],
+        acceptanceCriteria: ['Every probe has been attempted.'],
+        decisions: [],
+        allowedScope: ['src/'],
+        forbiddenScope: [],
+        producerAgentId: PRODUCER,
+        reviewerAgentId: REVIEWER,
+        recipes: [],
+        magnitude: 'M1',
+        baseCommit: base,
+        expectedOutputs: [],
+        maxAttempts: 1,
+      });
+      qualified = await qualifyOsSandbox(
+        {
+          store: rt.store,
+          clock: rt.clock,
+          ids: rt.ids,
+          registry: ContractRegistry.shared(),
+          factory,
+          workspaces: new EngineeringWorkspaceManager({
+            store: rt.store,
+            git,
+            clock: rt.clock,
+            projectRoot: repo,
+          }),
+          substrate,
+          engine: e,
+          qualification: e.qualification,
+          projectRoot: repo,
+          producerAgentId: PRODUCER,
+        },
+        probeItem,
+      );
+
+      /** What the persisted measurement says this probe measured. */
+      const attributionOf = (id: string): string =>
+        qualified?.measurement.containment.find((c) => c.id === id)?.attribution ?? 'CONTROL';
+
+      report('SERVA CODE — OS SANDBOX MEASUREMENT', [
+        '  run:         ' + qualified.runId,
+        '  policy:      ' + qualified.measurement.policyDigest,
+        '  boundary:    ' + qualified.measurement.boundaryFingerprint,
+        '  controls:    ' +
+          String(qualified.measurement.positiveControls.filter((c) => c.passed).length) +
+          '/' +
+          String(qualified.measurement.positiveControls.length) +
+          ' passed',
+        '  containment: ' +
+          String(qualified.measurement.containment.filter((c) => c.contained).length) +
+          '/' +
+          String(qualified.measurement.containment.length) +
+          ' contained',
+        ...qualified.results.map(
+          (r) =>
+            '    ' +
+            r.id.padEnd(3) +
+            ' ' +
+            r.expect.padEnd(8) +
+            ' permission=' +
+            r.permission.padEnd(10) +
+            ' reached=' +
+            String(r.reached).padEnd(5) +
+            ' ' +
+            r.outcome.padEnd(18) +
+            ' ' +
+            (r.truth === true ? 'OK' : r.truth === false ? 'ESCAPED' : 'n/a').padEnd(8) +
+            ' ' +
+            attributionOf(r.id).padEnd(12) +
+            r.what,
+        ),
+        ...qualified.notes.map((n) => '  note: ' + n),
+      ]);
+
+      /*
+       * A denied positive control invalidates the measurement outright. The negatives
+       * are not interpreted at all in that case — an instrument that could not perform
+       * an operation that should work says nothing about the ones that should not.
+       */
+      expect(qualified.valid).toBe(true);
+      expect(qualified.contained).toBe(true);
+
+      /* -------- the containment invariant, ASSERTED rather than printed -------- */
+
+      /*
+       * Printing `permission=` and `reached=` proves nothing; a run where every negative
+       * probe was denied by the permission layer would print just as tidily and would be
+       * no measurement at all. Each fact is therefore asserted, per probe, from the
+       * PERSISTED measurement rather than from the console.
+       */
+      for (const c of qualified.measurement.containment) {
+        expect(
+          c.permission,
+          c.id + ' must pass the tool permission layer, or the sandbox never answers',
+        ).toBe('ALLOWED');
+        expect(c.reached, c.id + ' must actually execute at the OS boundary').toBe(true);
+
+        if (c.id === 'H1') {
+          /*
+           * The one probe attributed to the ENVIRONMENT: a Windows binary cannot be
+           * executed from this guest with or without a sandbox, so the sandbox gets no
+           * credit for refusing it. It is still required to have been permitted and to
+           * have reached the boundary — only the truth requirement is waived, and
+           * explicitly, rather than by letting an undecidable result read as a pass.
+           */
+          expect(c.attribution).toBe('ENVIRONMENT');
+          expect(c.attributionBasis ?? '').toContain(
+            'HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT',
+          );
+        } else {
+          expect(c.attribution, c.id + ' is meant to measure the sandbox').toBe('SANDBOX');
+          expect(c.contained, c.id + ' must be independently confirmed contained').toBe(true);
+        }
+      }
+
+      // ...and the positive controls carry the same facts.
+      for (const c of qualified.measurement.positiveControls) {
+        expect(c.permission).toBe('ALLOWED');
+        expect(c.reached).toBe(true);
+        expect(c.passed).toBe(true);
+      }
+
+      // At least one probe must be genuine SANDBOX evidence, or this measured the
+      // environment and called it a sandbox.
+      expect(qualified.measurement.containment.some((c) => c.attribution === 'SANDBOX')).toBe(true);
+    }
 
     /*
      * The SAME function `serva implement` calls. It refuses internally before creating

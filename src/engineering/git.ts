@@ -222,6 +222,40 @@ export class GitService {
     return out;
   }
 
+  /**
+   * The blob ids git WOULD store for these paths, filters and all.
+   *
+   * Serva used to compute these itself by hashing the bytes on disk. That is only the
+   * same number when the working tree and the object store agree byte for byte, and
+   * `core.autocrlf` — set globally on many Windows machines, including the one this was
+   * measured on — means they routinely do not. The verified ChangeSet then named one
+   * blob, `git add` produced another, and integration refused a correct commit with
+   * CHANGESET_INTEGRATION_MISMATCH.
+   *
+   * Asking git is not a softening of that check; it is what makes the check compare two
+   * of the same kind of thing. The comparison itself is unchanged, and still refuses a
+   * commit whose content differs from what was verified.
+   *
+   * `--` separates paths from options, and each path is hashed through its own filters
+   * because git knows the path it is hashing.
+   */
+  async blobIdsFor(paths: readonly string[], cwd: string): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (paths.length === 0) return out;
+    for (const p of paths) assertNotOptionLike(p, 'path');
+    const r = await this.git(['hash-object', '--', ...paths], cwd);
+    if (!r.ok) return out;
+    const ids = r.stdout.split(/\r?\n/).filter((x) => x.length > 0);
+    /*
+     * Only pair them up when the counts agree. A short read means git skipped something,
+     * and zipping a short list against the paths would attach one file's identity to
+     * another — the exact failure this whole comparison exists to catch.
+     */
+    if (ids.length !== paths.length) return out;
+    for (let i = 0; i < paths.length; i++) out.set(paths[i] as string, ids[i] as string);
+    return out;
+  }
+
   async diff(baseCommit: string, cwd: string): Promise<string> {
     assertNotOptionLike(baseCommit, 'base commit');
     const r = await this.git(['diff', '--no-color', '--find-renames', baseCommit], cwd);

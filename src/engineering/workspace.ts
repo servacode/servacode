@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
-import { basename, join, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { fail } from '../core/errors.js';
 import { assertSafeSegment } from '../store/paths.js';
@@ -26,6 +26,21 @@ import type { Clock } from '../core/clock.js';
 export const WORKSPACE_CANON_TYPE = 'engineeringWorkspace';
 /** Worktrees live beside the store, never inside it: `.serva` is denied to every run. */
 export const WORKSPACES_DIRNAME = 'workspaces';
+
+/**
+ * Where a project's attempt worktrees live, derived from the project root alone.
+ *
+ * Pure, and exported, because two things must agree on it: the workspace manager that
+ * creates worktrees, and the sandbox policy that denies reads of every OTHER attempt's
+ * worktree. If the policy computed this region from `dirname(<this worktree>)` it would
+ * name a different directory during qualification than in production, and the boundary
+ * identity would stop matching for a reason that has nothing to do with the policy.
+ */
+export function workspacesRootFor(projectRoot: string): string {
+  const root = resolve(projectRoot);
+  const name = basename(root) + '-' + digestOf(root).slice(0, 8);
+  return resolve(root, '..', '.serva-' + WORKSPACES_DIRNAME, name);
+}
 
 export const WorkspaceState = {
   CREATED: 'CREATED',
@@ -80,6 +95,59 @@ export interface CreateWorkspaceRequest {
   readonly substrateClass: string;
 }
 
+/**
+ * Rewrite the linked worktree's `.git` pointer as a RELATIVE path.
+ *
+ * `git worktree add` writes an absolute one, which is correct for the machine that ran
+ * it and useless anywhere else. Serva runs git on Windows and delegates write-capable
+ * Producers to WSL2, so the pointer read
+ * `gitdir: C:/Users/.../.git/worktrees/<id>` — and a POSIX git resolves that as a
+ * RELATIVE path, appending it to the worktree directory. Measured: `git status` inside a
+ * Producer worktree failed with exit 128, outside any sandbox, on a repository that is
+ * perfectly healthy from the host.
+ *
+ * A relative pointer is resolved against the worktree directory by every git, on both
+ * platforms, so one file is correct for both. Forward slashes for the same reason — git
+ * accepts them on Windows, and backslashes mean nothing on Linux.
+ *
+ * The reverse pointer under `.git/worktrees/<id>/gitdir` is deliberately left alone: it
+ * is consulted by `git worktree list` and `prune` on the host, which is where Serva runs
+ * every git operation it owns.
+ */
+function portableGitPointer(worktreePath: string, projectRoot: string, workspaceId: string): void {
+  const pointer = join(worktreePath, '.git');
+  if (!existsSync(pointer)) return; // A real directory, not a linked worktree. Nothing to do.
+  const target = join(projectRoot, '.git', 'worktrees', workspaceId);
+  const rel = relative(worktreePath, target).split(sep).join('/');
+  if (rel === '' || rel.startsWith('..' + '/') === false) {
+    // The target is not above the worktree, which is not a shape Serva creates. Leave
+    // the pointer exactly as git wrote it rather than guessing.
+    return;
+  }
+  const replacement = 'gitdir: ' + rel + '\n';
+  const original = readFileSync(pointer, 'utf8');
+  try {
+    writeFileSync(pointer, replacement, 'utf8');
+  } catch {
+    /*
+     * On Windows git marks this file HIDDEN, and opening a hidden file for writing
+     * fails with EPERM. Replacing it works, and the attribute is not load-bearing.
+     */
+    try {
+      rmSync(pointer, { force: true });
+      writeFileSync(pointer, replacement, 'utf8');
+    } catch (e) {
+      // Put back exactly what git wrote rather than leave a worktree with no pointer.
+      try {
+        writeFileSync(pointer, original, 'utf8');
+      } catch {
+        /* the original is already gone; nothing further can be done here */
+      }
+      throw e;
+    }
+  }
+}
+
 export class EngineeringWorkspaceManager {
   constructor(private readonly deps: WorkspaceManagerDeps) {}
 
@@ -99,9 +167,7 @@ export class EngineeringWorkspaceManager {
    * basename cannot collide.
    */
   workspacesRoot(): string {
-    const root = resolve(this.deps.projectRoot);
-    const name = basename(root) + '-' + digestOf(root).slice(0, 8);
-    return resolve(root, '..', '.serva-' + WORKSPACES_DIRNAME, name);
+    return workspacesRootFor(this.deps.projectRoot);
   }
 
   /**
@@ -177,6 +243,8 @@ export class EngineeringWorkspaceManager {
         details: { path, branch, stderr: added.stderr.slice(0, 500) },
       });
     }
+
+    portableGitPointer(path, resolve(this.deps.projectRoot), workspaceId);
 
     const workspace = EngineeringWorkspaceSchema.parse({
       workspaceId,

@@ -28,6 +28,15 @@ export interface CommandRunner {
     stdout: string;
     stderr: string;
     spawnFailed?: boolean;
+    /**
+     * The command was killed for running too long.
+     *
+     * Distinct from `spawnFailed`, and the distinction is load-bearing: a killed process
+     * closes with a null exit code, which is indistinguishable from a failure unless the
+     * runner says which happened. Serva reported a slow engine as a missing one and told
+     * the owner to install software that was already installed and working.
+     */
+    timedOut?: boolean;
   }>;
 }
 
@@ -149,13 +158,60 @@ export interface ProbeOptions {
  * states the owner needs reported (19 §7 — halt and notify), not exceptions to be
  * caught somewhere far from the cause.
  */
+/** How much longer the retry gets. The first call warms; the second measures. */
+const COLD_START_FACTOR = 4;
+
 export async function probeClaude(opts: ProbeOptions): Promise<ProbeResult> {
   const bin = opts.bin ?? CLAUDE_BIN;
   const timeout = opts.timeoutMs ?? 15_000;
   const checkedAt = opts.now();
 
   const unknownCaps = capabilitiesFor('0.0.0');
-  const versionRes = await opts.run(bin, ['--version'], timeout);
+
+  /*
+   * One retry, and only for a timeout.
+   *
+   * The first call into a delegated boundary pays for the whole environment: starting
+   * the guest, and faulting in a 300MB binary across a filesystem bridge. Measured on
+   * this machine, that first `--version` took 16.3s against a 15s budget while every
+   * later call answered in under a second — so a healthy, authenticated engine was
+   * reported UNAVAILABLE and the qualification refused with PLATFORM_PREREQUISITE_REQUIRED.
+   *
+   * The retry is not a workaround for flakiness. The first attempt did the warming; the
+   * second measures the thing the timeout is meant to be about.
+   */
+  let versionRes = await opts.run(bin, ['--version'], timeout);
+  if (versionRes.timedOut === true) {
+    versionRes = await opts.run(bin, ['--version'], timeout * COLD_START_FACTOR);
+  }
+
+  if (versionRes.timedOut === true) {
+    const assessment = assessBillingRoute(undefined, opts.env);
+    return {
+      assessment,
+      status: {
+        state: EngineHealthState.UNAVAILABLE,
+        provider: PROVIDER,
+        transport: TRANSPORT,
+        version: 'UNKNOWN',
+        authenticated: false,
+        authenticationKind: assessment.authenticationKind,
+        billingMode: assessment.billingMode,
+        capabilities: unknownCaps,
+        checkedAt,
+        // Says what happened. "Could not be run" would send the owner to reinstall an
+        // engine that is present and answering, just not within the budget.
+        detail:
+          'The `' +
+          bin +
+          '` executable did not answer `--version` within ' +
+          String(Math.round((timeout * COLD_START_FACTOR) / 1000)) +
+          's, including one retry.',
+        remedy:
+          'The engine is present but the execution environment is not responding in time. This is usually a cold or heavily loaded guest rather than a missing install.',
+      },
+    };
+  }
 
   if (versionRes.spawnFailed === true || versionRes.code !== 0) {
     const assessment = assessBillingRoute(undefined, opts.env);

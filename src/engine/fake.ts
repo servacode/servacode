@@ -57,10 +57,19 @@ export interface FakeEngineOptions {
   readonly capabilities?: Partial<EngineCapabilities>;
 }
 
+/**
+ * `version` is not decorative. Sandbox settings are version-gated — `strictAllowlist`
+ * and the `credentials` block exist only from 2.1.219 and 2.1.187 — and Serva refuses to
+ * dispatch a Producer under a profile the detected engine would reject. A scripted engine
+ * claiming 1.0.0 therefore models an engine that CANNOT hold the Producer policy, which
+ * is a different scenario from the one these tests are about. That case has its own test.
+ */
+export const FAKE_ENGINE_VERSION = '2.1.231';
+
 export const FAKE_CAPABILITIES: EngineCapabilities = Object.freeze({
   provider: 'fake',
   transport: 'in-process',
-  version: '1.0.0',
+  version: FAKE_ENGINE_VERSION,
   supportsTools: true,
   supportsStructuredOutput: true,
   supportsSessionContinuation: false,
@@ -109,7 +118,7 @@ export class FakeEngineAdapter implements EngineAdapter {
       state: EngineHealthState.READY,
       provider: 'fake',
       transport: 'in-process',
-      version: '1.0.0',
+      version: FAKE_ENGINE_VERSION,
       authenticated: true,
       authenticationKind: AuthenticationKind.SUBSCRIPTION_OAUTH,
       billingMode: BillingMode.SUBSCRIPTION,

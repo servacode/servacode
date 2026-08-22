@@ -6,16 +6,26 @@ import { RunOutcome } from '../vocab/index.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { engineeringAuthorityRefusal } from '../substrate/types.js';
 import { BoundaryPurpose, describeBoundary, executionBoundary } from '../substrate/boundary.js';
-import { resolveProducerPolicy, resolveReviewerPolicy } from './capability.js';
+import {
+  resolveOsSandboxQualificationPolicy,
+  resolveProducerPolicy,
+  resolveReviewerPolicy,
+} from './capability.js';
 import {
   buildSandboxProfile,
   removeSandboxProfile,
   sandboxProfileDrift,
+  validateSandboxProfile,
   writeSandboxProfile,
+  SANDBOX_MEASUREMENT_TYPE,
+  measurementRefusal,
+  sandboxProfileStatuses,
+  type SandboxMeasurement,
   type GeneratedSandboxProfile,
 } from './sandboxProfile.js';
 import { REVIEWER_RESULT_SCHEMA, ReviewerVerdictSchema, recordReview } from './review.js';
 import type { AgentRuntime, AgentRunResult } from '../agents/runtime.js';
+import type { RunBudget } from '../engine/types.js';
 import type { ContractRegistry } from '../agents/registry.js';
 import type { EngineeringWorkspace } from './workspace.js';
 import type { EngineeringWorkItem } from './factory.js';
@@ -120,7 +130,24 @@ export interface DispatchDeps {
    * It is not the production Producer policy, nothing in the normal dispatch path sets
    * it, and it never widens Bash to anything unbounded.
    */
+  /**
+   * ACTIVATION ONLY. Probe commands for the OS-sandbox qualification profile.
+   *
+   * Present means "this dispatch is a measurement, not production work": the grant is
+   * swapped for `resolveOsSandboxQualificationPolicy` AFTER the full Producer gate has
+   * passed, so the OS boundary can be reached and observed. Absent — which is every
+   * production path — means the ordinary Producer grant, unchanged.
+   */
   readonly qualificationCommands?: readonly string[];
+  /**
+   * ACTIVATION ONLY. A larger budget for a qualification run.
+   *
+   * The default budget is sized for engineering work: a qualification that runs two
+   * dozen probes exhausted it and stopped halfway through, leaving the remaining probes
+   * NOT_RUN — which counts as failure and would have been read as a missing measurement
+   * rather than as a truncated one. Production leaves this undefined.
+   */
+  readonly budget?: Partial<RunBudget>;
 }
 
 export interface ProducerDispatch {
@@ -168,8 +195,24 @@ export interface SandboxProfileCheck {
 export function verifySandboxProfileInForce(o: {
   readonly profile: GeneratedSandboxProfile;
   readonly capabilities: EngineCapabilities;
+  readonly engineVersion: string;
   readonly effectiveSettings?: Record<string, unknown>;
 }): SandboxProfileCheck {
+  /*
+   * Validity FIRST, and blocking.
+   *
+   * "Serva generated a settings file" was never the same claim as "the engine accepted
+   * it". One unsupported key — `sandbox.network.enabled` — made the engine discard the
+   * whole file in silence, and the Producer ran under default policy while Serva
+   * recorded a boundary that did not exist. Measured on 2.1.231, `claude doctor` cannot
+   * tell the two profiles apart, so there is nothing to ask; the only defence is to
+   * refuse to emit a key that is not known to be accepted.
+   */
+  const validation = validateSandboxProfile(o.profile, o.engineVersion);
+  if (!validation.ok) {
+    return { refusal: validation.reason ?? 'SANDBOX_PROFILE_REJECTED', unproved: [] };
+  }
+
   if (!o.capabilities.supportsAmbientConfigIsolation) {
     return {
       refusal:
@@ -258,6 +301,9 @@ export async function dispatchProducer(
       worktreePath: o.workspace.path,
       projectRoot: deps.projectRoot,
       networkAllowed: false,
+      // Written in the paths the ENGINE sees. Serva's host paths would name nothing in
+      // a WSL2 guest, and a policy whose every entry matches nothing is not a policy.
+      ...(deps.toExecutionPath === undefined ? {} : { toExecutionPath: deps.toExecutionPath }),
     }),
     deps.projectRoot,
     o.workspace.workspaceId,
@@ -308,7 +354,7 @@ export async function dispatchProducer(
   });
 
   // The nine-condition gate, boundary first. Throws with the reason; no downgrade path.
-  const policy = resolveProducerPolicy({
+  const producerPolicy = resolveProducerPolicy({
     contract,
     workspace: o.workspace,
     qualification: deps.qualification,
@@ -317,20 +363,119 @@ export async function dispatchProducer(
     reviewerAvailable: o.reviewerAvailable,
     executorsAvailable: o.executorsAvailable,
     actualBoundary,
-    ...(deps.qualificationCommands === undefined
-      ? {}
-      : { allowedCommands: deps.qualificationCommands }),
     ...(deps.toExecutionPath === undefined ? {} : { toExecutionPath: deps.toExecutionPath }),
     ...(deps.allowSimulatedBoundary === undefined
       ? {}
       : { allowSimulatedBoundary: deps.allowSimulatedBoundary }),
   });
 
+  /*
+   * The qualification profile REPLACES the grant, and only after the gate above has
+   * already passed on its own terms.
+   *
+   * Order is the whole safety property. `resolveProducerPolicy` is what enforces the
+   * nine conditions — HARD substrate, matching boundary, isolated worktree, independent
+   * reviewer, working executors — and it is run unconditionally, so a qualification run
+   * cannot be used to slip past any of them. What the swap changes is one thing: which
+   * commands the permission layer pre-approves, so that the OS sandbox rather than the
+   * permission layer is the thing being measured.
+   */
+  const policy =
+    deps.qualificationCommands === undefined
+      ? producerPolicy
+      : resolveOsSandboxQualificationPolicy({
+          workspace: o.workspace,
+          projectRoot: deps.projectRoot,
+          probeCommands: deps.qualificationCommands,
+          ...(deps.toExecutionPath === undefined ? {} : { toExecutionPath: deps.toExecutionPath }),
+        });
+
   try {
+    /*
+     * THE FIVE STATUSES, AND HARD REQUIRES ALL OF THEM.
+     *
+     * Each one closes a way the previous attempt could look right while being wrong:
+     * GENERATED says Serva built a profile, VALIDATED that the engine would accept it
+     * rather than silently discard it, LOADED that the bytes on disk are still Serva's,
+     * EFFECTIVE that the invocation was actually given the file, and MEASURED that an
+     * adversarial run reached the operating system and the operating system refused what
+     * it should. Everything before MEASURED is an assertion about a settings file.
+     *
+     * The measurement is looked up BY POLICY DIGEST, so changing the policy invalidates
+     * it automatically instead of relying on someone remembering to re-measure.
+     */
+    const measurement = deps.store.getCanon<SandboxMeasurement>(
+      SANDBOX_MEASUREMENT_TYPE,
+      profile.policyDigest,
+    )?.body;
+
+    const simulated = actualBoundary.simulated && deps.allowSimulatedBoundary === true;
+    /*
+     * The qualification run is the one dispatch that cannot require a measurement,
+     * because it is the run that PRODUCES one. Requiring it here would mean a sandbox
+     * could never be measured for the first time — and the exemption is narrow: it
+     * applies only when `qualificationCommands` is set, which already means this dispatch
+     * has had its grant replaced by the OS_SANDBOX_QUALIFICATION profile and is a
+     * measurement rather than engineering work.
+     *
+     * It is not a hole in the boundary. The qualification runs under the REAL policy, in
+     * a disposable worktree; what it lacks is prior evidence about that policy, which is
+     * precisely the thing it exists to obtain.
+     */
+    const isQualification = deps.qualificationCommands !== undefined;
+    if (!simulated && !isQualification) {
+      const unmeasured = measurementRefusal(measurement, {
+        policyDigest: profile.policyDigest,
+        boundaryFingerprint: actualBoundary.fingerprint,
+        engineVersion: deps.engineVersion,
+      });
+      if (unmeasured !== undefined) {
+        return fail({
+          code: 'E_CAPABILITY_NOT_ENABLED',
+          message: 'SANDBOX_NOT_MEASURED: ' + unmeasured,
+          remedy:
+            'A Producer runs under a sandbox Serva has measured on this machine, for this policy. Run the OS sandbox qualification. No model call was made.',
+          details: {
+            workItemId: o.item.workItemId,
+            policyDigest: profile.policyDigest,
+            boundaryFingerprint: actualBoundary.fingerprint,
+          },
+          specRef: 'Phase 4 §4',
+        });
+      }
+    }
+
     const check = verifySandboxProfileInForce({
       profile,
       capabilities: deps.engineCapabilities,
+      engineVersion: deps.engineVersion,
     });
+
+    /*
+     * Record which statuses were actually reached, so the run carries the answer rather
+     * than the reader having to reconstruct it. A profile that stops short of MEASURED
+     * is reported as such even when the dispatch is allowed to proceed on a simulated
+     * boundary, because "we did not measure this" is exactly the fact that went missing
+     * last time.
+     */
+    const statuses = sandboxProfileStatuses({
+      profile,
+      engineVersion: deps.engineVersion,
+      boundaryFingerprint: actualBoundary.fingerprint,
+      loaded: check.refusal === undefined,
+      passedToInvocation: profile.path !== undefined,
+      // A qualification is honest about being unmeasured; it does not claim MEASURED on
+      // the strength of the measurement it is in the middle of taking.
+
+      ...(measurement === undefined ? {} : { measurement }),
+    });
+    const statusLine =
+      'sandbox profile status: ' +
+      statuses.reached.join(' > ') +
+      (statuses.missing.length === 0
+        ? ' (complete)'
+        : ' | NOT reached: ' + statuses.missing.join(', '));
+
     if (check.refusal !== undefined) {
       return fail({
         code: 'E_CAPABILITY_NOT_ENABLED',
@@ -347,6 +492,7 @@ export async function dispatchProducer(
     }
 
     const run = await deps.runtime.run({
+      ...(deps.budget === undefined ? {} : { budget: deps.budget }),
       agentId: contract.id,
       workItemId: o.item.workItemId,
       taskDefinition: o.taskDefinition,
@@ -434,7 +580,7 @@ export async function dispatchProducer(
         ? {}
         : { result: resultOf<ProducerResult>(run, ProducerResultSchema)! }),
       sandboxProfile: profile,
-      diagnostics: run.diagnostics,
+      diagnostics: [statusLine, ...run.diagnostics],
       unprovedBoundary: check.unproved,
     };
   } finally {

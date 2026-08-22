@@ -58,7 +58,21 @@ export interface AgentRunProjection {
   readonly startedAt?: string;
   readonly endedAt?: string;
   readonly outcome?: RunOutcome;
-  readonly toolCalls: readonly { tool: string; allowed: boolean; at: string }[];
+  readonly toolCalls: readonly {
+    tool: string;
+    allowed: boolean;
+    at: string;
+    useId?: string;
+    /**
+     * What the call was ABOUT — the command, the file, the pattern.
+     *
+     * Carried across from TOOL_REQUESTED, which is the event that records it. Without
+     * this a permission decision could not be attributed to anything: an OS-sandbox
+     * qualification could see that nine Bash calls were allowed and three denied, and
+     * had no way to say WHICH probe each decision belonged to.
+     */
+    subject?: string;
+  }[];
   readonly evidenceRefs: readonly string[];
   readonly scopeDeclared: readonly string[];
   readonly scopeActual: readonly string[];
@@ -105,7 +119,15 @@ export function projectAgentRun(store: Store, runId: string): AgentRunProjection
     });
   }
 
-  const toolCalls: { tool: string; allowed: boolean; at: string }[] = [];
+  const toolCalls: {
+    tool: string;
+    allowed: boolean;
+    at: string;
+    useId?: string;
+    subject?: string;
+  }[] = [];
+  /** useId -> subject, learned from TOOL_REQUESTED and joined onto the decision. */
+  const subjectByUse = new Map<string, string>();
   const evidenceRefs: string[] = [];
   const consumption: Record<string, number> = {};
   let scopeDeclared: string[] = [];
@@ -147,13 +169,24 @@ export function projectAgentRun(store: Store, runId: string): AgentRunProjection
       case AgentRunEventType.RUN_STARTED:
         startedAt = e.at;
         break;
-      case AgentRunEventType.TOOL_DECIDED:
+      case AgentRunEventType.TOOL_REQUESTED: {
+        const useId = str(p, 'useId');
+        const subject = str(p, 'subject');
+        if (useId !== undefined && subject !== undefined) subjectByUse.set(useId, subject);
+        break;
+      }
+      case AgentRunEventType.TOOL_DECIDED: {
+        const useId = str(p, 'useId');
+        const subject = useId === undefined ? undefined : subjectByUse.get(useId);
         toolCalls.push({
           tool: str(p, 'tool') ?? 'unknown',
           allowed: p['allowed'] === true,
           at: e.at,
+          ...(useId === undefined ? {} : { useId }),
+          ...(subject === undefined ? {} : { subject }),
         });
         break;
+      }
       case AgentRunEventType.EVIDENCE_CAPTURED: {
         const ref = str(p, 'evidenceId');
         if (ref !== undefined) evidenceRefs.push(ref);

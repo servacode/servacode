@@ -221,6 +221,10 @@ export async function resolveEngineeringEngine(
           stdout: r.stdout.replace(/\0/g, ''),
           stderr: r.stderr.replace(/\0/g, ''),
           ...(r.spawnFailed ? { spawnFailed: true } : {}),
+          // Carried through, not dropped. The transport already knows the difference
+          // between "it failed" and "it ran out of time"; discarding that here is what
+          // made a cold guest look like a missing install.
+          ...(r.timedOut ? { timedOut: true } : {}),
         })),
   });
 
@@ -276,6 +280,9 @@ export async function resolveEngineeringEngine(
     worktreePath: worktreeFixture,
     projectRoot: opts.projectRoot,
     networkAllowed: false,
+    // The policy is enforced where the engine runs, so it is written in that
+    // environment's paths — the same translation the Producer's grant uses.
+    toExecutionPath: (hostPath: string) => transport.toGuestPath(hostPath),
   });
   const profilePath = join(fixture, 'settings.json');
   writeFileSync(profilePath, JSON.stringify(profile.settings, null, 2), 'utf8');

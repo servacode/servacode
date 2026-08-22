@@ -740,6 +740,96 @@ describe('a governed change goes all the way to an accepted commit', () => {
     expect(await f.git.headCommit(f.repo)).toBe(f.base);
   }, 120_000);
 
+  it('a Producer that says the tests pass does not make them pass', async () => {
+    /*
+     * THE NEGATIVE CASE THAT MATTERS.
+     *
+     * The Producer reports, in its structured result, that it ran the suite and that it
+     * passed — and leaves the code broken. Nothing in Serva reads that claim when
+     * deciding: the recipe is executed, its exit code is the evidence, and the gate is
+     * computed from evidence. A change set can be accepted only by something that
+     * actually ran.
+     *
+     * This is the difference between a company that measures and one that believes its
+     * staff, and it has to be a test rather than a design intention, because the failure
+     * mode is silent: a fabricated pass looks exactly like a real one in the summary.
+     */
+    const f = await setup();
+
+    /*
+     * A suite that actually checks the code. The shared fixture's `test.js` exits 0
+     * unconditionally, which is fine for tests about plumbing and useless here: a suite
+     * that cannot fail cannot contradict anybody.
+     */
+    const g = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: f.repo,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    writeFileSync(
+      join(f.repo, 'test.js'),
+      [
+        "const total = require('./src/total.js');",
+        'if (total !== 1) {',
+        '  console.error("expected 1, got " + total);',
+        '  process.exit(1);',
+        '}',
+        'process.exit(0);',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    g('add', 'test.js');
+    g('commit', '-q', '-m', 'a suite that can fail');
+    const base = g('rev-parse', 'HEAD').trim();
+
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+
+    f.engine.script(PRODUCER, {
+      structuredOutput: envelope({
+        /*
+         * The false claim has to go in prose, because `ProducerResultSchema` is strict
+         * and gives a Producer no field in which to report a test outcome at all. That
+         * is the first line of the defence: there is nowhere to put the lie that Serva
+         * would read.
+         */
+        summary: 'Fixed the loop bound and ran the unit suite: SC-RECIPE-UNIT-TEST passes.',
+        claimedPaths: ['src/total.js'],
+        observations: [],
+        blockers: [],
+      }),
+    });
+    const producer = await dispatchProducer(f.dispatchDeps, {
+      item,
+      workspace: w,
+      taskDefinition: 'Fix total().',
+      reviewerAvailable: true,
+      executorsAvailable: true,
+    });
+    expect(producer.outcome).toBe(RunOutcome.COMPLETED);
+
+    // ...and the code is left in a state the suite rejects. The claim above is false.
+    writeFileSync(join(w.path, 'src', 'total.js'), 'module.exports = 0;\n', 'utf8');
+
+    const measured = await f.factory.verifyAttempt(item, w, {
+      required: { ...DEFAULT_REQUIRED_CHECKS, build: false, lint: false, codeReview: false },
+      producerRunId: producer.runId,
+    });
+
+    // The recipe ran, and it failed. Serva's evidence contradicts the Producer's prose.
+    const suite = measured.evidence.find((e) => e.runtimeComponentId === 'SC-RTC-012');
+    expect(suite?.outcome).toBe('FAIL');
+    expect(measured.gateResult.verdict).not.toBe(GateVerdict.PASS);
+    expect(measured.gateResult.verdict).not.toBe(GateVerdict.PASS_WITH_QUALIFICATION);
+    expect(measured.attemptOutcome).not.toBe('ACCEPTED');
+
+    // And nothing reached the owner's checkout.
+    expect(await f.git.isClean(f.repo)).toBe(true);
+    expect(await f.git.headCommit(f.repo)).toBe(base);
+  }, 120_000);
+
   it('a reviewer rejection stops the change at the gate', async () => {
     const f = await setup();
     const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });

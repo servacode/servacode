@@ -68,11 +68,17 @@ export interface ClaudeAdapterOptions {
 const defaultRunner: CommandRunner = (bin, args, timeoutMs) =>
   new Promise((resolve) => {
     let done = false;
+    let timedOut = false;
     const child = spawn(bin, [...args], { shell: false, windowsHide: true });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      if (!done) child.kill('SIGKILL');
+      if (!done) {
+        // Recorded before the kill, because a killed process closes with a null exit
+        // code and nothing downstream could otherwise tell the two apart.
+        timedOut = true;
+        child.kill('SIGKILL');
+      }
     }, timeoutMs);
     child.stdout?.on('data', (d: Buffer) => (stdout += d.toString('utf8')));
     child.stderr?.on('data', (d: Buffer) => (stderr += d.toString('utf8')));
@@ -84,7 +90,7 @@ const defaultRunner: CommandRunner = (bin, args, timeoutMs) =>
     child.on('close', (code) => {
       done = true;
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      resolve({ code, stdout, stderr, ...(timedOut ? { timedOut: true } : {}) });
     });
   });
 

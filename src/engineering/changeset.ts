@@ -105,7 +105,17 @@ export async function buildChangeSet(
   const headCommit = await deps.git.headCommit(workspace.path);
   const diff = await deps.git.diff(workspace.baseCommit, workspace.path);
 
-  const entries: ChangedEntry[] = changed.map((c) => describeEntry(workspace.path, c));
+  /*
+   * One call for every path that still exists, so each entry's identity is the one git
+   * would store rather than a hash of the bytes on disk. A deleted path has no content
+   * to hash and is skipped.
+   */
+  const present = changed
+    .filter((c) => c.status !== 'D' && existsSync(join(workspace.path, c.path)))
+    .map((c) => c.path);
+  const blobIds = await deps.git.blobIdsFor(present, workspace.path);
+
+  const entries: ChangedEntry[] = changed.map((c) => describeEntry(workspace.path, c, blobIds));
 
   const identity = {
     workItemId: workspace.workItemId,
@@ -179,7 +189,11 @@ export async function buildChangeSet(
   return changeSet;
 }
 
-function describeEntry(workspacePath: string, c: ChangedPath): ChangedEntry {
+function describeEntry(
+  workspacePath: string,
+  c: ChangedPath,
+  blobIds: ReadonlyMap<string, string>,
+): ChangedEntry {
   const abs = join(workspacePath, c.path);
   if (c.status === 'D' || !existsSync(abs)) {
     return ChangedEntrySchema.parse({
@@ -219,6 +233,12 @@ function describeEntry(workspacePath: string, c: ChangedPath): ChangedEntry {
     });
   }
   const buf = readFileSync(abs);
+  /*
+   * `digest` stays a digest of the bytes on disk — that is what Serva saw. `blobId` is
+   * what GIT would store, which is a different number whenever a filter is in play, and
+   * it is the one the integration check compares against the index.
+   */
+  const blobId = blobIds.get(c.path);
   return ChangedEntrySchema.parse({
     status: c.status,
     path: c.path,
@@ -226,7 +246,7 @@ function describeEntry(workspacePath: string, c: ChangedPath): ChangedEntry {
     isBinary: looksBinary(buf),
     isSymlink: false,
     digest: digestOf(buf.toString('utf8')),
-    blobId: gitBlobId(buf),
+    ...(blobId === undefined ? {} : { blobId }),
     sizeBytes: statSync(abs).size,
   });
 }

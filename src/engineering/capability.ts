@@ -236,8 +236,6 @@ export interface ProducerPolicyOptions {
   readonly actualBoundary: ExecutionBoundary;
   /** TEST ONLY. See ProducerGateInput. */
   readonly allowSimulatedBoundary?: boolean;
-  /** Recipes the Producer may invoke through Bash. Empty is valid and common. */
-  readonly allowedCommands?: readonly string[];
   /**
    * A host path as the ENGINE will name it.
    *
@@ -305,7 +303,6 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
     ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, worktree + '/**')),
     absoluteRule('Edit', worktree + '/**'),
     absoluteRule('Write', worktree + '/**'),
-    ...(opts.allowedCommands ?? []),
   ];
 
   const deny = [
@@ -346,6 +343,99 @@ export function resolveProducerPolicy(opts: ProducerPolicyOptions): ToolPolicy {
       'git history operations and all publishing verbs are denied',
       'network: NONE',
       'OS-level sandbox enforces the same write scope for child processes; the tool rules alone would not',
+    ],
+  };
+}
+
+/**
+ * THE OS-SANDBOX QUALIFICATION PROFILE.
+ *
+ * Serva has two independent defences for a Producer, and until now it had only ever
+ * measured the first:
+ *
+ *   1. the TOOL PERMISSION layer, which decides whether a call runs at all, and
+ *   2. the OS SANDBOX, which decides what a call that DID run is able to touch.
+ *
+ * Every escape probe in the previous cross-check was auto-denied at layer 1 — correct
+ * behaviour, and completely uninformative about layer 2. Nine denials were recorded and
+ * not one of them was evidence that the sandbox works, because no command ever reached
+ * it. "Denied" and "contained" are different findings and had been collapsed into one.
+ *
+ * So this profile deliberately PRE-APPROVES the probe commands, including ones the
+ * production grant refuses outright, in order to hand them to the operating system and
+ * see what the operating system does. That is the only way to obtain the measurement.
+ *
+ * Which is exactly why it is a separate function with its own name, its own rationale,
+ * and a `qualificationOnly` marker in that rationale that the production path asserts is
+ * absent. It approves what a Producer must never be allowed to attempt; if it ever
+ * became the default grant, Serva would have built the hole it is trying to prove is
+ * closed.
+ *
+ * It is NEVER reachable from `resolveProducerPolicy`, is not derived from a contract,
+ * and is used by one caller: the activation qualification harness.
+ */
+export const OS_SANDBOX_QUALIFICATION = 'OS_SANDBOX_QUALIFICATION';
+
+/** The marker every qualification policy carries and no production policy may. */
+export const QUALIFICATION_ONLY_MARKER =
+  'QUALIFICATION ONLY: this grant pre-approves commands a Producer may never run. It is not a Producer grant.';
+
+export interface OsSandboxQualificationOptions {
+  readonly workspace: EngineeringWorkspace;
+  readonly projectRoot: string;
+  /** The probe commands, as permission rules. Nothing else is approved. */
+  readonly probeCommands: readonly string[];
+  readonly toExecutionPath?: (hostPath: string) => string;
+}
+
+export function resolveOsSandboxQualificationPolicy(
+  opts: OsSandboxQualificationOptions,
+): ToolPolicy {
+  const map = opts.toExecutionPath ?? ((p: string): string => p);
+  const worktree = map(resolve(opts.workspace.path));
+
+  return {
+    available: [...PRODUCER_TOOLS],
+    /*
+     * The probe commands are approved BY NAME. Not `Bash(*)`, not `Bash(node:*)` as a
+     * blanket — each individual shape the qualification intends to run, so the set of
+     * things this profile can do is readable in one glance and cannot grow by accident.
+     */
+    approve: [
+      ...PHASE3_READ_TOOLS.map((t) => relativeRule(t, '**')),
+      relativeRule('Edit', '**'),
+      relativeRule('Write', '**'),
+      ...PHASE3_READ_TOOLS.map((t) => absoluteRule(t, worktree + '/**')),
+      absoluteRule('Edit', worktree + '/**'),
+      absoluteRule('Write', worktree + '/**'),
+      ...opts.probeCommands,
+    ],
+    /*
+     * The command denials of the production grant are NOT applied.
+     *
+     * `Bash(curl*)` would refuse the network probe at layer 1, and the whole point is to
+     * find out whether layer 2 refuses it. Tool-level denials that have nothing to do
+     * with the measurement — subagents, web fetch, notebooks — stay denied, because
+     * widening those would buy no evidence at all.
+     */
+    deny: [
+      ...ALWAYS_DENY_TOOLS.filter((t) => !PRODUCER_TOOLS.includes(t)),
+      ...PRODUCER_FORBIDDEN_TOOLS,
+    ],
+    filesystem: {
+      read: [resolve(opts.workspace.path)],
+      write: [resolve(opts.workspace.path)],
+      readDenied: [resolve(opts.projectRoot, SERVA_INTERNAL_DIR)],
+    },
+    network: 'NONE',
+    maxToolCalls: 60,
+    rationale: [
+      QUALIFICATION_ONLY_MARKER,
+      'purpose: ' + OS_SANDBOX_QUALIFICATION,
+      'the tool permission layer is deliberately opened for the probe commands so that the OS sandbox is the layer under test',
+      'probe commands approved: ' + String(opts.probeCommands.length),
+      'worktree: ' + opts.workspace.path,
+      'a denial recorded under this profile is an OS denial, not a permission denial',
     ],
   };
 }
