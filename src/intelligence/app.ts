@@ -15,6 +15,10 @@ import {
   requirementsVerifierDepartment,
 } from './departments/requirements.js';
 import { RESEARCH_CHAIN } from './departments/research.js';
+import { ARCHITECTURE_DEPARTMENTS } from './departments/architecture.js';
+import { DATA_SECURITY_DEPARTMENTS } from './departments/dataSecurity.js';
+import { EXPERIENCE_DEPARTMENTS } from './departments/experience.js';
+import { PLANNING_DEPARTMENTS } from './departments/planning.js';
 import { PHASE5_ENABLED_AGENTS } from './enabled.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { SourceMarking } from '../vocab/index.js';
@@ -51,6 +55,15 @@ export const UPSTREAM_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
    * become competitive truth, which is the one thing this ordering exists to prevent.
    */
   ...RESEARCH_CHAIN,
+  /*
+   * The design authority, in lifecycle order. Within a stage the order matters: the
+   * author runs before its reviewer, and the UI designer runs after the system it must
+   * compose from exists.
+   */
+  ...ARCHITECTURE_DEPARTMENTS,
+  ...DATA_SECURITY_DEPARTMENTS,
+  ...EXPERIENCE_DEPARTMENTS,
+  ...PLANNING_DEPARTMENTS,
 ]);
 
 export interface IntelligenceDeps {

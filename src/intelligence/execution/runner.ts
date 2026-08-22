@@ -224,7 +224,53 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     }
   }
 
-  /* ------------------------------------------------------------- 7. the run */
+  /* --------------------------- 7a. a computed stage asks nobody and spends nothing */
+
+  if (config.deterministic === true) {
+    let computed;
+    const dtx = deps.store.begin();
+    try {
+      /*
+       * The empty payload is deliberate: a deterministic department derives everything
+       * from the Store, so there is no model output to validate. It goes through the same
+       * transaction and the same ledger path as every other department.
+       */
+      computed = config.persist(dtx, undefined as never, ctx);
+      dtx.commit();
+    } catch (e) {
+      dtx.rollback();
+      return refuse(
+        DepartmentOutcome.FAILED,
+        config.title + ' could not be computed: ' + String(e instanceof Error ? e.message : e),
+      );
+    }
+
+    const ltx = deps.store.begin();
+    try {
+      appendLedgerEntry(ltx, stageDeps, {
+        workItemId: ctx.workItemId,
+        stageId: config.stageId,
+        profileRef: ctx.plan.profileId,
+        disposition: StageLedgerDisposition.EXECUTED,
+        reason: config.title + ' computed from persisted canon (no model call)',
+        attempt,
+      });
+      ltx.commit();
+    } catch {
+      ltx.rollback();
+    }
+
+    return {
+      ...base,
+      outcome: DepartmentOutcome.COMPLETED,
+      artifactIds: [...(prepared.artifactIds ?? []), ...computed.artifactIds],
+      ownerDecisionIds: computed.ownerDecisionIds ?? [],
+      diagnostics: [...diagnostics, ...(computed.notes ?? [])],
+      ...(computed.judgements === undefined ? {} : { judgements: computed.judgements }),
+    };
+  }
+
+  /* ------------------------------------------------------------- 7b. the run */
 
   let run;
   try {

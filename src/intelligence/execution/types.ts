@@ -138,6 +138,21 @@ export interface DepartmentConfig<S extends z.ZodTypeAny = z.ZodTypeAny> {
   readonly usesResearchGateway?: boolean;
 
   /**
+   * A stage Serva COMPUTES rather than reasons about.
+   *
+   * SPEC §17 asks for the risk stage without inventing a new sovereign agent, and risk is
+   * genuinely an aggregation: unvalidated load-bearing assumptions, residual security
+   * risks, unresolved owner decisions. Asking a model to "identify the risks" produces a
+   * plausible list; computing it produces the actual ones, each pointing at the artifact
+   * it came from.
+   *
+   * A deterministic department makes NO model call. It still passes every governance
+   * check, still records a ledger disposition, and still writes canon through the one
+   * write path — it simply has nothing to ask.
+   */
+  readonly deterministic?: boolean;
+
+  /**
    * Work Serva does BEFORE the run, on the department's behalf.
    *
    * This exists for exactly one reason: retrieval. The research gateway fetches and

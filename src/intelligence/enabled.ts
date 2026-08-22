@@ -31,6 +31,37 @@ export const PHASE5_INTELLIGENCE_AGENTS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The design authority: architecture, data, security, operations, experience, testing.
+ *
+ * Every one is read-only intelligence — none writes a file, runs a command, or holds a
+ * network tool. Enabling them grants the ability to REASON about a project and record
+ * structured conclusions, and nothing else.
+ *
+ * The reviewers are enabled alongside their authors deliberately: a design authority
+ * without its independent reviewer is half a department, and the half that is missing is
+ * the one that disagrees.
+ */
+export const PHASE5_DESIGN_AGENTS: ReadonlySet<string> = new Set([
+  'SC-AGENT-070', // Software Architect
+  'SC-AGENT-071', // Technology Evaluator
+  'SC-AGENT-072', // Architecture Reviewer      — INDEPENDENT of 070/071
+  'SC-AGENT-080', // Data Architect
+  'SC-AGENT-082', // Data Model Reviewer        — INDEPENDENT of 080
+  'SC-AGENT-090', // Security Architect
+  'SC-AGENT-100', // Infrastructure Architect
+  'SC-AGENT-110', // Cost Engineer
+  'SC-AGENT-120', // UX Designer
+  'SC-AGENT-123', // UX Reviewer                — INDEPENDENT of 120
+  'SC-AGENT-130', // Design System Owner
+  'SC-AGENT-131', // UI Designer                — composes only; invents nothing
+  'SC-AGENT-133', // Design System Reviewer     — INDEPENDENT of 130/131
+  'SC-AGENT-140', // Operability Classifier
+  'SC-AGENT-141', // Admin Experience Designer
+  'SC-AGENT-210', // Test Strategist
+  'SC-AGENT-211', // Test Case Designer
+]);
+
+/**
  * Research and downstream design departments, enabled as each is wired.
  *
  * Kept separate from the set above so that "which agents can currently run" stays
@@ -48,4 +79,5 @@ export const PHASE5_RESEARCH_AGENTS: ReadonlySet<string> = new Set([
 export const PHASE5_ENABLED_AGENTS: ReadonlySet<string> = new Set([
   ...PHASE5_INTELLIGENCE_AGENTS,
   ...PHASE5_RESEARCH_AGENTS,
+  ...PHASE5_DESIGN_AGENTS,
 ]);
