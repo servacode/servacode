@@ -21,6 +21,7 @@ import { EXPERIENCE_DEPARTMENTS } from './departments/experience.js';
 import { PLANNING_DEPARTMENTS } from './departments/planning.js';
 import { PHASE5_ENABLED_AGENTS } from './enabled.js';
 import { AuditAction, audit } from '../events/audit.js';
+import { fail } from '../core/errors.js';
 import { SourceMarking } from '../vocab/index.js';
 import type { DepartmentConfig } from './execution/types.js';
 import type { GatewayDeps } from './research/gateway.js';
@@ -179,6 +180,44 @@ export function answerOwnerDecision(
   const existing = repo.get(o.decisionId);
   if (existing === undefined) {
     throw new Error('No owner decision ' + o.decisionId + ' exists');
+  }
+
+  /*
+   * THE ANSWER MUST BE ONE OF THE OPTIONS THAT WERE OFFERED.
+   *
+   * Without this, `chosenOption` is free text, and free text cannot be routed on. An
+   * answer nobody offered has no disposition, no impact statement and no cost implication
+   * - it is a string that looks like consent, and anything reading it downstream has to
+   * guess what the owner meant.
+   *
+   * Checked where a person types it, so a malformed answer is refused while they are
+   * still in front of it rather than at some later point that blames the wrong thing.
+   */
+  if (!existing.options.some((opt) => opt.option === o.chosenOption)) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: '"' + o.chosenOption + '" is not one of the options offered on ' + o.decisionId,
+      remedy:
+        'Answer with one of the options as written. They are: ' +
+        existing.options.map((opt) => '"' + opt.option + '"').join(', '),
+      details: { decisionId: o.decisionId, offered: existing.options.map((opt) => opt.option) },
+      specRef: '§32',
+    });
+  }
+
+  /*
+   * The impersonation rule, applied at the point of writing as well as at every point of
+   * reading. `ownerDecisionRefusal` catches a stored agent answer; this stops one being
+   * stored at all.
+   */
+  if (o.answeredBy.startsWith('SC-AGENT-') || o.answeredBy.startsWith('SC-RUN-')) {
+    return fail({
+      code: 'E_GATE_AUTHORITY',
+      message: 'Owner decision ' + o.decisionId + ' cannot be answered by ' + o.answeredBy,
+      remedy:
+        'An owner decision is answered by a person. An agent answering it is the system asking itself for permission.',
+      specRef: '§32',
+    });
   }
 
   const tx = deps.store.begin();

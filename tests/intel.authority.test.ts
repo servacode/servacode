@@ -255,9 +255,10 @@ describe('an owner answer is idempotent and attributable', () => {
       createdAt: at,
       question: 'Should phone orders earn loyalty points?',
       whyServaCannotDecide: 'It is a commercial policy.',
+      purpose: 'BUSINESS_RULE',
       options: [
-        { option: 'Yes', impact: 'phone orders earn points' },
-        { option: 'No', impact: 'counter only' },
+        { option: 'Yes', impact: 'phone orders earn points', disposition: 'APPROVE' },
+        { option: 'No', impact: 'counter only', disposition: 'REJECT' },
       ],
       recommendation: 'Yes',
       recommendationRationale: 'consistency across channels',

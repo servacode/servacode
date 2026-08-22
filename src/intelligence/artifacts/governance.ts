@@ -168,6 +168,47 @@ export const ChangeRequestSchema = artifact({
 export type ChangeRequest = z.output<typeof ChangeRequestSchema>;
 
 /**
+ * What answering an option MEANS, in a vocabulary rather than in English.
+ *
+ * SPEC: §32. This exists because approval was previously inferred from prose. An option
+ * reading "Yes" authorised a change and an option reading "No" was indistinguishable from
+ * it to any code that did not read English — so a decision the owner had REFUSED could
+ * authorise the very thing they refused.
+ *
+ * A disposition is what Serva routes on. The prose is what the owner reads.
+ */
+export const OptionDisposition = {
+  APPROVE: 'APPROVE',
+  REJECT: 'REJECT',
+  DEFER: 'DEFER',
+  /** Neither approves nor refuses: it supplies a fact or a preference Serva lacked. */
+  INFORM: 'INFORM',
+} as const;
+export type OptionDisposition = (typeof OptionDisposition)[keyof typeof OptionDisposition];
+
+/**
+ * What the decision is FOR.
+ *
+ * A decision raised to unblock a stalled department is not an approval of anything, and
+ * must never be usable as one. Purpose is checked alongside the target reference, because
+ * either alone is forgeable by coincidence: an old decision that happens to reference this
+ * change, or an approval decision that belongs to a different change.
+ */
+export const DecisionPurpose = {
+  /** Authorises a specific ChangeRequest. The only purpose `approveChange` accepts. */
+  CHANGE_APPROVAL: 'CHANGE_APPROVAL',
+  /** Authorises a specific Proposal to become scope. */
+  PROPOSAL_APPROVAL: 'PROPOSAL_APPROVAL',
+  /** Supplies a business rule, policy or fact Serva may not invent. */
+  BUSINESS_RULE: 'BUSINESS_RULE',
+  /** Answers something a department could not proceed without. */
+  SPECIFICATION_GAP: 'SPECIFICATION_GAP',
+  /** Accepts a residual risk, a cost overrun, or similar. */
+  RISK_ACCEPTANCE: 'RISK_ACCEPTANCE',
+} as const;
+export type DecisionPurpose = (typeof DecisionPurpose)[keyof typeof DecisionPurpose];
+
+/**
  * A decision that is genuinely the owner's to make.
  *
  * SPEC: §32. Written in business language, with a recommendation — the owner is being
@@ -176,16 +217,36 @@ export type ChangeRequest = z.output<typeof ChangeRequestSchema>;
  * `answeredBy` may never be an agent. `ownerDecisionRefusal` enforces that: an AI response
  * cannot impersonate owner approval, which is the difference between a governed company
  * and a system that asks itself for permission.
+ *
+ * `purpose` and `targetRef` together make an answer PURPOSE-BOUND. Without them an
+ * approval is a free-floating "the owner said yes to something", and any code looking for
+ * consent will find some. With them, consent is a statement about one named artifact and
+ * cannot be borrowed by another.
  */
 export const OwnerDecisionRequestSchema = artifact({
   question: z.string().min(1),
   whyServaCannotDecide: z.string().min(1),
+  /** What answering this decides. Routed on; never inferred from the question text. */
+  purpose: enumOf(DecisionPurpose),
+  /**
+   * The artifact this decision is ABOUT.
+   *
+   * Required for the approval purposes, because an approval with no target approves
+   * nothing in particular — which is exactly how an unrelated answer came to authorise an
+   * M4 change. Optional for the others, where the decision supplies information rather
+   * than consent.
+   */
+  targetRef: RefSchema.optional(),
+  /** Further artifacts the answer bears on, for the audit trail. */
+  supportingRefs: z.array(RefSchema).default([]),
   options: z
     .array(
       z
         .object({
           option: z.string().min(1),
           impact: z.string().min(1),
+          /** What choosing this MEANS. Serva routes on this, not on the wording. */
+          disposition: enumOf(OptionDisposition),
           costImplication: z.string().min(1).optional(),
           riskImplication: z.string().min(1).optional(),
         })
@@ -202,6 +263,85 @@ export const OwnerDecisionRequestSchema = artifact({
   answeredAt: z.string().min(1).optional(),
 });
 export type OwnerDecisionRequest = z.output<typeof OwnerDecisionRequestSchema>;
+
+/** The disposition the owner actually chose, or undefined if unanswered. */
+export function chosenDisposition(d: OwnerDecisionRequest): OptionDisposition | undefined {
+  if (d.state !== 'ANSWERED' || d.chosenOption === undefined) return undefined;
+  return d.options.find((o) => o.option === d.chosenOption)?.disposition;
+}
+
+/**
+ * May this decision authorise `targetId` for `purpose`?
+ *
+ * Returns the reason it may not, so a caller can report it rather than only refuse. Every
+ * clause here is a way an approval was previously borrowable:
+ *
+ *   not answered            — an open question is not consent
+ *   answered by an agent    — the system asking itself for permission
+ *   wrong purpose           — a decision raised to unblock a stage is not an approval
+ *   wrong target            — the owner approved something, but not this
+ *   option not on the form  — an answer that was never offered
+ *   disposition not APPROVE — the owner said no, and "no" is not "yes"
+ */
+export function approvalRefusal(
+  d: OwnerDecisionRequest | undefined,
+  o: { readonly purpose: DecisionPurpose; readonly targetId: string },
+): string | undefined {
+  if (d === undefined) return 'no such owner decision exists';
+  if (d.state !== 'ANSWERED') return 'owner decision ' + d.id + ' is ' + d.state + ', not ANSWERED';
+
+  const impersonation = ownerDecisionRefusal(d);
+  if (impersonation !== undefined) return impersonation;
+
+  if (d.purpose !== o.purpose) {
+    return (
+      'owner decision ' +
+      d.id +
+      ' was raised for ' +
+      d.purpose +
+      ', not ' +
+      o.purpose +
+      ': answering a question is not approving a change'
+    );
+  }
+
+  const bound =
+    d.targetRef?.id === o.targetId ||
+    d.blockedRefs.some((r) => r.id === o.targetId) ||
+    d.supportingRefs.some((r) => r.id === o.targetId);
+  if (!bound) {
+    return (
+      'owner decision ' +
+      d.id +
+      ' does not name ' +
+      o.targetId +
+      ': the owner approved something, but not this'
+    );
+  }
+
+  const chosen = d.options.find((opt) => opt.option === d.chosenOption);
+  if (chosen === undefined) {
+    return (
+      'owner decision ' +
+      d.id +
+      ' records the answer "' +
+      String(d.chosenOption) +
+      '", which is not one of the options it offered'
+    );
+  }
+  if (chosen.disposition !== OptionDisposition.APPROVE) {
+    return (
+      'the owner chose "' +
+      chosen.option +
+      '" on ' +
+      d.id +
+      ', which is a ' +
+      chosen.disposition +
+      ' — not an approval'
+    );
+  }
+  return undefined;
+}
 
 /** An owner decision answered by anything other than the owner is not a decision. */
 export function ownerDecisionRefusal(d: OwnerDecisionRequest): string | undefined {

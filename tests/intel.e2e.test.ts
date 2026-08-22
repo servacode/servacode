@@ -228,9 +228,10 @@ describe('the whole company runs', () => {
       createdAt: f.deps.clock.now(),
       question: 'Should the loyalty scheme apply to phone orders?',
       whyServaCannotDecide: 'It is a commercial policy.',
+      purpose: 'BUSINESS_RULE',
       options: [
-        { option: 'Yes', impact: 'phone orders earn points' },
-        { option: 'No', impact: 'counter only' },
+        { option: 'Yes', impact: 'phone orders earn points', disposition: 'APPROVE' },
+        { option: 'No', impact: 'counter only', disposition: 'REJECT' },
       ],
       recommendation: 'Yes',
       recommendationRationale: 'consistency across channels',

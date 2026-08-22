@@ -13,7 +13,11 @@ import {
   StateMachineSchema,
   financialRefusal,
 } from '../artifacts/business.js';
-import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+} from '../artifacts/governance.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, derived } from './shared.js';
 import type {
@@ -331,14 +335,23 @@ export const businessAnalysisDepartment: DepartmentConfig<typeof BusinessOutputS
           '" but nobody with the authority to set it has confirmed it.',
         whyServaCannotDecide:
           'This determines what customers are charged and what the business earns. Serva does not invent money rules, and a plausible default here becomes a real charge.',
+        purpose: DecisionPurpose.BUSINESS_RULE,
+        targetRef: { id },
         options: [
           {
             option: 'Confirm the drafted rule as stated',
             impact: 'the product implements it as written',
+            /*
+             * APPROVE, and it means one specific thing: this financial rule, as drafted,
+             * becomes company truth. It authorises the rule named in `targetRef` and
+             * nothing else — `approvalRefusal` will not let it travel.
+             */
+            disposition: OptionDisposition.APPROVE,
           },
           {
             option: 'State a different rule',
             impact: 'Serva records yours and Engineering implements that',
+            disposition: OptionDisposition.INFORM,
           },
         ],
         recommendation: 'Confirm or correct the drafted rule',

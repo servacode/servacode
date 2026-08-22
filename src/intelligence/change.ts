@@ -6,14 +6,21 @@ import { getCatalogues } from '../catalogue/index.js';
 import { ARTIFACT_TYPES, canonExists, repository } from './repository.js';
 import {
   ChangeRequestSchema,
+  DecisionPurpose,
   IMPACT_DIMENSIONS,
   ImpactAnalysisSchema,
+  OptionDisposition,
   OwnerDecisionRequestSchema,
+  approvalRefusal,
   unassessedDimensions,
 } from './artifacts/governance.js';
 import { readOrchestratorRecord, writeOrchestratorRecord } from './execution/orchestrator.js';
 import { resolveApplicability } from './applicability.js';
-import type { ChangeRequest, ImpactAnalysis } from './artifacts/governance.js';
+import type {
+  ChangeRequest,
+  ImpactAnalysis,
+  OwnerDecisionRequest,
+} from './artifacts/governance.js';
 import type { Store } from '../store/store.js';
 import type { Clock } from '../core/clock.js';
 import type { IdSource } from '../core/ids.js';
@@ -279,6 +286,100 @@ export function analyseImpact(deps: ChangeDeps, input: ImpactInput): ImpactAnaly
 }
 
 /**
+ * Raise the approval question for a change. The ONLY way to mint change consent.
+ *
+ * Serva writes it, so the purpose, the target and the dispositions are Serva's rather than
+ * anybody else's. A department cannot construct one of these, and an owner answering some
+ * other question cannot accidentally produce one.
+ */
+export function requestChangeApproval(
+  deps: ChangeDeps,
+  o: { readonly changeRequestId: string; readonly workItemId?: string },
+): OwnerDecisionRequest {
+  const cr = repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema).get(
+    o.changeRequestId,
+  );
+  if (cr === undefined) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'No change request ' + o.changeRequestId + ' exists',
+      remedy: 'Raise and analyse the change before asking the owner to approve it.',
+      specRef: '§34',
+    });
+  }
+  if (cr.state !== 'ANALYSED') {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Change ' + cr.id + ' is ' + cr.state + ', not ANALYSED',
+      remedy:
+        'Ask the owner to approve a change whose impact is known. Approving an unassessed change asks them to consent to an unknown quantity.',
+      specRef: '§34',
+    });
+  }
+
+  const at = deps.clock.now();
+  const request = OwnerDecisionRequestSchema.parse({
+    id: deps.ids.next('SC-ODR'),
+    createdAt: at,
+    question: 'Do you approve this ' + cr.magnitude + ' change? "' + cr.description + '"',
+    whyServaCannotDecide:
+      'A ' +
+      cr.magnitude +
+      ' change alters what the product IS. Serva can tell you what it would cost and what it would invalidate; it cannot decide that you want it.',
+    purpose: DecisionPurpose.CHANGE_APPROVAL,
+    targetRef: { id: cr.id, version: cr.version },
+    supportingRefs: cr.impactAnalysisRef === undefined ? [] : [cr.impactAnalysisRef],
+    options: [
+      {
+        option: 'Approve the change',
+        impact: 'the affected stages run again and their gates re-evaluate current evidence',
+        disposition: OptionDisposition.APPROVE,
+      },
+      {
+        option: 'Reject the change',
+        impact: 'nothing is re-run and the product stays as specified',
+        disposition: OptionDisposition.REJECT,
+      },
+      {
+        option: 'Defer the change',
+        impact: 'the request stays on record and continues to block the handover',
+        disposition: OptionDisposition.DEFER,
+      },
+    ],
+    recommendation: 'Approve the change',
+    recommendationRationale:
+      'You asked for it. This asks you to confirm the cost now that Serva has assessed it.',
+    blocksWork: true,
+    blockedRefs: [{ id: cr.id }],
+    state: 'OPEN',
+    meta: {
+      provenance: { marking: 'SYSTEM', component: 'change-approval' },
+      attribution: { at },
+      ...(o.workItemId === undefined ? {} : { workItemId: o.workItemId }),
+    },
+  });
+
+  const tx = deps.store.begin();
+  try {
+    repository(deps.store, ARTIFACT_TYPES.OWNER_DECISION_REQUEST, OwnerDecisionRequestSchema).put(
+      tx,
+      request,
+    );
+    audit(tx, {
+      action: AuditAction.ARTIFACT_RECORDED,
+      subject: request.id,
+      outcome: 'OK',
+      detail: { purpose: DecisionPurpose.CHANGE_APPROVAL, changeRequest: cr.id },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return request;
+}
+
+/**
  * Approve a change. M3 and M4 need the owner, and nothing may stand in for them.
  *
  * The owner decision is looked up rather than asserted, and must be ANSWERED by somebody
@@ -321,25 +422,37 @@ export function approveChange(
         specRef: 'SC-POL-013',
       });
     }
+    /*
+     * PURPOSE-BOUND, OR IT IS NOT AN APPROVAL.
+     *
+     * The previous rule was "any ANSWERED decision not answered by an agent", and it was
+     * wrong in three separate ways at once. An owner decision raised months earlier about
+     * something else satisfied it. A decision raised merely to unblock a stalled
+     * department satisfied it. And a decision on which the owner had chosen "No" satisfied
+     * it, because nothing read which option they picked.
+     *
+     * `approvalRefusal` requires all of: the decision was raised AS a change approval, it
+     * names THIS change, the recorded answer is one of the options actually offered, and
+     * that option's disposition is APPROVE. Consent is a statement about one named
+     * artifact, and it cannot be borrowed by another.
+     */
     const decision = repository(
       deps.store,
       ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
       OwnerDecisionRequestSchema,
     ).get(o.ownerDecisionId);
-    if (decision === undefined || decision.state !== 'ANSWERED') {
+
+    const refusal = approvalRefusal(decision, {
+      purpose: DecisionPurpose.CHANGE_APPROVAL,
+      targetId: cr.id,
+    });
+    if (refusal !== undefined) {
       return fail({
         code: 'E_GATE_AUTHORITY',
-        message: 'Owner decision ' + o.ownerDecisionId + ' is not answered',
-        remedy: 'An unanswered question is not approval.',
-        specRef: '§32',
-      });
-    }
-    if (decision.answeredBy === undefined || decision.answeredBy.startsWith('SC-AGENT-')) {
-      return fail({
-        code: 'E_GATE_AUTHORITY',
-        message:
-          'Owner decision ' + o.ownerDecisionId + ' was answered by ' + String(decision.answeredBy),
-        remedy: 'An agent cannot approve a change on the owner’s behalf.',
+        message: 'Refusing to approve ' + cr.id + ': ' + refusal,
+        remedy:
+          'Raise the approval question with requestChangeApproval and have the owner answer it. An approval borrowed from another question is not consent to this one.',
+        details: { changeRequestId: cr.id, ownerDecisionId: o.ownerDecisionId },
         specRef: '§32',
       });
     }

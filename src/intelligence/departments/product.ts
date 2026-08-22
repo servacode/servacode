@@ -8,7 +8,11 @@ import {
   ProductScopeSchema,
   ValidationRecommendationSchema,
 } from '../artifacts/product.js';
-import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+} from '../artifacts/governance.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, derived } from './shared.js';
 import type {
@@ -264,7 +268,17 @@ export const productValidationDepartment: DepartmentConfig<typeof ProductOutputS
         createdAt: at,
         question: d.question,
         whyServaCannotDecide: d.whyServaCannotDecide,
-        options: d.options,
+        purpose: DecisionPurpose.SPECIFICATION_GAP,
+        /*
+         * The wording of the options is the department's; the DISPOSITION is Serva's.
+         *
+         * A department that could mint an APPROVE option could write itself an approval
+         * and hand it to `approveChange`. So model-supplied alternatives are all INFORM:
+         * they tell Serva what the owner wants, which is what a product-validation
+         * question is for. APPROVE is only ever assigned where Serva raises the decision
+         * and knows exactly what is being approved.
+         */
+        options: d.options.map((o) => ({ ...o, disposition: OptionDisposition.INFORM })),
         recommendation: d.recommendation,
         recommendationRationale: d.recommendationRationale,
         blocksWork: d.blocksWork,

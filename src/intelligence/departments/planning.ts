@@ -20,7 +20,12 @@ import {
   RollbackSpecSchema,
   costRefusal,
 } from '../artifacts/operations.js';
-import { RiskSchema, OwnerDecisionRequestSchema } from '../artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+  RiskSchema,
+} from '../artifacts/governance.js';
 import { TestCaseSchema, TestStrategySchema } from '../artifacts/testing.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, derived } from './shared.js';
@@ -210,9 +215,19 @@ export const costDepartment: DepartmentConfig<typeof CostOutputSchema> = {
           question: 'The estimated cost exceeds the stated budget. How would you like to proceed?',
           whyServaCannotDecide:
             'Spending more than the budget is a commercial commitment. Serva can narrow the scope or change the approach, but it cannot decide to spend your money.',
+          purpose: DecisionPurpose.RISK_ACCEPTANCE,
+          targetRef: { id: assessmentId },
           options: [
-            { option: 'Increase the budget', impact: 'the product is built as scoped' },
-            { option: 'Narrow the scope', impact: 'Serva returns a smaller product within budget' },
+            {
+              option: 'Increase the budget',
+              impact: 'the product is built as scoped',
+              disposition: OptionDisposition.APPROVE,
+            },
+            {
+              option: 'Narrow the scope',
+              impact: 'Serva returns a smaller product within budget',
+              disposition: OptionDisposition.INFORM,
+            },
           ],
           recommendation: 'Narrow the scope',
           recommendationRationale:

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
 import { ProjectGoalSchema } from '../src/intelligence/artifacts/framing.js';
-import { OwnerDecisionRequestSchema } from '../src/intelligence/artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+} from '../src/intelligence/artifacts/governance.js';
 import {
   IMPACT_DIMENSIONS,
   analyseImpact,
@@ -11,7 +15,9 @@ import {
   outstandingChanges,
   planReentry,
   raiseChangeRequest,
+  requestChangeApproval,
 } from '../src/intelligence/change.js';
+import { answerOwnerDecision } from '../src/intelligence/app.js';
 import {
   accept,
   assess,
@@ -222,7 +228,8 @@ describe('a change is assessed before it is anything else', () => {
   });
 });
 
-describe('approving a change is the owner’s act, not the analysis’', () => {
+describe('an owner approval is bound to the change it approves', () => {
+  /** An analysed change, ready for the approval question. */
   function analysed(f: ReturnType<typeof setup>, magnitude: 'M2' | 'M4') {
     const goal = seedGoal(f.store, f.deps);
     const cr = raiseChangeRequest(f, {
@@ -239,6 +246,15 @@ describe('approving a change is the owner’s act, not the analysis’', () => {
     return cr;
   }
 
+  /** Answer a decision as a person, through the real runtime path. */
+  function answer(f: ReturnType<typeof setup>, decisionId: string, option: string): void {
+    answerOwnerDecision(f as never, {
+      decisionId,
+      chosenOption: option,
+      answeredBy: 'owner@bakery',
+    });
+  }
+
   it('an unanalysed change cannot be approved', () => {
     const f = setup();
     const cr = raiseChangeRequest(f, { origin: 'owner', description: 'x', magnitude: 'M1' });
@@ -253,68 +269,143 @@ describe('approving a change is the owner’s act, not the analysis’', () => {
     );
   });
 
-  it('an agent cannot stand in for the owner', () => {
+  it('an unrelated answered decision cannot approve it', () => {
     const f = setup();
     const cr = analysed(f, 'M4');
-    const at = f.deps.clock.now();
-    const decisionId = f.deps.ids.next('SC-ODR');
-    const tx = f.store.begin();
-    repository(f.store, ARTIFACT_TYPES.OWNER_DECISION_REQUEST, OwnerDecisionRequestSchema).put(tx, {
-      id: decisionId,
-      createdAt: at,
-      question: 'Change the commission model?',
-      whyServaCannotDecide: 'It is a commercial policy.',
-      options: [
-        { option: 'Yes', impact: 'margins change' },
-        { option: 'No', impact: 'nothing changes' },
-      ],
-      recommendation: 'No',
-      recommendationRationale: 'no evidence it helps',
-      blocksWork: true,
-      blockedRefs: [],
-      state: 'ANSWERED',
-      chosenOption: 'Yes',
-      answeredBy: 'SC-AGENT-040',
-      answeredAt: at,
-      meta: { provenance: { marking: 'SYSTEM', component: 'test' }, attribution: { at } },
-    } as never);
-    tx.commit();
 
-    expect(() => approveChange(f, { changeRequestId: cr.id, ownerDecisionId: decisionId })).toThrow(
-      /answered by SC-AGENT-040/,
+    /* A real, correctly-formed owner decision — about something else entirely. */
+    const unrelated = raiseChangeRequest(f, {
+      origin: 'owner',
+      description: 'something else',
+      magnitude: 'M4',
+    });
+    analyseImpact(f, {
+      changeRequestId: unrelated.id,
+      dimensions: fullDimensions(),
+      reentryStageId: 'SC-STAGE-010',
+      assessedBy: 'SC-AGENT-040',
+    });
+    const other = requestChangeApproval(f, { changeRequestId: unrelated.id });
+    answer(f, other.id, 'Approve the change');
+
+    expect(() => approveChange(f, { changeRequestId: cr.id, ownerDecisionId: other.id })).toThrow(
+      /does not name/,
     );
   });
 
-  it('a real owner answer approves it', () => {
+  it('a decision raised for a different purpose cannot approve it', () => {
     const f = setup();
     const cr = analysed(f, 'M4');
+
+    /* A specification-gap question. The owner answered it; it authorises nothing. */
     const at = f.deps.clock.now();
-    const decisionId = f.deps.ids.next('SC-ODR');
+    const gapId = f.deps.ids.next('SC-ODR');
     const tx = f.store.begin();
     repository(f.store, ARTIFACT_TYPES.OWNER_DECISION_REQUEST, OwnerDecisionRequestSchema).put(tx, {
-      id: decisionId,
+      id: gapId,
       createdAt: at,
-      question: 'Change the commission model?',
-      whyServaCannotDecide: 'It is a commercial policy.',
+      question: 'What happens to an order placed after closing time?',
+      whyServaCannotDecide: 'It is a policy decision.',
+      purpose: DecisionPurpose.SPECIFICATION_GAP,
+      /* It even names the change — and still must not approve it. */
+      blockedRefs: [{ id: cr.id }],
       options: [
-        { option: 'Yes', impact: 'margins change' },
-        { option: 'No', impact: 'nothing changes' },
+        {
+          option: 'Answer it',
+          impact: 'the stage continues',
+          disposition: OptionDisposition.INFORM,
+        },
+        {
+          option: 'Defer it',
+          impact: 'it stays unspecified',
+          disposition: OptionDisposition.DEFER,
+        },
       ],
-      recommendation: 'No',
-      recommendationRationale: 'no evidence it helps',
+      recommendation: 'Answer it',
+      recommendationRationale: 'the work is stopped either way',
       blocksWork: true,
-      blockedRefs: [],
-      state: 'ANSWERED',
-      chosenOption: 'Yes',
-      answeredBy: 'owner@bakery',
-      answeredAt: at,
+      state: 'OPEN',
       meta: { provenance: { marking: 'SYSTEM', component: 'test' }, attribution: { at } },
     } as never);
     tx.commit();
+    answer(f, gapId, 'Answer it');
 
-    expect(approveChange(f, { changeRequestId: cr.id, ownerDecisionId: decisionId }).state).toBe(
+    expect(() => approveChange(f, { changeRequestId: cr.id, ownerDecisionId: gapId })).toThrow(
+      /raised for SPECIFICATION_GAP/,
+    );
+  });
+
+  it('the owner choosing REJECT does not approve it', () => {
+    const f = setup();
+    const cr = analysed(f, 'M4');
+    const request = requestChangeApproval(f, { changeRequestId: cr.id });
+    answer(f, request.id, 'Reject the change');
+
+    expect(() => approveChange(f, { changeRequestId: cr.id, ownerDecisionId: request.id })).toThrow(
+      /which is a REJECT/,
+    );
+  });
+
+  it('the owner choosing DEFER does not approve it either', () => {
+    const f = setup();
+    const cr = analysed(f, 'M4');
+    const request = requestChangeApproval(f, { changeRequestId: cr.id });
+    answer(f, request.id, 'Defer the change');
+
+    expect(() => approveChange(f, { changeRequestId: cr.id, ownerDecisionId: request.id })).toThrow(
+      /which is a DEFER/,
+    );
+  });
+
+  it('an answer nobody offered is refused when it is given', () => {
+    const f = setup();
+    const cr = analysed(f, 'M4');
+    const request = requestChangeApproval(f, { changeRequestId: cr.id });
+
+    expect(() => answer(f, request.id, 'Yes')).toThrow(/not one of the options offered/);
+    /* And the decision is still OPEN, so nothing downstream can read it as consent. */
+    const stored = repository(
+      f.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    ).get(request.id);
+    expect(stored?.state).toBe('OPEN');
+  });
+
+  it('an agent cannot answer it at all', () => {
+    const f = setup();
+    const cr = analysed(f, 'M4');
+    const request = requestChangeApproval(f, { changeRequestId: cr.id });
+
+    expect(() =>
+      answerOwnerDecision(f as never, {
+        decisionId: request.id,
+        chosenOption: 'Approve the change',
+        answeredBy: 'SC-AGENT-040',
+      }),
+    ).toThrow(/cannot be answered by SC-AGENT-040/);
+  });
+
+  it('the exact bound approval, chosen by a person, is accepted', () => {
+    const f = setup();
+    const cr = analysed(f, 'M4');
+    const request = requestChangeApproval(f, { changeRequestId: cr.id });
+
+    /* The question names the change and carries its impact analysis. */
+    expect(request.purpose).toBe(DecisionPurpose.CHANGE_APPROVAL);
+    expect(request.targetRef?.id).toBe(cr.id);
+    expect(request.supportingRefs.length).toBeGreaterThan(0);
+
+    answer(f, request.id, 'Approve the change');
+    expect(approveChange(f, { changeRequestId: cr.id, ownerDecisionId: request.id }).state).toBe(
       'APPROVED',
     );
+  });
+
+  it('an approval question cannot be raised for an unassessed change', () => {
+    const f = setup();
+    const cr = raiseChangeRequest(f, { origin: 'owner', description: 'x', magnitude: 'M4' });
+    expect(() => requestChangeApproval(f, { changeRequestId: cr.id })).toThrow(/not ANALYSED/);
   });
 });
 

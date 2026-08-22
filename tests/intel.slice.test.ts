@@ -28,6 +28,7 @@ import {
 } from '../src/intelligence/artifacts/requirements.js';
 import { readLedger } from '../src/lifecycle/stages.js';
 import { readGateResults } from '../src/gates/engine.js';
+import { OwnerDecisionRequestSchema } from '../src/intelligence/artifacts/governance.js';
 import { DiscoveryFindingsSchema } from '../src/intelligence/artifacts/discovery.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { parseToolSurface } from '../src/agents/toolPolicy.js';
@@ -445,13 +446,42 @@ describe('an owner decision is control flow, not advice', () => {
     // Requirements did NOT run. A blocked lifecycle does not quietly continue.
     expect(first.ran.some((r) => r.agentId === 'SC-AGENT-050')).toBe(false);
 
-    /* --- an AGENT cannot answer it --- */
+    /* --- an AGENT cannot answer it, at either end --- */
     const decisionId = first.record.pendingOwnerDecisions[0] as string;
-    answerOwnerDecision(f.intel, {
-      decisionId,
+
+    /* The write path refuses outright, so a forged answer is never stored. */
+    expect(() =>
+      answerOwnerDecision(f.intel, {
+        decisionId,
+        chosenOption: 'Confirm the drafted rule as stated',
+        answeredBy: 'SC-AGENT-040',
+      }),
+    ).toThrow(/cannot be answered by SC-AGENT-040/);
+
+    /*
+     * And if one reached the Store some other way — a direct write, a restored backup, a
+     * future code path nobody has written yet — the orchestrator refuses it on resume.
+     * Two independent checks, because a single point of enforcement is a single point of
+     * failure for the one rule that separates a governed company from a system that asks
+     * itself for permission.
+     */
+    const odrRepo = repository(
+      f.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    );
+    const open = odrRepo.get(decisionId);
+    expect(open).toBeDefined();
+    const forgeTx = f.store.begin();
+    odrRepo.put(forgeTx, {
+      ...(open as NonNullable<typeof open>),
+      state: 'ANSWERED',
       chosenOption: 'Confirm the drafted rule as stated',
       answeredBy: 'SC-AGENT-040',
+      answeredAt: f.deps.clock.now(),
     });
+    forgeTx.commit();
+
     const forged = await o.advance();
     expect(forged.state).toBe(OrchestratorState.WAITING_FOR_OWNER);
     expect(forged.reason).toContain('cannot be synthesised');
@@ -493,7 +523,7 @@ describe('an owner decision is control flow, not advice', () => {
     const decisionId = first.record.pendingOwnerDecisions[0] as string;
     answerOwnerDecision(f.intel, {
       decisionId,
-      chosenOption: 'Confirm the drafted rule',
+      chosenOption: 'Confirm the drafted rule as stated',
       answeredBy: 'owner:bakery@example.com',
     });
 

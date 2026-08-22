@@ -5,7 +5,11 @@ import { assertResearchAuthority } from '../research/gateway.js';
 import { resolveIntelligencePolicy } from '../research/capability.js';
 import { parseToolSurface } from '../../agents/toolPolicy.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
-import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+} from '../artifacts/governance.js';
 import { DepartmentOutcome } from './types.js';
 import type {
   DepartmentConfig,
@@ -77,15 +81,23 @@ function raiseEscalationDecisions(
         whyServaCannotDecide:
           config.title +
           ' reached the edge of what it is allowed to decide. Answering this means choosing what the product does, which is yours to choose — and a plausible default here becomes a real behaviour nobody agreed to.',
+        purpose: DecisionPurpose.SPECIFICATION_GAP,
         options: [
           {
             option: 'Answer it, and Serva records the answer as company truth',
             impact: 'the stage runs again with your answer and the work continues',
+            /*
+             * INFORM, not APPROVE. This unblocks a department; it authorises nothing.
+             * Making it an approval would mean every stalled stage minted consent that
+             * `approveChange` could later find and use.
+             */
+            disposition: OptionDisposition.INFORM,
           },
           {
             option: 'Declare it out of scope for now',
             impact:
               'Serva records the absence rather than guessing, and the affected behaviour stays unspecified',
+            disposition: OptionDisposition.DEFER,
           },
         ],
         recommendation: 'Answer it',

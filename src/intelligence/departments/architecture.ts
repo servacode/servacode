@@ -3,7 +3,11 @@ import { ARTIFACT_TYPES, repository } from '../repository.js';
 import { ConstraintSchema } from '../artifacts/framing.js';
 import { NfrSchema, RequirementSchema } from '../artifacts/requirements.js';
 import { BusinessRuleSchema } from '../artifacts/business.js';
-import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+} from '../artifacts/governance.js';
 import {
   AdrSchema,
   ArchitectureModelSchema,
@@ -356,14 +360,18 @@ export const architectureDepartment: DepartmentConfig<typeof ArchitectureOutputS
         question: 'The specification does not say: ' + g.what,
         whyServaCannotDecide:
           'Architecture can decide HOW the product is built. This is a question about WHAT it should do, and answering it here would put a business decision in a technical document where nobody would think to look for it.',
+        purpose: DecisionPurpose.SPECIFICATION_GAP,
+        supportingRefs: [{ id: modelId }],
         options: [
           {
             option: 'Answer it, and Serva records it as a requirement',
             impact: g.whyItBlocksDesign,
+            disposition: OptionDisposition.INFORM,
           },
           {
             option: 'Defer it, and Serva designs around the absence',
             impact: 'the design leaves the behaviour unspecified rather than guessing at it',
+            disposition: OptionDisposition.DEFER,
           },
         ],
         recommendation: 'Answer it',
