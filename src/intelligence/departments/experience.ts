@@ -580,7 +580,7 @@ export const designSystemDepartment: DepartmentConfig<typeof DesignSystemOutputS
     });
     ids.push(rtlId);
 
-    const a11yId = ctx.ids.next('SC-A11Y');
+    const a11yId = ctx.ids.next('SC-ACCESS');
     repository(ctx.store, ARTIFACT_TYPES.ACCESSIBILITY_SPEC, AccessibilitySpecSchema).put(tx, {
       id: a11yId,
       createdAt: at,

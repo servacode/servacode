@@ -157,12 +157,156 @@ export const COMPETITIVE_GATE: QualityGate = {
   ],
 };
 
+/** SC-GATE-FEASIBILITY — can this be built, at this cost, with these risks visible? */
+export const FEASIBILITY_GATE: QualityGate = {
+  id: 'SC-GATE-FEASIBILITY',
+  name: 'Feasibility',
+  version: '1.0.0',
+  blocking: true,
+  waivable: false,
+  invalidationSet: ['intel.costModel', 'intel.risk', 'intel.costAssessment'],
+  criteria: [
+    criterion('FE-1', 'A cost model exists and every figure states a source or a basis'),
+    criterion('FE-2', 'Cost does not exceed a stated budget without an owner decision'),
+    criterion('FE-3', 'Risks are recorded, and UNKNOWN has not been recorded as LOW', {
+      severity: Severity.MAJOR,
+    }),
+  ],
+};
+
+/** SC-GATE-ARCHITECTURE — is the design justified and independently reviewed? */
+export const ARCHITECTURE_GATE: QualityGate = {
+  id: 'SC-GATE-ARCHITECTURE',
+  name: 'Architecture',
+  version: '1.0.0',
+  blocking: true,
+  waivable: false,
+  invalidationSet: ['intel.architectureModel', 'intel.dataModel', 'intel.nfrMapping'],
+  criteria: [
+    criterion('AR-1', 'Every NFR is mapped to a mechanism or explicitly flagged unsatisfied', {
+      evaluation: {
+        kind: 'VERIFIER_RESULT',
+        role: 'SC-AGENT-070',
+        criteria: ['every NFR addressed'],
+      },
+    }),
+    criterion('AR-2', 'An INDEPENDENT reviewer accepted the architecture', {
+      evaluation: {
+        kind: 'VERIFIER_RESULT',
+        role: 'SC-AGENT-072',
+        criteria: ['complexity justified', 'NFRs mapped', 'ownership unambiguous'],
+      },
+      independence: true,
+      requiredClass: EvidenceClass.JUDGMENT,
+    }),
+    criterion('AR-3', 'Every complexity pattern names the requirement that forces it'),
+    criterion('DA-1', 'An INDEPENDENT reviewer accepted the data model', {
+      evaluation: {
+        kind: 'VERIFIER_RESULT',
+        role: 'SC-AGENT-082',
+        criteria: ['ownership', 'transaction boundaries', 'retention'],
+      },
+      independence: true,
+      requiredClass: EvidenceClass.JUDGMENT,
+    }),
+  ],
+};
+
+/** SC-GATE-SECURITY_DESIGN — is the security modelled rather than asserted? */
+export const SECURITY_DESIGN_GATE: QualityGate = {
+  id: 'SC-GATE-SECURITY_DESIGN',
+  name: 'Security Design',
+  version: '1.0.0',
+  blocking: true,
+  waivable: false,
+  invalidationSet: ['intel.threatModel', 'intel.authorizationModel', 'intel.privacyDesign'],
+  criteria: [
+    criterion('SE-1', 'A threat model exists with trust boundaries and abuse cases'),
+    criterion('SE-2', 'An authorization model states who may do what, defaulting to DENY'),
+    criterion('SE-3', 'Privacy records what data exists, why, and who can reach it'),
+    criterion('SE-4', 'No residual risk is accepted without an owner disposition', {
+      severity: Severity.MAJOR,
+    }),
+  ],
+};
+
+/** SC-GATE-TECHNOLOGY — was the choice a comparison, and was it made in the right order? */
+export const TECHNOLOGY_GATE: QualityGate = {
+  id: 'SC-GATE-TECHNOLOGY',
+  name: 'Technology',
+  version: '1.0.0',
+  blocking: true,
+  waivable: false,
+  invalidationSet: ['intel.technologyEvaluation', 'intel.adr'],
+  criteria: [
+    criterion('TE-1', 'Every material decision compared at least two real candidates'),
+    criterion('TE-2', 'Criteria were declared before candidates were scored'),
+    criterion('TE-3', 'Every decision records its reversal cost and re-evaluation trigger'),
+  ],
+};
+
+/** SC-GATE-DESIGN — is the experience complete and the system usable? */
+export const DESIGN_GATE: QualityGate = {
+  id: 'SC-GATE-DESIGN',
+  name: 'Design',
+  version: '1.0.0',
+  blocking: true,
+  waivable: false,
+  invalidationSet: ['intel.flow', 'intel.designTokenSet', 'intel.adminOperabilityReview'],
+  criteria: [
+    criterion('UX-1', 'Every screen accounts for every required state', {
+      evaluation: {
+        kind: 'VERIFIER_RESULT',
+        role: 'SC-AGENT-120',
+        criteria: ['state coverage complete'],
+      },
+    }),
+    criterion('UX-2', 'An INDEPENDENT reviewer accepted the experience', {
+      evaluation: { kind: 'VERIFIER_RESULT', role: 'SC-AGENT-123', criteria: ['flows', 'states'] },
+      independence: true,
+      requiredClass: EvidenceClass.JUDGMENT,
+    }),
+    criterion('DS-1', 'An INDEPENDENT reviewer accepted the design system', {
+      evaluation: {
+        kind: 'VERIFIER_RESULT',
+        role: 'SC-AGENT-133',
+        criteria: ['tokens', 'component states', 'RTL'],
+      },
+      independence: true,
+      requiredClass: EvidenceClass.JUDGMENT,
+    }),
+    criterion('DS-2', 'The deterministic design checks find nothing blocking'),
+    criterion('AO-1', 'EVERY feature has an AdminOperabilityReview'),
+    criterion('AO-2', 'No protected rule is exposed as an ordinary operator setting'),
+  ],
+};
+
+/** SC-GATE-PLAN — is there a test strategy, and does everything still trace? */
+export const PLAN_GATE: QualityGate = {
+  id: 'SC-GATE-PLAN',
+  name: 'Plan',
+  version: '1.0.0',
+  blocking: true,
+  waivable: false,
+  invalidationSet: ['intel.testStrategy', 'intel.testCase'],
+  criteria: [
+    criterion('PL-1', 'A test strategy maps every promise to a verification approach'),
+    criterion('PL-2', 'Nothing is orphaned: the traceability checker finds nothing blocking'),
+  ],
+};
+
 export const UPSTREAM_GATES: readonly QualityGate[] = Object.freeze([
   INTAKE_GATE,
   DISCOVERY_GATE,
   PRODUCT_VALIDATION_GATE,
   REQUIREMENTS_GATE,
   COMPETITIVE_GATE,
+  FEASIBILITY_GATE,
+  ARCHITECTURE_GATE,
+  SECURITY_DESIGN_GATE,
+  TECHNOLOGY_GATE,
+  DESIGN_GATE,
+  PLAN_GATE,
 ]);
 
 export function gateById(id: string): QualityGate | undefined {

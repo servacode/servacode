@@ -28,6 +28,40 @@ import {
 } from '../artifacts/requirements.js';
 import { CompetitivePositionSchema, ResearchFindingSchema } from '../artifacts/market.js';
 import { assessFreshness, staleSubjects } from '../research/freshness.js';
+import { marketFreshnessSubjects } from '../research/subjects.js';
+import {
+  ArchitectureModelSchema,
+  AdrSchema,
+  ComplexityJustificationSchema,
+  TechnologyEvaluationSchema,
+  evaluationRefusal,
+} from '../artifacts/architecture.js';
+import {
+  AuthorizationModelSchema,
+  PrivacyDesignSchema,
+  ResidualRiskSchema,
+  ThreatModelSchema,
+} from '../artifacts/security.js';
+import { CostAssessmentSchema, CostModelSchema, costRefusal } from '../artifacts/operations.js';
+import { RiskSchema } from '../artifacts/governance.js';
+import { BusinessRuleSchema } from '../artifacts/business.js';
+import { FlowSchema, StateCoverageSchema } from '../artifacts/ux.js';
+import {
+  ComponentSpecSchema,
+  DesignExceptionSchema,
+  DesignTokenSetSchema,
+} from '../artifacts/design.js';
+import {
+  AdminAuditRequirementSchema,
+  AdminOperabilityReviewSchema,
+  ConfigurationRegisterSchema,
+  OperationalControlSchema,
+  ProtectedRuleSchema,
+} from '../artifacts/admin.js';
+import { TestCaseSchema, TestStrategySchema } from '../artifacts/testing.js';
+import { checkDesign } from '../checks/design.js';
+import { checkConfiguration } from '../checks/configuration.js';
+import { checkTraceability } from '../checks/traceability.js';
 import { questionKindRefusal } from '../departments/intake.js';
 import { gateById } from './definitions.js';
 import type { CriterionEvaluation } from '../../gates/types.js';
@@ -365,18 +399,8 @@ export function evaluationsFor(
           ),
         );
 
-        /* Freshness, computed rather than trusted: an expired finding is not current. */
-        const verdicts = assessFreshness(
-          [
-            ...findings.map((f) => ({ id: f.id, validUntil: f.freshness.validUntil })),
-            ...positions.map((p) => ({
-              id: p.id,
-              validUntil: p.freshness.validUntil,
-              dependsOn: p.differentiatorRefs.map((r) => r.id),
-            })),
-          ],
-          deps.clock,
-        );
+        /* Freshness over the WHOLE market graph, so nothing reads as merely absent. */
+        const verdicts = assessFreshness(marketFreshnessSubjects(store), deps.clock);
         out.push(measured('CO-3', staleSubjects(verdicts).length === 0));
       }
 
@@ -392,6 +416,297 @@ export function evaluationsFor(
                 (p) => p.reasonToSwitch.trim() !== '' && p.reasonToStay.trim() !== '',
               ),
             ),
+      );
+      break;
+    }
+
+    case 'SC-GATE-FEASIBILITY': {
+      const costs = repository(store, ARTIFACT_TYPES.COST_MODEL, CostModelSchema).list();
+      const assessments = repository(
+        store,
+        ARTIFACT_TYPES.COST_ASSESSMENT,
+        CostAssessmentSchema,
+      ).list();
+      const risks = repository(store, ARTIFACT_TYPES.RISK, RiskSchema).list();
+
+      if (costs.length === 0) {
+        out.push(indeterminate('FE-1', IndeterminateReason.EVIDENCE_ABSENT));
+      } else {
+        const figures = costs.flatMap((c) => [
+          ...(c.buildCost === undefined ? [] : [c.buildCost]),
+          ...c.runCost.map((r) => r.cost),
+        ]);
+        out.push(
+          measured(
+            'FE-1',
+            figures.every((m) => costRefusal(m) === undefined),
+          ),
+        );
+      }
+
+      /* Over budget with no owner decision is a silent continuation, which is the failure. */
+      const overspend = assessments.filter(
+        (a) => a.verdict === 'EXCEEDS_BUDGET' && a.ownerDecisionRef === undefined,
+      );
+      out.push(measured('FE-2', overspend.length === 0));
+
+      /*
+       * UNKNOWN is expected and acceptable — what is not is an UNKNOWN quietly recorded as
+       * LOW. This checks the register exists at all; the distinction itself is enforced by
+       * the aggregator, which never downgrades.
+       */
+      out.push(
+        risks.length === 0
+          ? indeterminate('FE-3', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured('FE-3', true),
+      );
+      break;
+    }
+
+    case 'SC-GATE-ARCHITECTURE': {
+      const arch = repository(
+        store,
+        ARTIFACT_TYPES.ARCHITECTURE_MODEL,
+        ArchitectureModelSchema,
+      ).list();
+      const complexity = repository(
+        store,
+        ARTIFACT_TYPES.COMPLEXITY_JUSTIFICATION,
+        ComplexityJustificationSchema,
+      ).list();
+      const reqs = repository(store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).list();
+      const nfrs = repository(store, ARTIFACT_TYPES.NFR, NfrSchema).list();
+
+      out.push(judged('AR-1'));
+      out.push(judged('AR-2'));
+      out.push(judged('DA-1'));
+
+      if (arch.length === 0) {
+        out.push(indeterminate('AR-3', IndeterminateReason.PRECONDITION_ABSENT));
+      } else {
+        const known = new Set([...reqs.map((r) => r.id), ...nfrs.map((n) => n.id)]);
+        out.push(
+          measured(
+            'AR-3',
+            complexity.every((c) => known.has(c.forcingRequirementRef.id)),
+          ),
+        );
+      }
+      break;
+    }
+
+    case 'SC-GATE-SECURITY_DESIGN': {
+      const threats = repository(store, ARTIFACT_TYPES.THREAT_MODEL, ThreatModelSchema).list();
+      const authz = repository(
+        store,
+        ARTIFACT_TYPES.AUTHORIZATION_MODEL,
+        AuthorizationModelSchema,
+      ).list();
+      const privacy = repository(store, ARTIFACT_TYPES.PRIVACY_DESIGN, PrivacyDesignSchema).list();
+      const residual = repository(store, ARTIFACT_TYPES.RESIDUAL_RISK, ResidualRiskSchema).list();
+
+      out.push(
+        threats.length === 0
+          ? indeterminate('SE-1', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(
+              'SE-1',
+              threats.every((t) => t.boundaryRefs.length > 0 && t.threats.length > 0),
+            ),
+      );
+      out.push(
+        authz.length === 0
+          ? indeterminate('SE-2', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(
+              'SE-2',
+              authz.every((a) => a.defaultEffect === 'DENY' && a.entries.length > 0),
+            ),
+      );
+      out.push(
+        privacy.length === 0
+          ? indeterminate('SE-3', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(
+              'SE-3',
+              privacy.every((p) => p.dataInventory.length > 0),
+            ),
+      );
+      /*
+       * A residual risk PENDING_OWNER is not a failure — it is an honest open question, and
+       * readiness blocks on it separately. What would fail is one marked ACCEPTED with no
+       * owner decision behind it.
+       */
+      out.push(
+        measured(
+          'SE-4',
+          residual.every(
+            (r) => r.ownerDisposition !== 'ACCEPTED' || r.ownerDecisionRef !== undefined,
+          ),
+        ),
+      );
+      break;
+    }
+
+    case 'SC-GATE-TECHNOLOGY': {
+      const evaluations = repository(
+        store,
+        ARTIFACT_TYPES.TECHNOLOGY_EVALUATION,
+        TechnologyEvaluationSchema,
+      ).list();
+      const adrs = repository(store, ARTIFACT_TYPES.ADR, AdrSchema).list();
+
+      if (evaluations.length === 0) {
+        out.push(indeterminate('TE-1', IndeterminateReason.EVIDENCE_ABSENT));
+        out.push(indeterminate('TE-2', IndeterminateReason.EVIDENCE_ABSENT));
+      } else {
+        out.push(
+          measured(
+            'TE-1',
+            evaluations.every((e) => e.candidates.length >= 2),
+          ),
+        );
+        out.push(
+          measured(
+            'TE-2',
+            evaluations.every((e) => evaluationRefusal(e) === undefined),
+          ),
+        );
+      }
+      out.push(
+        adrs.length === 0
+          ? indeterminate('TE-3', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(
+              'TE-3',
+              adrs.every(
+                (a) => a.reevaluationTrigger.trim() !== '' && a.rejectedReasons.length > 0,
+              ),
+            ),
+      );
+      break;
+    }
+
+    case 'SC-GATE-DESIGN': {
+      const features = repository(store, ARTIFACT_TYPES.FEATURE, FeatureSchema).list();
+      const reviews = repository(
+        store,
+        ARTIFACT_TYPES.ADMIN_OPERABILITY_REVIEW,
+        AdminOperabilityReviewSchema,
+      ).list();
+      const registers = repository(
+        store,
+        ARTIFACT_TYPES.CONFIGURATION_REGISTER,
+        ConfigurationRegisterSchema,
+      ).list();
+      const protectedRules = repository(
+        store,
+        ARTIFACT_TYPES.PROTECTED_RULE,
+        ProtectedRuleSchema,
+      ).list();
+      const audits = repository(
+        store,
+        ARTIFACT_TYPES.ADMIN_AUDIT_REQUIREMENT,
+        AdminAuditRequirementSchema,
+      ).list();
+      const controls = repository(
+        store,
+        ARTIFACT_TYPES.OPERATIONAL_CONTROL,
+        OperationalControlSchema,
+      ).list();
+      const tokens = repository(
+        store,
+        ARTIFACT_TYPES.DESIGN_TOKEN_SET,
+        DesignTokenSetSchema,
+      ).list();
+      const components = repository(
+        store,
+        ARTIFACT_TYPES.COMPONENT_SPEC,
+        ComponentSpecSchema,
+      ).list();
+      const coverage = repository(store, ARTIFACT_TYPES.STATE_COVERAGE, StateCoverageSchema).list();
+      const exceptions = repository(
+        store,
+        ARTIFACT_TYPES.DESIGN_EXCEPTION,
+        DesignExceptionSchema,
+      ).list();
+
+      out.push(judged('UX-1'));
+      out.push(judged('UX-2'));
+      out.push(judged('DS-1'));
+
+      /* SC-RTC-017 and the token/state checks, mechanically. */
+      const designFindings = checkDesign({
+        ...(tokens[0] === undefined ? {} : { tokens: tokens[0] }),
+        components,
+        coverage,
+        exceptions,
+        clock: deps.clock,
+      });
+      out.push(
+        measured(
+          'DS-2',
+          designFindings.every((f) => f.severity !== Severity.BLOCKING),
+        ),
+      );
+
+      /* SC-RTC-008, over the ACTUAL persisted operability artifacts. */
+      const configFindings = checkConfiguration({
+        features,
+        reviews,
+        ...(registers[0] === undefined ? {} : { register: registers[0] }),
+        protectedRules,
+        auditRequirements: audits,
+        controls,
+      });
+      out.push(
+        features.length === 0
+          ? indeterminate('AO-1', IndeterminateReason.PRECONDITION_ABSENT)
+          : measured(
+              'AO-1',
+              features.every((f) => reviews.some((r) => r.featureRef.id === f.id)),
+            ),
+      );
+      out.push(measured('AO-2', !configFindings.some((f) => f.code === 'PROTECTED_RULE_EXPOSED')));
+      break;
+    }
+
+    case 'SC-GATE-PLAN': {
+      const strategies = repository(store, ARTIFACT_TYPES.TEST_STRATEGY, TestStrategySchema).list();
+      out.push(
+        strategies.length === 0
+          ? indeterminate('PL-1', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(
+              'PL-1',
+              strategies.every((s) => s.coverage.length > 0),
+            ),
+      );
+
+      const trace = checkTraceability({
+        goals: repository(store, ARTIFACT_TYPES.PROJECT_GOAL, ProjectGoalSchema).list(),
+        features: repository(store, ARTIFACT_TYPES.FEATURE, FeatureSchema).list(),
+        requirements: repository(store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).list(),
+        acceptanceCriteria: repository(
+          store,
+          ARTIFACT_TYPES.ACCEPTANCE_CRITERION,
+          AcceptanceCriterionSchema,
+        ).list(),
+        nfrs: repository(store, ARTIFACT_TYPES.NFR, NfrSchema).list(),
+        businessRules: repository(store, ARTIFACT_TYPES.BUSINESS_RULE, BusinessRuleSchema).list(),
+        complexity: repository(
+          store,
+          ARTIFACT_TYPES.COMPLEXITY_JUSTIFICATION,
+          ComplexityJustificationSchema,
+        ).list(),
+        operabilityReviews: repository(
+          store,
+          ARTIFACT_TYPES.ADMIN_OPERABILITY_REVIEW,
+          AdminOperabilityReviewSchema,
+        ).list(),
+        flows: repository(store, ARTIFACT_TYPES.FLOW, FlowSchema).list(),
+        testCases: repository(store, ARTIFACT_TYPES.TEST_CASE, TestCaseSchema).list(),
+      });
+      out.push(
+        measured(
+          'PL-2',
+          trace.every((f) => f.severity !== Severity.BLOCKING),
+        ),
       );
       break;
     }

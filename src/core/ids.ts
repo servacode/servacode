@@ -127,7 +127,7 @@ export type IdPrefix =
   | 'SC-CMP'
   | 'SC-LAY'
   | 'SC-RTL'
-  | 'SC-A11Y'
+  | 'SC-ACCESS'
   | 'SC-MOT'
   | 'SC-DDEC'
   | 'SC-DEX'
