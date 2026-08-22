@@ -209,11 +209,15 @@ describe('a change is assessed before it is anything else', () => {
       changeRequestId: cr.id,
       profileId: 'PRF-NEW-PRODUCT',
     });
-    /* Everything from requirements onward re-runs; intake and discovery stand. */
-    expect(plan.stagesToRerun[0]).toBe('SC-STAGE-011');
+    /*
+     * A DELTA. Only REQUIREMENTS was marked affected, so requirements re-runs — and risk,
+     * which Serva computes rather than reasons about and would otherwise be describing a
+     * product that has since changed. UX is later in the lifecycle and untouched, so it
+     * stands: re-running it would be work nobody asked for, billed to the client.
+     */
+    expect(plan.stagesToRerun).toEqual(['SC-STAGE-011', 'SC-STAGE-016']);
     expect(plan.stagesRetained).toContain('SC-STAGE-002');
-    expect(plan.stagesToRerun).toContain('SC-STAGE-024');
-    expect(plan.stagesRetained).not.toContain('SC-STAGE-024');
+    expect(plan.stagesRetained).toContain('SC-STAGE-024');
     expect(plan.affectedRefs).toContain(goal);
   });
 });
@@ -342,18 +346,22 @@ describe('re-entry re-opens the lifecycle, idempotently', () => {
     applyReentry(f, { workItemId: WORK_ITEM, changeRequestId: crId });
     const after = readOrchestratorRecord(f.store, WORK_ITEM);
 
-    /* Intake stands. Requirements and everything after it does not. */
+    /* Requirements is no longer complete. Intake and the untouched UX stage still are. */
     expect(after?.completedStages).toContain('SC-STAGE-002');
     expect(after?.completedStages).not.toContain('SC-STAGE-011');
-    expect(after?.completedStages).not.toContain('SC-STAGE-024');
+    expect(after?.completedStages).toContain('SC-STAGE-024');
     expect(after?.ranStages).not.toContain('SC-STAGE-011');
     expect(after?.state).toBe('RUNNING');
 
-    /* A gate verdict is about the evidence that existed when it was given. */
+    /*
+     * A gate verdict is a statement about the evidence that existed when it was given, so
+     * the gate guarding a re-run stage is dropped. The architecture gate is not: nothing
+     * it judged is being re-derived.
+     */
     const gates = (after?.gateResults ?? []).map((g) => g.gateId);
     expect(gates).toContain('SC-GATE-INTAKE');
+    expect(gates).toContain('SC-GATE-ARCHITECTURE');
     expect(gates).not.toContain('SC-GATE-REQUIREMENTS');
-    expect(gates).not.toContain('SC-GATE-ARCHITECTURE');
   });
 
   it('applying the same change twice changes nothing the second time', () => {

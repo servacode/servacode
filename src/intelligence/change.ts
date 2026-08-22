@@ -44,6 +44,43 @@ import type { IdSource } from '../core/ids.js';
  * lifecycle, and arithmetic is Serva's.
  */
 
+/**
+ * Which stage owns each impact dimension.
+ *
+ * This is what turns "the analysis says UX is affected" into "stage 024 runs again". It
+ * is a lookup rather than a judgement on purpose: the alternative is asking a model which
+ * stages to re-run, and a model asked that question will answer helpfully rather than
+ * consistently.
+ *
+ * IMPLEMENTATION is deliberately empty here — it is downstream of Phase 5, and Phase 4
+ * decides for itself what a changed specification means for code.
+ */
+const DIMENSION_STAGES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  PRODUCT_SCOPE: ['SC-STAGE-004'],
+  BUSINESS_RULES: ['SC-STAGE-010'],
+  REQUIREMENTS: ['SC-STAGE-011'],
+  MARKET_POSITION: ['SC-STAGE-013'],
+  EXISTING_EVIDENCE: ['SC-STAGE-013'],
+  COST: ['SC-STAGE-015'],
+  ARCHITECTURE: ['SC-STAGE-020', 'SC-STAGE-023'],
+  DATA: ['SC-STAGE-021'],
+  SECURITY: ['SC-STAGE-022'],
+  UX: ['SC-STAGE-024'],
+  DESIGN_SYSTEM: ['SC-STAGE-025'],
+  ADMIN_OPERABILITY: ['SC-STAGE-026'],
+  TESTS: ['SC-STAGE-030'],
+  IMPLEMENTATION: [],
+});
+
+/**
+ * Stages Serva re-derives whenever anything re-runs at all.
+ *
+ * Risk is computed from persisted canon rather than reasoned about, so re-deriving it
+ * costs nothing and NOT re-deriving it leaves a risk register describing a product that
+ * has since changed — which is worse than having no register, because it looks current.
+ */
+const ALWAYS_REDERIVE: readonly string[] = Object.freeze(['SC-STAGE-016']);
+
 export interface ChangeDeps {
   readonly store: Store;
   readonly clock: Clock;
@@ -156,7 +193,8 @@ export function analyseImpact(deps: ChangeDeps, input: ImpactInput): ImpactAnaly
     });
   }
 
-  const stage = getCatalogues().stages.find((s) => s.id === draft.reentryStageId);
+  const catalogue = getCatalogues().stages;
+  const stage = catalogue.find((s) => s.id === draft.reentryStageId);
   if (stage === undefined) {
     return fail({
       code: 'E_VALIDATION',
@@ -164,6 +202,35 @@ export function analyseImpact(deps: ChangeDeps, input: ImpactInput): ImpactAnaly
       remedy:
         'Stages are canonical in 03. Re-entry picks one of them; it does not get to name a new one.',
       specRef: '03 §4',
+    });
+  }
+
+  /*
+   * The re-entry stage is the EARLIEST stage that must run again. An analysis naming an
+   * affected dimension that lives before it is contradicting itself, and the contradiction
+   * matters: whichever half is wrong, some affected canon would never be re-derived.
+   */
+  const order = catalogue.map((s) => s.id);
+  const reentryIndex = order.indexOf(draft.reentryStageId);
+  const tooEarly = draft.dimensions
+    .filter((d) => d.verdict === 'AFFECTED')
+    .flatMap((d) => (DIMENSION_STAGES[d.dimension] ?? []).map((sid) => ({ d: d.dimension, sid })))
+    .filter(({ sid }) => {
+      const i = order.indexOf(sid);
+      return i >= 0 && i < reentryIndex;
+    });
+  if (tooEarly.length > 0) {
+    return fail({
+      code: 'E_VALIDATION',
+      message:
+        'The analysis re-enters at ' +
+        draft.reentryStageId +
+        ' but says these earlier stages are affected: ' +
+        tooEarly.map((t) => t.d + ' (' + t.sid + ')').join(', '),
+      remedy:
+        'Re-enter at the earliest affected stage, or record those dimensions as NOT_AFFECTED. As written, canon the change touches would never be re-derived.',
+      details: { reentryStageId: draft.reentryStageId, tooEarly },
+      specRef: '§34',
     });
   }
 
@@ -346,8 +413,34 @@ export function planReentry(
   const plan = resolveApplicability(o.profileId);
   const order = plan.upstreamToRun.map((s) => s.stageId);
   const from = order.indexOf(analysis.reentryStageId);
-  const stagesToRerun = from < 0 ? [] : order.slice(from);
-  const stagesRetained = from < 0 ? order : order.slice(0, from);
+
+  /*
+   * A DELTA, not a suffix.
+   *
+   * The tempting rule is "everything from here onward", and it is wrong in the direction
+   * that costs the client money: a requirements change would re-run market research,
+   * which does not depend on requirements at all. What re-runs is the re-entry stage
+   * itself, plus the later stages the analysis actually marked AFFECTED, plus the stages
+   * Serva computes rather than reasons about.
+   *
+   * The cost of being wrong the other way — a stage that should have re-run and did not —
+   * is contained by the validation above: an affected dimension may not name a stage
+   * earlier than the re-entry point, so nothing affected can fall through the gap.
+   */
+  const affectedStages = new Set(
+    analysis.dimensions
+      .filter((d) => d.verdict === 'AFFECTED')
+      .flatMap((d) => DIMENSION_STAGES[d.dimension] ?? []),
+  );
+  const rerun = (stageId: string, index: number): boolean =>
+    from >= 0 &&
+    index >= from &&
+    (stageId === analysis.reentryStageId ||
+      affectedStages.has(stageId) ||
+      ALWAYS_REDERIVE.includes(stageId));
+
+  const stagesToRerun = order.filter((s, i) => rerun(s, i));
+  const stagesRetained = order.filter((s, i) => !rerun(s, i));
 
   return {
     changeRequestId: cr.id,

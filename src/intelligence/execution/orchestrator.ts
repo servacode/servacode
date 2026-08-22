@@ -10,7 +10,7 @@ import { OwnerDecisionRequestSchema, ownerDecisionRefusal } from '../artifacts/g
 import { runDepartment } from './runner.js';
 import { DepartmentOutcome } from './types.js';
 import type { DepartmentConfig, DepartmentContext, DepartmentResult, RunnerDeps } from './types.js';
-import type { ApplicabilityPlan } from '../applicability.js';
+import type { ApplicabilityPlan, StageApplicability } from '../applicability.js';
 import type { GatewayDeps } from '../research/gateway.js';
 import type { Store, Transaction } from '../../store/store.js';
 
@@ -281,6 +281,26 @@ export class IntelligenceOrchestrator {
   }
 
   /**
+   * Evaluate the gate that guards a stage, or nothing when none does.
+   *
+   * Pulled out because it is now called from two places — after a stage completes, and
+   * after a stage fails — and those two callers must not be able to drift into asking the
+   * gate different questions.
+   */
+  private async evaluateGate(
+    stage: StageApplicability,
+  ): Promise<{ readonly verdict: GateVerdict; readonly reasons: readonly string[] } | undefined> {
+    if (stage.gate === undefined || this.deps.gates === undefined) return undefined;
+    if (!gateFiresAfter(stage.gate, stage.stageId)) return undefined;
+    return await this.deps.gates.evaluate({
+      gateId: stage.gate,
+      workItemId: this.workItemId,
+      stageId: stage.stageId,
+      judgements: this.judgements,
+    });
+  }
+
+  /**
    * Run the lifecycle forward until it completes, blocks, or needs the owner.
    *
    * Idempotent by construction: completed stages are skipped on re-entry, so calling this
@@ -387,11 +407,42 @@ export class IntelligenceOrchestrator {
             continue;
           }
           if (result.outcome !== DepartmentOutcome.COMPLETED) {
+            /*
+             * The gate still runs.
+             *
+             * A department that could not produce its evidence has not made the gate
+             * irrelevant — it has given the gate its answer. Recording NOT_VERIFIED is
+             * strictly more useful than recording nothing: readiness blocks on a verdict
+             * it can name, and the difference between "the evidence says no" and "there
+             * was no evidence" survives into the report.
+             *
+             * The department's own reason is kept alongside it, because the gate verdict
+             * says WHAT is missing and the department reason says WHY.
+             */
+            const departmentReason = result.reason ?? config.title + ' did not complete';
+            const verdict = await this.evaluateGate(stage);
+            const gateResults =
+              verdict === undefined
+                ? record.gateResults
+                : [
+                    ...record.gateResults.filter((g) => g.gateId !== stage.gate),
+                    { gateId: stage.gate as string, verdict: verdict.verdict },
+                  ];
+
             record = this.write({
               ...record,
               state: OrchestratorState.BLOCKED,
               haltedAtStage: stage.stageId,
-              blockedReason: result.reason ?? config.title + ' did not complete',
+              blockedReason:
+                verdict === undefined
+                  ? departmentReason
+                  : stage.gate +
+                    ' returned ' +
+                    verdict.verdict +
+                    ': ' +
+                    departmentReason +
+                    (verdict.reasons.length === 0 ? '' : ' — ' + verdict.reasons.join('; ')),
+              gateResults,
               completedStages: [...completed],
               ranStages: [...alreadyRan],
             });
@@ -436,14 +487,8 @@ export class IntelligenceOrchestrator {
 
       /* ------------------------------------- the gate that guards this stage */
 
-      const fires = stage.gate === undefined ? false : gateFiresAfter(stage.gate, stage.stageId);
-      if (stage.gate !== undefined && fires && this.deps.gates !== undefined) {
-        const gate = await this.deps.gates.evaluate({
-          gateId: stage.gate,
-          workItemId: this.workItemId,
-          stageId: stage.stageId,
-          judgements: this.judgements,
-        });
+      const gate = await this.evaluateGate(stage);
+      if (stage.gate !== undefined && gate !== undefined) {
         const gateResults = [
           ...record.gateResults.filter((g) => g.gateId !== stage.gate),
           { gateId: stage.gate, verdict: gate.verdict },
