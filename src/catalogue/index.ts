@@ -55,6 +55,38 @@ export interface PolicyDef {
   readonly name: string;
 }
 
+/**
+ * One entry in a profile's stage selection.
+ *
+ * `mode` carries the spec's own qualifier — `delta`, `light`, `assess`, `re-check`,
+ * `verify`, `config only`, `docs`, `review`. It is not decoration: `011(delta)` means the
+ * requirements stage runs SCOPED TO THE CHANGE, and running it in full instead would be
+ * the "rerun the whole company for a copy fix" failure the lifecycle exists to prevent.
+ */
+export interface ProfileStageDef {
+  readonly stage: string;
+  readonly mode?: string;
+}
+
+/** 03 §7 — a named, versioned selection of stages, gates and departments. */
+export interface ProfileDef {
+  readonly id: string;
+  readonly appliesTo: string;
+  /** PRF-NEW-PRODUCT is "All applicable"; every other profile enumerates its stages. */
+  readonly allApplicable: boolean;
+  readonly stages: readonly ProfileStageDef[];
+  /**
+   * Prose in the spec's stage column that the generator could not reduce to a stage.
+   *
+   * Reported rather than dropped. `045 + root-cause record` carries an obligation and
+   * `013 or targeted research` carries an alternative; a catalogue that kept only the
+   * numbers would quietly mean less than the specification says.
+   */
+  readonly unparsedStageTerms: readonly string[];
+  readonly stagesRaw: string;
+  readonly notes: string;
+}
+
 export interface CataloguesFile {
   readonly $generated: {
     readonly from: string;
@@ -67,6 +99,7 @@ export interface CataloguesFile {
   readonly stages: readonly StageDef[];
   readonly gates: readonly GateDef[];
   readonly workflows: readonly WorkflowDef[];
+  readonly profiles: readonly ProfileDef[];
   readonly policies: readonly PolicyDef[];
   readonly counts: Readonly<Record<string, number>>;
 }
@@ -77,12 +110,14 @@ export interface Catalogues extends CataloguesFile {
   readonly stageIds: readonly string[];
   readonly gateIds: readonly string[];
   readonly workflowIds: readonly string[];
+  readonly profileIds: readonly string[];
   readonly policyIds: readonly string[];
   readonly runtimeComponentIds: readonly string[];
   agent(id: string): AgentDef | undefined;
   department(id: string): DepartmentDef | undefined;
   stage(id: string): StageDef | undefined;
   gate(id: string): GateDef | undefined;
+  profile(id: string): ProfileDef | undefined;
   /** 32 §8.2 R-TIER — tier is DERIVED from department, never stored on the agent. */
   tierOfAgent(agentId: string): number | undefined;
 }
@@ -115,6 +150,7 @@ export function getCatalogues(): Catalogues {
   const agentById = new Map(raw.agents.map((a) => [a.id, a]));
   const stageById = new Map(raw.stages.map((s) => [s.id, s]));
   const gateById = new Map(raw.gates.map((g) => [g.id, g]));
+  const profileById = new Map((raw.profiles ?? []).map((p) => [p.id, p]));
 
   cached = {
     ...raw,
@@ -123,12 +159,14 @@ export function getCatalogues(): Catalogues {
     stageIds: raw.stages.map((s) => s.id),
     gateIds: raw.gates.map((g) => g.id),
     workflowIds: raw.workflows.map((w) => w.id),
+    profileIds: (raw.profiles ?? []).map((p) => p.id),
     policyIds: raw.policies.map((p) => p.id),
     runtimeComponentIds: raw.runtimeComponents.map((r) => r.id),
     agent: (id) => agentById.get(id),
     department: (id) => deptById.get(id),
     stage: (id) => stageById.get(id),
     gate: (id) => gateById.get(id),
+    profile: (id) => profileById.get(id),
     tierOfAgent: (agentId) => {
       const a = agentById.get(agentId);
       if (a === undefined) return undefined;

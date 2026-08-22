@@ -1039,6 +1039,477 @@
       "name": "Project Reconciliation"
     }
   ],
+  "profiles": [
+    {
+      "id": "PRF-NEW-PRODUCT",
+      "appliesTo": "New project from an idea",
+      "allApplicable": true,
+      "stages": [
+        {
+          "stage": "002"
+        },
+        {
+          "stage": "003"
+        },
+        {
+          "stage": "004"
+        },
+        {
+          "stage": "010"
+        },
+        {
+          "stage": "011"
+        },
+        {
+          "stage": "013"
+        },
+        {
+          "stage": "015"
+        },
+        {
+          "stage": "016"
+        },
+        {
+          "stage": "020"
+        },
+        {
+          "stage": "021"
+        },
+        {
+          "stage": "022"
+        },
+        {
+          "stage": "023"
+        },
+        {
+          "stage": "024"
+        },
+        {
+          "stage": "025"
+        },
+        {
+          "stage": "026"
+        },
+        {
+          "stage": "030"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        },
+        {
+          "stage": "043"
+        },
+        {
+          "stage": "044"
+        },
+        {
+          "stage": "045"
+        },
+        {
+          "stage": "050"
+        },
+        {
+          "stage": "052"
+        },
+        {
+          "stage": "053"
+        },
+        {
+          "stage": "054"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "All applicable",
+      "notes": "The full lifecycle"
+    },
+    {
+      "id": "PRF-MAJOR-FEATURE",
+      "appliesTo": "Significant addition to an existing product",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "002",
+          "mode": "delta"
+        },
+        {
+          "stage": "003",
+          "mode": "delta"
+        },
+        {
+          "stage": "010",
+          "mode": "delta"
+        },
+        {
+          "stage": "011",
+          "mode": "delta"
+        },
+        {
+          "stage": "013",
+          "mode": "delta"
+        },
+        {
+          "stage": "015",
+          "mode": "delta"
+        },
+        {
+          "stage": "016",
+          "mode": "delta"
+        },
+        {
+          "stage": "020",
+          "mode": "delta"
+        },
+        {
+          "stage": "021",
+          "mode": "delta"
+        },
+        {
+          "stage": "022",
+          "mode": "delta"
+        },
+        {
+          "stage": "023",
+          "mode": "delta"
+        },
+        {
+          "stage": "024",
+          "mode": "delta"
+        },
+        {
+          "stage": "025",
+          "mode": "delta"
+        },
+        {
+          "stage": "026",
+          "mode": "delta"
+        },
+        {
+          "stage": "030"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        },
+        {
+          "stage": "043"
+        },
+        {
+          "stage": "044"
+        },
+        {
+          "stage": "045"
+        },
+        {
+          "stage": "050"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "002(delta), 003(delta), 010–016(delta), 020–026(delta), 030, 040–045, 050",
+      "notes": "Delta = scoped to the change"
+    },
+    {
+      "id": "PRF-FEATURE",
+      "appliesTo": "Ordinary feature",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "011",
+          "mode": "delta"
+        },
+        {
+          "stage": "024",
+          "mode": "delta"
+        },
+        {
+          "stage": "025",
+          "mode": "delta"
+        },
+        {
+          "stage": "026",
+          "mode": "delta"
+        },
+        {
+          "stage": "030"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        },
+        {
+          "stage": "043"
+        },
+        {
+          "stage": "044"
+        },
+        {
+          "stage": "045"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "011(delta), 024–026(delta), 030, 040–045",
+      "notes": "Discovery skipped by profile"
+    },
+    {
+      "id": "PRF-SMALL-CHANGE",
+      "appliesTo": "Small, bounded change",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "030",
+          "mode": "light"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        },
+        {
+          "stage": "045"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "030(light), 040, 041, 042, 045",
+      "notes": "Requires no new requirement"
+    },
+    {
+      "id": "PRF-BUG-FIX",
+      "appliesTo": "Defect repair",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        },
+        {
+          "stage": "045"
+        }
+      ],
+      "unparsedStageTerms": [
+        "045 + root-cause record"
+      ],
+      "stagesRaw": "040, 041, 042, 045 + root-cause record",
+      "notes": "Regression test mandatory"
+    },
+    {
+      "id": "PRF-SECURITY-FIX",
+      "appliesTo": "Security defect",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "022",
+          "mode": "assess"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "043"
+        },
+        {
+          "stage": "045"
+        },
+        {
+          "stage": "050"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "022(assess), 040, 041, 043, 045, 050",
+      "notes": "Expedited path, `17` §9"
+    },
+    {
+      "id": "PRF-ARCHITECTURE-CHANGE",
+      "appliesTo": "Structural change",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "013",
+          "mode": "re-check"
+        },
+        {
+          "stage": "015"
+        },
+        {
+          "stage": "016"
+        },
+        {
+          "stage": "020"
+        },
+        {
+          "stage": "021"
+        },
+        {
+          "stage": "022"
+        },
+        {
+          "stage": "023"
+        },
+        {
+          "stage": "030"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        },
+        {
+          "stage": "043"
+        },
+        {
+          "stage": "044"
+        },
+        {
+          "stage": "045"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "013(re-check), 015, 016, 020–023, 030, 040–045",
+      "notes": "Mandatory Impact Analysis"
+    },
+    {
+      "id": "PRF-DESIGN-CHANGE",
+      "appliesTo": "Design system / UX change",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "024"
+        },
+        {
+          "stage": "025"
+        },
+        {
+          "stage": "030"
+        },
+        {
+          "stage": "040"
+        },
+        {
+          "stage": "041"
+        },
+        {
+          "stage": "042"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "024, 025, 030, 040, 041, 042",
+      "notes": "Token change → impact across all consumers"
+    },
+    {
+      "id": "PRF-RESEARCH",
+      "appliesTo": "Investigation only",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "013"
+        }
+      ],
+      "unparsedStageTerms": [
+        "013 or targeted research"
+      ],
+      "stagesRaw": "013 or targeted research",
+      "notes": "Produces findings + proposals; **produces no code**"
+    },
+    {
+      "id": "PRF-RELEASE",
+      "appliesTo": "Release of accepted work",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "045",
+          "mode": "verify"
+        },
+        {
+          "stage": "050"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "045(verify), 050",
+      "notes": "No new implementation; 050 includes handover"
+    },
+    {
+      "id": "PRF-INCIDENT",
+      "appliesTo": "Production incident",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "054",
+          "mode": "+ fix path afterwards"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "054 (+ fix path afterwards)",
+      "notes": "Compressed; retroactive records mandatory"
+    },
+    {
+      "id": "PRF-OPERATIONAL-CHANGE",
+      "appliesTo": "Config/operational change",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "026",
+          "mode": "review"
+        },
+        {
+          "stage": "040",
+          "mode": "config only"
+        },
+        {
+          "stage": "045"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "026(review), 040(config only), 045",
+      "notes": "May require zero code"
+    },
+    {
+      "id": "PRF-DOCUMENTATION",
+      "appliesTo": "Docs only",
+      "allApplicable": false,
+      "stages": [
+        {
+          "stage": "040",
+          "mode": "docs"
+        },
+        {
+          "stage": "041"
+        }
+      ],
+      "unparsedStageTerms": [],
+      "stagesRaw": "040(docs), 041",
+      "notes": "No QA unless docs are product surface"
+    }
+  ],
   "policies": [
     {
       "id": "SC-POL-001",
@@ -1188,6 +1659,7 @@
     "stages": 26,
     "gates": 19,
     "workflows": 15,
+    "profiles": 13,
     "policies": 35
   }
 }

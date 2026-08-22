@@ -23,6 +23,14 @@ const OUT = join(OUT_DIR, 'catalogues.json');
 
 const md = readFileSync(SPEC, 'utf8');
 
+/*
+ * Profiles are canonical in 03 §7 and appear nowhere in 30, so they are read from their
+ * own document rather than copied into this script. A profile that exists only in a
+ * generator is a second company model, which Phase 5 is explicitly forbidden to create.
+ */
+const LIFECYCLE = join(repoRoot, 'docs', 'serva-code', '03_PROJECT_LIFECYCLE.md');
+const lifecycleMd = readFileSync(LIFECYCLE, 'utf8');
+
 /** Slice the document between two headings. */
 function section(startsWith, endsWith) {
   const a = md.indexOf(startsWith);
@@ -95,6 +103,87 @@ const gates = rows(gateSeg, /^SC-GATE-[A-Z_]+$/).map(([id, afterStage, blocking]
 
 const workflows = rows(wfSeg, /^SC-WF-\d+$/).map(([id, name]) => ({ id, name }));
 
+/* ------------------------------------------------------------------ profiles (03 §7) */
+
+/** Stage numbers that actually exist, so a range expands to real stages only. */
+const stageNumbers = stages.map((st) => st.id.replace('SC-STAGE-', ''));
+
+/**
+ * Parse one cell of the "Stages executed" column.
+ *
+ * The column is written for people: `010–016(delta)`, `030(light)`, `054 (+ fix path
+ * afterwards)`, `All applicable`. Anything this cannot parse is preserved verbatim in
+ * `unparsed` rather than dropped, because silently losing a stage from a profile would
+ * silently remove a gate from a project.
+ */
+function parseStageSelection(cell) {
+  const text = cell.replace(/\*\*/g, '').trim();
+  if (/^all applicable$/i.test(text)) {
+    return { all: true, stages: stageNumbers.map((n) => ({ stage: n })), unparsed: [] };
+  }
+  const out = [];
+  const unparsed = [];
+  for (const rawPart of text.split(',')) {
+    const part = rawPart.trim();
+    if (part === '') continue;
+    // `NNN–NNN(mode)` or `NNN-NNN(mode)`
+    const range = /^(\d{3})\s*[–-]\s*(\d{3})\s*(?:\(([^)]*)\))?/.exec(part);
+    if (range !== null) {
+      const [, from, to, mode] = range;
+      for (const n of stageNumbers) {
+        if (n >= from && n <= to) out.push(mode === undefined ? { stage: n } : { stage: n, mode });
+      }
+      continue;
+    }
+    // `NNN(mode)` or `NNN`
+    const one = /^(\d{3})\s*(?:\(([^)]*)\))?(.*)$/.exec(part);
+    if (one !== null) {
+      const [, n, mode, rest] = one;
+      if (!stageNumbers.includes(n)) {
+        unparsed.push(part);
+        continue;
+      }
+      out.push(mode === undefined ? { stage: n } : { stage: n, mode });
+      // Trailing prose is REPORTED, not dropped. `013 or targeted research` carries a
+      // real alternative, and a parser that quietly keeps the number and discards the
+      // sentence is how a profile comes to mean less than the spec says.
+      if ((rest ?? '').trim() !== '') unparsed.push(part);
+      continue;
+    }
+    unparsed.push(part);
+  }
+  return { all: false, stages: out, unparsed };
+}
+
+const profileSeg = (() => {
+  const a = lifecycleMd.indexOf('## 7. Lifecycle Profiles');
+  const b = lifecycleMd.indexOf('### 7.1');
+  if (a < 0 || b < 0 || b <= a) throw new Error('Cannot locate the profile table in 03 §7.');
+  return lifecycleMd.slice(a, b);
+})();
+
+const profiles = [];
+for (const line of profileSeg.split('\n')) {
+  if (!line.startsWith('|')) continue;
+  const cells = line
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim().replace(/^`|`$/g, ''));
+  const id = cells[0];
+  if (id === undefined || !/^PRF-[A-Z-]+$/.test(id)) continue;
+  const [, appliesTo, stagesCell, notes] = cells;
+  const parsed = parseStageSelection(stagesCell ?? '');
+  profiles.push({
+    id,
+    appliesTo,
+    allApplicable: parsed.all,
+    stages: parsed.stages,
+    unparsedStageTerms: parsed.unparsed,
+    stagesRaw: stagesCell,
+    notes,
+  });
+}
+
 // Policies: the constitution owns the text; 30 §9 owns membership. Derive the
 // identifier set from 01 headings so a policy cannot exist without a definition.
 const constitution = readFileSync(
@@ -121,6 +210,7 @@ const payload = {
   stages,
   gates,
   workflows,
+  profiles,
   policies,
   counts: {
     departments: departments.length,
@@ -129,6 +219,7 @@ const payload = {
     stages: stages.length,
     gates: gates.length,
     workflows: workflows.length,
+    profiles: profiles.length,
     policies: policies.length,
   },
 };
