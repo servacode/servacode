@@ -26,6 +26,8 @@ import {
   mustHasAcceptanceRefusal,
   nfrMeasurabilityRefusal,
 } from '../artifacts/requirements.js';
+import { CompetitivePositionSchema, ResearchFindingSchema } from '../artifacts/market.js';
+import { assessFreshness, staleSubjects } from '../research/freshness.js';
 import { questionKindRefusal } from '../departments/intake.js';
 import { gateById } from './definitions.js';
 import type { CriterionEvaluation } from '../../gates/types.js';
@@ -328,6 +330,69 @@ export function evaluationsFor(
 
       /* The independent verifier's judgement. Absent means NOT_VERIFIED. */
       out.push(judged('RQ-4'));
+      break;
+    }
+
+    case 'SC-GATE-COMPETITIVE': {
+      const findings = repository(
+        store,
+        ARTIFACT_TYPES.RESEARCH_FINDING,
+        ResearchFindingSchema,
+      ).list();
+      const positions = repository(
+        store,
+        ARTIFACT_TYPES.COMPETITIVE_POSITION,
+        CompetitivePositionSchema,
+      ).list();
+
+      /*
+       * No research at all is INDETERMINATE, not NOT_MET.
+       *
+       * The distinction decides what an operator does next. NOT_MET says the company
+       * looked and the market failed the test; INDETERMINATE says nobody looked. §31 is
+       * explicit that research unavailable is NOT_VERIFIED — and inventing a plausible
+       * landscape to avoid an awkward gate result is the exact failure this gate exists
+       * to make impossible.
+       */
+      if (findings.length === 0) {
+        out.push(indeterminate('CO-1', IndeterminateReason.EVIDENCE_ABSENT));
+        out.push(indeterminate('CO-3', IndeterminateReason.EVIDENCE_ABSENT));
+      } else {
+        out.push(
+          measured(
+            'CO-1',
+            findings.every((f) => f.sources.length > 0),
+          ),
+        );
+
+        /* Freshness, computed rather than trusted: an expired finding is not current. */
+        const verdicts = assessFreshness(
+          [
+            ...findings.map((f) => ({ id: f.id, validUntil: f.freshness.validUntil })),
+            ...positions.map((p) => ({
+              id: p.id,
+              validUntil: p.freshness.validUntil,
+              dependsOn: p.differentiatorRefs.map((r) => r.id),
+            })),
+          ],
+          deps.clock,
+        );
+        out.push(measured('CO-3', staleSubjects(verdicts).length === 0));
+      }
+
+      /* The independent verifier's judgement. Absent means nobody checked. */
+      out.push(judged('CO-2'));
+
+      out.push(
+        positions.length === 0
+          ? indeterminate('CO-4', IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(
+              'CO-4',
+              positions.every(
+                (p) => p.reasonToSwitch.trim() !== '' && p.reasonToStay.trim() !== '',
+              ),
+            ),
+      );
       break;
     }
 

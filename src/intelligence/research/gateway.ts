@@ -40,9 +40,16 @@ import type { IdSource } from '../../core/ids.js';
  * so a department config cannot obtain research merely by asking for it.
  */
 
-/** What a retriever must provide. Injected, so tests never touch the network. */
+/**
+ * What a retriever must provide. Injected, so tests never touch the network.
+ *
+ * `discover` is optional and separate from `fetch` on purpose: finding candidate sources
+ * and reading them are different acts with different risks, and a deployment may permit
+ * one without the other. With no `discover`, only explicitly seeded URLs are ever read.
+ */
 export interface Retriever {
   fetch(url: string, timeoutMs: number): Promise<RetrievedPage>;
+  discover?(query: string, allowedHosts: readonly string[]): Promise<readonly string[]>;
 }
 
 export interface RetrievedPage {

@@ -2,9 +2,16 @@ import { RunOutcome, StageExecutionState, StageLedgerDisposition } from '../../v
 import { AuditAction, audit } from '../../events/audit.js';
 import { appendLedgerEntry, startStage, transitionStage } from '../../lifecycle/stages.js';
 import { assertResearchAuthority } from '../research/gateway.js';
+import { resolveIntelligencePolicy } from '../research/capability.js';
 import { parseToolSurface } from '../../agents/toolPolicy.js';
 import { DepartmentOutcome } from './types.js';
-import type { DepartmentConfig, DepartmentContext, DepartmentResult, RunnerDeps } from './types.js';
+import type {
+  DepartmentConfig,
+  DepartmentContext,
+  DepartmentResult,
+  PrepareResult,
+  RunnerDeps,
+} from './types.js';
 import type { z } from 'zod';
 
 /**
@@ -175,7 +182,29 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     }
   }
 
-  /* ------------------------------------------- 6. context, deliberately narrow */
+  /* ------------------------------- 6a. Serva's own pre-run work, where declared */
+
+  let prepared: PrepareResult = { canon: [], notes: [] };
+  if (config.prepare !== undefined) {
+    try {
+      prepared = await config.prepare(ctx);
+    } catch (e) {
+      return refuse(
+        DepartmentOutcome.FAILED,
+        config.title + ' preparation failed: ' + String(e instanceof Error ? e.message : e),
+      );
+    }
+    diagnostics.push(...prepared.notes);
+    if (prepared.blocked !== undefined) {
+      /*
+       * Stopped BEFORE the model call. "We could not find out" is a result, and the one
+       * thing that must not happen next is a plausible answer produced without evidence.
+       */
+      return refuse(DepartmentOutcome.PREREQUISITE_MISSING, prepared.blocked);
+    }
+  }
+
+  /* ------------------------------------------- 6b. context, deliberately narrow */
 
   const spec = config.buildContext(ctx);
   if (spec.excluded.length > 0) {
@@ -207,7 +236,24 @@ export async function runDepartment<S extends z.ZodTypeAny>(
       ...(ctx.ownerRequest === undefined ? {} : { ownerRequest: ctx.ownerRequest }),
       resultSchema: config.outputJsonSchema,
       resultValidator: config.outputSchema,
-      canon: spec.canon.map((c) => ({
+      /*
+       * The grant is computed HERE, not derived by the runtime.
+       *
+       * Phase 3 refuses to resolve a policy for a contract that declares network, because
+       * it cannot enforce network at call time. Serva's answer is not to enforce it but
+       * to withhold it: retrieval happens in the gateway, and the run itself gets no
+       * tools at all. The grant is proved to be within the contract before binding.
+       */
+      capability: {
+        policy: resolveIntelligencePolicy(contract, {
+          projectRoot: deps.projectRoot,
+          enabled: deps.enabledAgents,
+        }),
+        cwd: deps.projectRoot,
+        basis:
+          'company intelligence run: no filesystem, no execution, no network; any external evidence was retrieved by Serva and is present as untrusted data',
+      },
+      canon: [...spec.canon, ...prepared.canon].map((c) => ({
         source: c.source,
         kind: c.kind,
         version: c.version,
@@ -310,7 +356,7 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     ...base,
     outcome,
     runId: run.runId,
-    artifactIds: persisted.artifactIds,
+    artifactIds: [...(prepared.artifactIds ?? []), ...persisted.artifactIds],
     ownerDecisionIds,
     diagnostics,
     ...(persisted.judgements === undefined ? {} : { judgements: persisted.judgements }),

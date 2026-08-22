@@ -122,7 +122,16 @@ export function parseToolSurface(contract: AgentContract): ParsedToolSurface {
       (declaredFsRead === null ? undefined : declaredFsRead[1]?.trim()),
     fsWrite: /fs\.write\(/.test(t) || grantsWrite(contract.filesystemScope),
     exec: /\bexec\(/.test(t),
-    net: contract.networkScope.toUpperCase() !== 'NONE',
+    /*
+     * The LEADING TOKEN decides, not the whole string.
+     *
+     * `networkScope` is prose with a verdict at the front: SC-AGENT-063 reads
+     * "NONE — it verifies against *captured* content, not by re-fetching". Comparing the
+     * entire field to 'NONE' classified that as network-GRANTED — the one agent whose
+     * whole purpose depends on being unable to fetch. A contract that explains itself
+     * must not thereby acquire a capability it explicitly disclaims.
+     */
+    net: !/^\s*none\b/i.test(contract.networkScope),
   };
 }
 

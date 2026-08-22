@@ -57,6 +57,7 @@ export const ARTIFACT_TYPES = {
   DIFFERENTIATOR: 'intel.differentiator',
   COMPETITIVE_POSITION: 'intel.competitivePosition',
   SOURCE_CAPTURE: 'intel.sourceCapture',
+  RESEARCH_REQUEST: 'intel.researchRequest',
   CLAIM_VERIFICATION: 'intel.claimVerification',
 
   ACTOR: 'intel.actor',

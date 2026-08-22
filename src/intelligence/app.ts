@@ -14,6 +14,7 @@ import {
   requirementsDepartment,
   requirementsVerifierDepartment,
 } from './departments/requirements.js';
+import { RESEARCH_CHAIN } from './departments/research.js';
 import { PHASE5_ENABLED_AGENTS } from './enabled.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { SourceMarking } from '../vocab/index.js';
@@ -44,6 +45,12 @@ export const UPSTREAM_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
   requirementsDepartment as DepartmentConfig,
   nfrDepartment as DepartmentConfig,
   requirementsVerifierDepartment as DepartmentConfig,
+  /*
+   * The research chain, in the order the separation requires: gather, verify, interpret,
+   * then propose. Running the analyst before the verifier would let an unverified claim
+   * become competitive truth, which is the one thing this ordering exists to prevent.
+   */
+  ...RESEARCH_CHAIN,
 ]);
 
 export interface IntelligenceDeps {

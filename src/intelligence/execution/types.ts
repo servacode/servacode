@@ -64,6 +64,17 @@ export interface DepartmentContext {
   readonly gateway?: GatewayDeps;
 }
 
+/** The outcome of Serva's pre-run work for a department. */
+export interface PrepareResult {
+  /** Extra context the run may read — captured sources, fenced as untrusted data. */
+  readonly canon: readonly ContextElement[];
+  readonly notes: readonly string[];
+  /** Set when the stage cannot honestly proceed. Stops before any model call. */
+  readonly blocked?: string;
+  /** Ids of anything Serva persisted while preparing, for the ledger. */
+  readonly artifactIds?: readonly string[];
+}
+
 /** What a department produced, beyond the artifacts it wrote. */
 export interface PersistResult {
   /** Artifact ids written, for the ledger and the evidence record. */
@@ -125,6 +136,20 @@ export interface DepartmentConfig<S extends z.ZodTypeAny = z.ZodTypeAny> {
 
   /** True only for departments whose canonical contract declares network scope. */
   readonly usesResearchGateway?: boolean;
+
+  /**
+   * Work Serva does BEFORE the run, on the department's behalf.
+   *
+   * This exists for exactly one reason: retrieval. The research gateway fetches and
+   * captures sources under Serva's authority, and the agent then reasons over the
+   * captured evidence with no network capability of its own. Putting it here rather than
+   * inside the department keeps the ordering in the runner, where the authority check
+   * already lives — a department cannot fetch first and ask permission afterwards.
+   *
+   * Returning `blocked` stops the stage before any model call, which is what "research
+   * was unavailable" must look like: a recorded refusal, never an invented landscape.
+   */
+  prepare?(ctx: DepartmentContext): Promise<PrepareResult>;
 
   buildContext(ctx: DepartmentContext): DepartmentContextSpec;
   task(ctx: DepartmentContext): string;

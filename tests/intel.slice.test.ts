@@ -28,6 +28,8 @@ import {
 } from '../src/intelligence/artifacts/requirements.js';
 import { readLedger } from '../src/lifecycle/stages.js';
 import { readGateResults } from '../src/gates/engine.js';
+import { ContractRegistry } from '../src/agents/registry.js';
+import { parseToolSurface } from '../src/agents/toolPolicy.js';
 import { cleanup, freshStore } from './helpers.js';
 
 /**
@@ -264,8 +266,10 @@ describe('the intelligence execution core runs the upstream company', () => {
       'SC-AGENT-050', // requirements
       'SC-AGENT-051', // NFRs
       'SC-AGENT-052', // independent verifier
+      'SC-AGENT-060', // market research — refused before any model call, see below
     ]);
-    const runIds = result.ran.map((r) => r.runId);
+    // Every run that reached the engine got its own session.
+    const runIds = result.ran.map((r) => r.runId).filter((id) => id !== undefined);
     expect(new Set(runIds).size).toBe(runIds.length);
 
     /* --- separate structured artifacts, actually persisted --- */
@@ -344,15 +348,16 @@ describe('the intelligence execution core runs the upstream company', () => {
     /*
      * ...and then it stops, honestly.
      *
-     * PRF-NEW-PRODUCT selects market and competitive intelligence, and no department is
-     * wired to that stage in this build. The alternative — skipping it and reporting
-     * COMPLETE — would describe a lifecycle that never ran a third of its stages as
-     * finished, which is exactly the "looks done, was not" failure the ledger exists to
-     * prevent.
+     * Market research runs and finds it has no gateway, so it refuses BEFORE any model
+     * call: RESEARCH_UNAVAILABLE. That is the correct state of an offline installation.
+     * The alternative — a plausible competitor landscape produced with no sources — is
+     * indistinguishable from real research until it costs someone a quarter.
      */
     expect(result.state).toBe(OrchestratorState.BLOCKED);
     expect(result.record.haltedAtStage).toBe('SC-STAGE-013');
-    expect(result.reason).toContain('no department is wired');
+    expect(result.reason).toContain('RESEARCH_UNAVAILABLE');
+    // No model call was spent on the research department.
+    expect(result.ran.at(-1)?.runId).toBeUndefined();
     expect(result.record.completedStages).toEqual([
       'SC-STAGE-002',
       'SC-STAGE-003',
@@ -450,6 +455,7 @@ describe('an owner decision is control flow, not advice', () => {
       'SC-AGENT-050',
       'SC-AGENT-051',
       'SC-AGENT-052',
+      'SC-AGENT-060',
     ]);
   }, 60_000);
 
@@ -545,10 +551,19 @@ describe('the substrate refuses before it dispatches', () => {
     expect(verifier?.id).toBe('DEPT-REQUIREMENTS-VERIFIER');
   });
 
-  it('no upstream department carries network capability', async () => {
-    /* SPEC §10: network is not a department capability. */
-    for (const d of UPSTREAM_DEPARTMENTS) {
-      expect(d.usesResearchGateway ?? false).toBe(false);
+  it('exactly one department may cause retrieval, and its contract says so', async () => {
+    /*
+     * SPEC §10. Network is not a department capability: it belongs to the gateway, and
+     * only the agent whose CANONICAL CONTRACT declares network scope may cause a fetch.
+     */
+    const withGateway = UPSTREAM_DEPARTMENTS.filter((d) => d.usesResearchGateway === true);
+    expect(withGateway.map((d) => d.agentId)).toEqual(['SC-AGENT-060']);
+
+    const registry = ContractRegistry.shared();
+    expect(parseToolSurface(registry.get('SC-AGENT-060')).net).toBe(true);
+    // ...and every other research-chain actor has none, including the verifier.
+    for (const id of ['SC-AGENT-061', 'SC-AGENT-062', 'SC-AGENT-063']) {
+      expect(parseToolSurface(registry.get(id)).net).toBe(false);
     }
   });
 
