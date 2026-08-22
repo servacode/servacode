@@ -11,7 +11,12 @@ export default defineConfig({
     include: ['tests/live/**/*.test.ts'],
     // The engineering acceptance lives here too but costs something different, so it
     // gets its own command rather than riding along with the model-call suite.
-    exclude: ['tests/live/engineering.live.test.ts'],
+    exclude: [
+      // Each of these costs something different, so each gets its own explicit command
+      // rather than riding along with the model-call suite.
+      'tests/live/engineering.live.test.ts',
+      'tests/live/intelligence.live.test.ts',
+    ],
     environment: 'node',
     reporters: ['default'],
     sequence: { shuffle: false, concurrent: false },
