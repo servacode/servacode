@@ -1,0 +1,318 @@
+import { RunOutcome, StageExecutionState, StageLedgerDisposition } from '../../vocab/index.js';
+import { AuditAction, audit } from '../../events/audit.js';
+import { appendLedgerEntry, startStage, transitionStage } from '../../lifecycle/stages.js';
+import { assertResearchAuthority } from '../research/gateway.js';
+import { parseToolSurface } from '../../agents/toolPolicy.js';
+import { DepartmentOutcome } from './types.js';
+import type { DepartmentConfig, DepartmentContext, DepartmentResult, RunnerDeps } from './types.js';
+import type { z } from 'zod';
+
+/**
+ * THE ONE INTELLIGENCE DEPARTMENT RUNNER.
+ *
+ * SPEC: 04, 05, 06, 19.
+ *
+ * Every governed intelligence run goes through here, and the order of operations is the
+ * governance. Each step below refuses BEFORE the next becomes possible, so a department
+ * cannot reach a model call by being configured optimistically:
+ *
+ *   1. the agent must be enabled            — a scope decision, not a config tweak
+ *   2. independence must hold               — a reviewer may not be the author
+ *   3. network authority comes from the contract, never from the department
+ *   4. prerequisites must exist             — decided from the Store, no model involved
+ *   5. the stage enters IN_PROGRESS         — the ledger records the attempt
+ *   6. context is MINIMISED and exclusions recorded
+ *   7. the run happens through AgentRuntime — one run, one session, one payload
+ *   8. the payload is validated by Serva    — "the provider says it is valid" is not enough
+ *   9. artifacts are persisted in ONE transaction
+ *  10. the ledger records the disposition   — including the failures
+ *
+ * A department config contributes only steps 6, 7's task text, and 9's mapping. It cannot
+ * reorder, skip, or soften any of the rest, which is exactly the point.
+ */
+
+/** Everything the ledger needs to describe one attempt. */
+function ledgerActor(config: DepartmentConfig): string {
+  return config.agentId;
+}
+
+export async function runDepartment<S extends z.ZodTypeAny>(
+  deps: RunnerDeps,
+  config: DepartmentConfig<S>,
+  ctx: DepartmentContext,
+  attempt = 1,
+): Promise<DepartmentResult> {
+  const base = {
+    departmentId: config.id,
+    stageId: config.stageId,
+    agentId: config.agentId,
+    artifactIds: [] as readonly string[],
+    ownerDecisionIds: [] as readonly string[],
+  };
+  const diagnostics: string[] = [];
+  const stageDeps = { ids: deps.ids, clock: deps.clock, actor: ledgerActor(config) };
+
+  const refuse = (outcome: DepartmentOutcome, reason: string): DepartmentResult => {
+    const tx = deps.store.begin();
+    try {
+      appendLedgerEntry(tx, stageDeps, {
+        workItemId: ctx.workItemId,
+        stageId: config.stageId,
+        profileRef: ctx.plan.profileId,
+        disposition:
+          outcome === DepartmentOutcome.PREREQUISITE_MISSING
+            ? StageLedgerDisposition.BLOCKED
+            : StageLedgerDisposition.FAILED,
+        reason,
+        attempt,
+      });
+      tx.commit();
+    } catch {
+      tx.rollback();
+    }
+    return { ...base, outcome, diagnostics, reason };
+  };
+
+  /* ---------------------------------------------------------- 1. enablement */
+
+  const contract = deps.registry.get(config.agentId);
+  if (!deps.enabledAgents.has(config.agentId)) {
+    return refuse(
+      DepartmentOutcome.REFUSED,
+      'Agent ' +
+        config.agentId +
+        ' is not enabled for execution, so ' +
+        config.title +
+        ' cannot run. Enabling an agent is a scope decision, not a configuration tweak.',
+    );
+  }
+
+  /* ------------------------------------------------------- 2. independence */
+
+  /*
+   * SPEC: §40. Checked here rather than in each department, because the departments that
+   * most need it are exactly the ones whose authors would find it most inconvenient.
+   */
+  for (const forbidden of config.independentOf ?? []) {
+    if (forbidden === config.agentId) {
+      return refuse(
+        DepartmentOutcome.REFUSED,
+        config.title +
+          ' is configured to be independent of ' +
+          forbidden +
+          ', and is running AS that actor: marking your own work is not review',
+      );
+    }
+  }
+
+  /* ------------------------------------------------- 3. network authority */
+
+  /*
+   * Network is not a department capability. It belongs to the research gateway, and only
+   * an agent whose CANONICAL CONTRACT declares network scope may cause retrieval. A
+   * department that merely asks for it is refused here, before anything is fetched.
+   */
+  if (config.usesResearchGateway === true) {
+    try {
+      assertResearchAuthority(contract);
+    } catch (e) {
+      return refuse(DepartmentOutcome.REFUSED, String(e instanceof Error ? e.message : e));
+    }
+    if (ctx.gateway === undefined) {
+      diagnostics.push(
+        'no research gateway was provided, so this department will produce findings only from what is already captured',
+      );
+    }
+  } else if (parseToolSurface(contract).net) {
+    /*
+     * The reverse direction, and worth catching: a contract that declares network being
+     * run by a department that never declared it would mean the capability existed and
+     * nobody had decided it should.
+     */
+    diagnostics.push(
+      'contract ' +
+        contract.id +
+        ' declares network scope, but this department does not use the research gateway; no retrieval will occur',
+    );
+  }
+
+  /* ------------------------------------------------------ 4. prerequisites */
+
+  const missing: string[] = [];
+  for (const type of config.requires ?? []) {
+    if (deps.store.listCanonIds(type).length === 0) missing.push(type);
+  }
+  if (missing.length > 0) {
+    return refuse(
+      DepartmentOutcome.PREREQUISITE_MISSING,
+      config.title +
+        ' cannot run: no ' +
+        missing.join(', ') +
+        ' exists yet. The stage that produces it has not completed.',
+    );
+  }
+
+  /* ------------------------------------------------------------- 5. ledger */
+
+  {
+    const tx = deps.store.begin();
+    try {
+      const state = startStage(tx, deps.store, stageDeps, ctx.workItemId, config.stageId);
+      if (state.state !== StageExecutionState.IN_PROGRESS) {
+        transitionStage(
+          tx,
+          deps.store,
+          stageDeps,
+          ctx.workItemId,
+          config.stageId,
+          StageExecutionState.IN_PROGRESS,
+        );
+      }
+      tx.commit();
+    } catch (e) {
+      tx.rollback();
+      diagnostics.push('stage transition: ' + String(e instanceof Error ? e.message : e));
+    }
+  }
+
+  /* ------------------------------------------- 6. context, deliberately narrow */
+
+  const spec = config.buildContext(ctx);
+  if (spec.excluded.length > 0) {
+    const tx = deps.store.begin();
+    try {
+      audit(tx, {
+        action: AuditAction.ARTIFACT_RECORDED,
+        subject: config.id,
+        outcome: 'OK',
+        detail: {
+          contextExclusions: spec.excluded.map((e) => e.subject + ': ' + e.reason).slice(0, 20),
+        },
+      });
+      tx.commit();
+    } catch {
+      tx.rollback();
+    }
+  }
+
+  /* ------------------------------------------------------------- 7. the run */
+
+  let run;
+  try {
+    run = await deps.runtime.run({
+      agentId: config.agentId,
+      workItemId: ctx.workItemId,
+      taskDefinition: config.task(ctx),
+      scopeBoundary: config.scopeBoundary(ctx),
+      ...(ctx.ownerRequest === undefined ? {} : { ownerRequest: ctx.ownerRequest }),
+      resultSchema: config.outputJsonSchema,
+      resultValidator: config.outputSchema,
+      canon: spec.canon.map((c) => ({
+        source: c.source,
+        kind: c.kind,
+        version: c.version,
+        content: c.content,
+        relevance: c.relevance,
+      })),
+    });
+  } catch (e) {
+    return refuse(
+      DepartmentOutcome.FAILED,
+      config.title + ' could not be dispatched: ' + String(e instanceof Error ? e.message : e),
+    );
+  }
+
+  diagnostics.push(...run.diagnostics);
+
+  /* ------------------------------------------------------- 8. Serva validates */
+
+  if (run.outcome !== RunOutcome.COMPLETED || run.envelope === undefined) {
+    return {
+      ...refuse(
+        DepartmentOutcome.FAILED,
+        config.title + ' run ended ' + run.outcome + '. NO OUTPUT = NOTHING RECORDED.',
+      ),
+      runId: run.runId,
+    };
+  }
+
+  const parsed = config.outputSchema.safeParse(run.envelope.result);
+  if (!parsed.success) {
+    return {
+      ...refuse(
+        DepartmentOutcome.FAILED,
+        config.title + ' produced a payload Serva does not accept for this role',
+      ),
+      runId: run.runId,
+    };
+  }
+
+  /* ------------------------------------------------- 9. persist, atomically */
+
+  let persisted;
+  const tx = deps.store.begin();
+  try {
+    persisted = config.persist(tx, parsed.data as z.output<S>, ctx);
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    return {
+      ...refuse(
+        DepartmentOutcome.FAILED,
+        config.title +
+          ' produced output that could not be recorded as canon: ' +
+          String(e instanceof Error ? e.message : e),
+      ),
+      runId: run.runId,
+    };
+  }
+
+  /* ---------------------------------------------------------- 10. disposition */
+
+  const ownerDecisionIds = persisted.ownerDecisionIds ?? [];
+  const outcome =
+    ownerDecisionIds.length > 0
+      ? DepartmentOutcome.OWNER_DECISION_REQUIRED
+      : DepartmentOutcome.COMPLETED;
+
+  {
+    const ltx = deps.store.begin();
+    try {
+      appendLedgerEntry(ltx, stageDeps, {
+        workItemId: ctx.workItemId,
+        stageId: config.stageId,
+        profileRef: ctx.plan.profileId,
+        /*
+         * EXECUTED even when an owner decision is outstanding: the department DID its
+         * work and produced a question. Recording it as blocked would lose the fact that
+         * the analysis happened, and would make a resume look like a first attempt.
+         */
+        disposition: StageLedgerDisposition.EXECUTED,
+        reason:
+          outcome === DepartmentOutcome.OWNER_DECISION_REQUIRED
+            ? config.title +
+              ' completed and raised ' +
+              String(ownerDecisionIds.length) +
+              ' owner decision(s)'
+            : config.title + ' completed',
+        attempt,
+      });
+      ltx.commit();
+    } catch (e) {
+      ltx.rollback();
+      diagnostics.push('ledger: ' + String(e instanceof Error ? e.message : e));
+    }
+  }
+
+  if (persisted.notes !== undefined) diagnostics.push(...persisted.notes);
+
+  return {
+    ...base,
+    outcome,
+    runId: run.runId,
+    artifactIds: persisted.artifactIds,
+    ownerDecisionIds,
+    diagnostics,
+    ...(persisted.judgements === undefined ? {} : { judgements: persisted.judgements }),
+  };
+}
