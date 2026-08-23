@@ -3,6 +3,23 @@ import { fail } from '../core/errors.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { provenanceRefusal } from './provenance.js';
 import type { Store, Transaction } from '../store/store.js';
+
+/**
+ * The narrow write surface a repository needs.
+ *
+ * A real Transaction satisfies it structurally, and so does a ScopedCanonWriter. What
+ * neither the interface nor any scoped implementation offers is `commit` — the runner owns
+ * the transaction boundary, and a department that could end it could end it early.
+ */
+export interface CanonWriter {
+  putCanon<T>(
+    type: string,
+    id: string,
+    body: T,
+    opts?: { supersedes?: string; source?: string },
+  ): ReturnType<Transaction['putCanon']>;
+  appendTrace(...args: Parameters<Transaction['appendTrace']>): void;
+}
 import type { IntelligenceMeta } from './provenance.js';
 
 /**
@@ -178,8 +195,13 @@ export class ArtifactRepository<S extends z.ZodTypeAny> {
    * The version is assigned HERE from what is already stored rather than trusted from the
    * caller. An agent that computes its own version number will eventually compute one that
    * overwrites a record somebody is still relying on.
+   *
+   * `tx` is a CanonWriter rather than a Transaction, so a scoped writer can be passed
+   * where a department is being constrained. What the repository needs is the ability to
+   * stage a canonical write and an audit entry; the ability to COMMIT is deliberately not
+   * part of that, and a department never has it.
    */
-  put(tx: Transaction, value: z.input<S>): z.output<S> {
+  put(tx: CanonWriter, value: z.input<S>): z.output<S> {
     const parsed = this.schema.safeParse(value);
     if (!parsed.success) {
       return fail({

@@ -185,6 +185,13 @@ export const architectureDepartment: DepartmentConfig<typeof ArchitectureOutputS
   stageId: 'SC-STAGE-020',
   agentId: ARCHITECT,
   title: 'Software Architecture',
+  produces: [
+    ARTIFACT_TYPES.ARCHITECTURE_MODEL,
+    ARTIFACT_TYPES.MODULE_CONTRACT,
+    ARTIFACT_TYPES.SSOT_REGISTER,
+    ARTIFACT_TYPES.COMPLEXITY_JUSTIFICATION,
+    ARTIFACT_TYPES.NFR_MAPPING,
+  ],
   outputSchema: ArchitectureOutputSchema,
   outputJsonSchema: jsonSchemaFor(ArchitectureOutputSchema),
   requires: [ARTIFACT_TYPES.REQUIREMENT, ARTIFACT_TYPES.NFR],
@@ -461,6 +468,7 @@ export const technologyDepartment: DepartmentConfig<typeof TechnologyOutputSchem
   stageId: 'SC-STAGE-023',
   agentId: EVALUATOR,
   title: 'Technology Selection',
+  produces: [ARTIFACT_TYPES.TECHNOLOGY_EVALUATION],
   outputSchema: TechnologyOutputSchema,
   outputJsonSchema: jsonSchemaFor(TechnologyOutputSchema),
   requires: [ARTIFACT_TYPES.ARCHITECTURE_MODEL],
@@ -546,36 +554,228 @@ export const technologyDepartment: DepartmentConfig<typeof TechnologyOutputSchem
         continue;
       }
 
-      const adrId = ctx.ids.next('SC-ADR');
-      repository(ctx.store, ARTIFACT_TYPES.ADR, AdrSchema).put(tx, {
-        id: adrId,
-        createdAt: at,
-        class: 'TECHNOLOGY',
-        title: d.area + ': ' + d.chosen,
-        context: 'Selection for ' + d.area,
-        options: d.candidates.map((c) => ({
-          option: c.name,
-          consequence: c.lockInNote ?? c.costNote ?? 'see evaluation',
-        })),
-        chosen: d.chosen,
-        drivers: [],
-        evidenceRefs: [{ id: evalId }],
-        rationale: d.rationale,
-        rejectedReasons: d.rejectedReasons,
-        consequences: d.consequences,
-        reversalCost: d.reversalCost,
-        reevaluationTrigger: d.reevaluationTrigger,
-        evaluationRef: { id: evalId },
-        meta: derived(ctx, EVALUATOR, [evalId], 'decision recorded with its alternatives'),
-      });
-      ids.push(adrId);
+      /*
+       * The ADR is NOT written here.
+       *
+       * `32` gives ADR[] to SC-AGENT-070, the architect, and this department runs as
+       * SC-AGENT-071. The distinction is not bookkeeping: an evaluation compares
+       * candidates against declared criteria, and an ADR commits the system to one of
+       * them and states what it will cost to reverse. Letting the evaluator write both
+       * means the comparison and the commitment are made by the same actor in the same
+       * breath, and nothing independent ever asks whether the winner is the right choice
+       * for THIS architecture.
+       *
+       * `architectureDecisionDepartment` below records it, as the architect, from the
+       * evaluation this run persisted.
+       */
+      notes.push(
+        'evaluation ' + evalId + ' for ' + d.area + ' is ready for an architecture decision',
+      );
     }
 
     return { artifactIds: ids, notes };
   },
 };
 
-/* ================================================== SC-AGENT-072 — architecture review */
+/* ================================ SC-AGENT-070 — the architecture decision, stage 023 */
+
+export const ArchitectureDecisionOutputSchema = z
+  .object({
+    decisions: z
+      .array(
+        z
+          .object({
+            evaluationId: z.string().min(1),
+            chosen: z.string().min(1),
+            rationale: z.string().min(1),
+            rejectedReasons: z.array(z.string().min(1)).min(1),
+            consequences: z.array(z.string().min(1)).min(1),
+            reversalCost: z.enum(['LOW', 'MEDIUM', 'HIGH', 'IRREVERSIBLE']),
+            reevaluationTrigger: z.string().min(1),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
+
+export const ARCH_DECISION_JSON_SCHEMA: Record<string, unknown> = jsonSchemaFor(
+  ArchitectureDecisionOutputSchema,
+);
+
+/**
+ * THE ARCHITECTURE DECISION — SC-AGENT-070, stage 023.
+ *
+ * A second governed run by the architect, over the evaluations SC-AGENT-071 produced.
+ *
+ * `32` gives ADR[] to the architect and TechnologyEvaluation[] to the evaluator, and the
+ * distinction is not bookkeeping. An evaluation compares candidates against criteria that
+ * were declared before scoring. An ADR commits the system to one of them and states what
+ * reversing it will cost. When one run does both, the comparison and the commitment are
+ * made by the same actor in the same breath, and nothing ever independently asks whether
+ * the winner on points is the right choice for THIS architecture — which is a different
+ * question, and the one an architect is for.
+ *
+ * The evaluator's scoring is therefore evidence here, not a verdict. This run may choose a
+ * candidate that did not score highest, provided it says why: a stated reason to override
+ * the scores is a decision, and an unstated one is how scoring becomes theatre.
+ */
+export const architectureDecisionDepartment: DepartmentConfig<
+  typeof ArchitectureDecisionOutputSchema
+> = {
+  id: 'DEPT-ARCH-DECISION',
+  stageId: 'SC-STAGE-023',
+  agentId: ARCHITECT,
+  title: 'Architecture Decision Record',
+  produces: [ARTIFACT_TYPES.ADR],
+  outputSchema: ArchitectureDecisionOutputSchema,
+  outputJsonSchema: ARCH_DECISION_JSON_SCHEMA,
+  requires: [ARTIFACT_TYPES.TECHNOLOGY_EVALUATION],
+
+  buildContext(ctx: DepartmentContext): DepartmentContextSpec {
+    const evaluations = repository(
+      ctx.store,
+      ARTIFACT_TYPES.TECHNOLOGY_EVALUATION,
+      TechnologyEvaluationSchema,
+    ).list();
+    const model = repository(
+      ctx.store,
+      ARTIFACT_TYPES.ARCHITECTURE_MODEL,
+      ArchitectureModelSchema,
+    ).list();
+    const nfrs = repository(ctx.store, ARTIFACT_TYPES.NFR, NfrSchema).list();
+
+    return {
+      canon: [
+        contextFrom(
+          'evaluations',
+          'TECHNOLOGY_EVALUATION',
+          evaluations,
+          (e) =>
+            e.id +
+            ' — ' +
+            e.decisionArea +
+            ': candidates ' +
+            e.candidates.map((c) => c.name).join(', ') +
+            ' against criteria ' +
+            e.criteria.map((c) => c.name).join(', '),
+          1,
+        ),
+        contextFrom('architecture', 'ARCHITECTURE_MODEL', model, (m) => m.style, 1),
+        contextFrom('nfrs', 'NFR', nfrs, (n) => n.id + ': ' + n.target, 1),
+      ].filter((c): c is NonNullable<typeof c> => c !== undefined),
+      excluded: [
+        {
+          subject: 'implementation and cost estimates',
+          reason: 'the decision is architectural; the estimate follows it rather than making it',
+        },
+      ],
+    };
+  },
+
+  task(): string {
+    return [
+      'Record the architecture decision for each technology evaluation.',
+      '',
+      'The evaluation is EVIDENCE, not a verdict. It compared candidates against criteria',
+      'that were fixed before scoring, which is what makes it trustworthy — but the highest',
+      'score is not automatically the right choice for this architecture, and deciding that',
+      'is your job rather than the evaluator\u2019s.',
+      '',
+      'If you choose a candidate that did not score highest, say why in the rationale. A',
+      'stated reason to override the scores is a decision; an unstated one turns the whole',
+      'evaluation into theatre.',
+      '',
+      'Every decision must state what it will cost to reverse and what would make you',
+      'reconsider it. A decision with no reversal cost and no re-evaluation trigger is one',
+      'nobody will ever revisit, however wrong it turns out to be.',
+    ].join('\n');
+  },
+
+  scopeBoundary(): string {
+    return 'Architecture decision records over completed technology evaluations. Do not produce new evaluations or change the architecture model.';
+  },
+
+  persist(tx, output, ctx) {
+    const ids: string[] = [];
+    const notes: string[] = [];
+    const at = ctx.clock.now();
+
+    const evaluations = new Map(
+      repository(ctx.store, ARTIFACT_TYPES.TECHNOLOGY_EVALUATION, TechnologyEvaluationSchema)
+        .list()
+        .map((e) => [e.id, e]),
+    );
+    const alreadyRecorded = new Set(
+      repository(ctx.store, ARTIFACT_TYPES.ADR, AdrSchema)
+        .list()
+        .map((a) => a.evaluationRef?.id)
+        .filter((id): id is string => id !== undefined),
+    );
+
+    for (const d of output.decisions) {
+      const evaluation = evaluations.get(d.evaluationId);
+      if (evaluation === undefined) {
+        notes.push('decision cites evaluation ' + d.evaluationId + ', which does not exist');
+        continue;
+      }
+      /* Idempotent: an evaluation already decided does not get a second record. */
+      if (alreadyRecorded.has(evaluation.id)) continue;
+
+      if (!evaluation.candidates.some((c) => c.name === d.chosen)) {
+        notes.push(
+          'decision for ' +
+            evaluation.decisionArea +
+            ' chose "' +
+            d.chosen +
+            '", which was never a candidate in ' +
+            evaluation.id,
+        );
+        continue;
+      }
+
+      const adrId = ctx.ids.next('SC-ADR');
+      repository(ctx.store, ARTIFACT_TYPES.ADR, AdrSchema).put(tx, {
+        id: adrId,
+        createdAt: at,
+        class: 'TECHNOLOGY',
+        title: evaluation.decisionArea + ': ' + d.chosen,
+        context: 'Selection for ' + evaluation.decisionArea,
+        options: evaluation.candidates.map((c) => ({
+          option: c.name,
+          consequence: c.lockInNote ?? c.costNote ?? 'see evaluation',
+        })),
+        chosen: d.chosen,
+        drivers: [],
+        evidenceRefs: [{ id: evaluation.id }],
+        rationale: d.rationale,
+        rejectedReasons: d.rejectedReasons,
+        consequences: d.consequences,
+        reversalCost: d.reversalCost,
+        reevaluationTrigger: d.reevaluationTrigger,
+        evaluationRef: { id: evaluation.id },
+        meta: derived(
+          ctx,
+          ARCHITECT,
+          [evaluation.id],
+          'architecture decision over an independent evaluation',
+        ),
+      });
+      ids.push(adrId);
+    }
+
+    /* An evaluation nobody decided is work that produced nothing. Say so. */
+    for (const [id, evaluation] of evaluations) {
+      if (alreadyRecorded.has(id)) continue;
+      if (output.decisions.some((d) => d.evaluationId === id)) continue;
+      notes.push('evaluation ' + id + ' for ' + evaluation.decisionArea + ' has no decision');
+    }
+
+    return { artifactIds: ids, notes };
+  },
+};
+
+const REVIEWER = 'SC-AGENT-072';
 
 export const ArchitectureReviewOutputSchema = z
   .object({
@@ -595,14 +795,13 @@ export const ArchitectureReviewOutputSchema = z
   })
   .strict();
 
-const REVIEWER = 'SC-AGENT-072';
-
 export const architectureReviewDepartment: DepartmentConfig<typeof ArchitectureReviewOutputSchema> =
   {
     id: 'DEPT-ARCHITECTURE-REVIEW',
     stageId: 'SC-STAGE-020',
     agentId: REVIEWER,
     title: 'Architecture Review',
+    produces: [],
     outputSchema: ArchitectureReviewOutputSchema,
     outputJsonSchema: jsonSchemaFor(ArchitectureReviewOutputSchema),
     requires: [ARTIFACT_TYPES.ARCHITECTURE_MODEL],
@@ -708,4 +907,6 @@ export const ARCHITECTURE_DEPARTMENTS: readonly DepartmentConfig[] = Object.free
   architectureDepartment as DepartmentConfig,
   architectureReviewDepartment as DepartmentConfig,
   technologyDepartment as DepartmentConfig,
+  /* SC-AGENT-070 records the decision the evaluator compared candidates for. */
+  architectureDecisionDepartment as DepartmentConfig,
 ]);

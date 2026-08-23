@@ -119,6 +119,13 @@ export const discoveryDepartment: DepartmentConfig<typeof DiscoveryOutputSchema>
   stageId: 'SC-STAGE-003',
   agentId: AGENT,
   title: 'Discovery',
+  produces: [
+    ARTIFACT_TYPES.USER_SEGMENT,
+    ARTIFACT_TYPES.JOB_TO_BE_DONE,
+    ARTIFACT_TYPES.CURRENT_ALTERNATIVE,
+    ARTIFACT_TYPES.PAIN,
+    ARTIFACT_TYPES.DISCOVERY_FINDINGS,
+  ],
   outputSchema: DiscoveryOutputSchema,
   outputJsonSchema: DISCOVERY_JSON_SCHEMA,
   requires: [ARTIFACT_TYPES.CLIENT_INPUT],

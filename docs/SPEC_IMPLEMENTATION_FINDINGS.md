@@ -260,3 +260,57 @@ the approved host asking us to consult one nobody approved.
 
 **Proposed R5:** name the research gateway as the sole egress point in `11`, and state
 that a contract's network scope authorises Serva's retrieval rather than the agent's.
+
+---
+
+## SF-12 — three artifact families have no owner in `32`
+
+**Where:** `32` states each contract's `outputs` as a human list. Cross-referencing every
+Phase 5 department against those lists leaves three groups that no contract claims.
+
+**Why it matters:** the implementation now enforces *committed types ⊆ declared outputs ⊆
+contract outputs* at the write boundary, so an artifact nobody is authorised to produce is
+an artifact that cannot be written. Three families would have made the whole upstream
+lifecycle unrunnable:
+
+- **the intake framing artifacts** — `ClientInput`, `ProjectGoal`, `Constraint`,
+  `OpenQuestion`. Every later stage depends on them, and no contract lists them.
+  `SC-AGENT-020`'s outputs begin at `ProductScope`.
+- **`Feature`** — `SC-AGENT-020` is authorised for `ProductScope` (the scope a feature sits
+  in) and `FeaturePriority[]` (the priority it carries), but not for the feature itself.
+- **`Risk`** — only `ResidualRisk` appears, under `SC-AGENT-090`. The risk register Serva
+  aggregates from persisted canon is not agent output at all: no model call produces it.
+
+**Resolution in code:** `DepartmentConfig.producesBeyondContract`, an explicit list where
+each entry states why. It is not a loophole: an entry with no reason is refused, an entry
+for something the contract *does* authorise is refused, and a catalogue test enumerates the
+whole set — so it can grow, but only in a diff somebody has to read.
+
+**Proposed R5:** add the framing artifacts to whichever contract owns stage 002, name
+`Feature` in `SC-AGENT-020`'s outputs, and state that Serva-computed aggregates such as the
+risk register are `SYSTEM`-authored rather than belonging to any agent.
+
+---
+
+## SF-13 — `SC-AGENT-071` cannot record the decision it evaluates
+
+**Where:** `32` gives `TechnologyEvaluation[]` to `SC-AGENT-071` and `ADR[]` to
+`SC-AGENT-070`.
+
+**Why it matters:** found by the write-authority check rather than by reading, which is the
+point of having the check. The technology department was running as `SC-AGENT-071` and
+writing both — the same defect the audit identified in `140`/`141` and `210`/`211`, in a
+third place nobody had looked.
+
+It is also the right rule. An evaluation compares candidates against criteria fixed before
+scoring. An ADR commits the system to one and states what reversing it will cost. One actor
+doing both means the comparison and the commitment happen in the same breath, and nothing
+independently asks whether the winner on points is right for *this* architecture — a
+different question, and the one an architect exists to answer.
+
+**Resolution in code:** `DEPT-ARCH-DECISION`, a second governed run at stage 023 by
+`SC-AGENT-070`, reading the persisted evaluations. It may choose a candidate that did not
+score highest provided it says why, because a stated reason to override the scores is a
+decision and an unstated one turns the evaluation into theatre.
+
+**Proposed R5:** none. The specification was right and the implementation was wrong.

@@ -8,6 +8,7 @@ import { resolveApplicability } from '../applicability.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import { OwnerDecisionRequestSchema, ownerDecisionRefusal } from '../artifacts/governance.js';
 import { runDepartment } from './runner.js';
+import { validateDepartmentAuthority } from './authority.js';
 import { DepartmentOutcome } from './types.js';
 import type { DepartmentConfig, DepartmentContext, DepartmentResult, RunnerDeps } from './types.js';
 import type { ApplicabilityPlan, StageApplicability } from '../applicability.js';
@@ -157,6 +158,15 @@ export class IntelligenceOrchestrator {
     skip?: Readonly<Record<string, string>>,
   ) {
     this.plan = resolveApplicability(profileId, skip === undefined ? {} : { skip });
+    /*
+     * AUTHORITY IS CHECKED BEFORE ANYTHING RUNS.
+     *
+     * A department whose declared outputs exceed its agent's canonical contract is a
+     * configuration error, and the honest place to discover one is construction — not
+     * halfway through a paid run, and certainly not by finding another agent's canon in
+     * the Store afterwards.
+     */
+    validateDepartmentAuthority(deps.departments, deps.registry);
   }
 
   get applicability(): ApplicabilityPlan {

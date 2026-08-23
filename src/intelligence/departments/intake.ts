@@ -106,6 +106,30 @@ export const intakeDepartment: DepartmentConfig<typeof IntakeOutputSchema> = {
   stageId: 'SC-STAGE-002',
   agentId: AGENT,
   title: 'Intake',
+  produces: [
+    ARTIFACT_TYPES.CLIENT_INPUT,
+    ARTIFACT_TYPES.PROJECT_GOAL,
+    ARTIFACT_TYPES.CONSTRAINT,
+    ARTIFACT_TYPES.OPEN_QUESTION,
+  ],
+  producesBeyondContract: [
+    {
+      type: ARTIFACT_TYPES.CLIENT_INPUT,
+      why: 'R4 assigns the intake framing artifacts to no agent contract, and every downstream stage depends on them. Recorded as SF-12 rather than silently widening SC-AGENT-020.',
+    },
+    {
+      type: ARTIFACT_TYPES.PROJECT_GOAL,
+      why: 'As CLIENT_INPUT: no contract in 32 claims the framing artifacts. SF-12.',
+    },
+    {
+      type: ARTIFACT_TYPES.CONSTRAINT,
+      why: 'As CLIENT_INPUT: no contract in 32 claims the framing artifacts. SF-12.',
+    },
+    {
+      type: ARTIFACT_TYPES.OPEN_QUESTION,
+      why: 'As CLIENT_INPUT: no contract in 32 claims the framing artifacts. SF-12.',
+    },
+  ],
   outputSchema: IntakeOutputSchema,
   outputJsonSchema: INTAKE_JSON_SCHEMA,
   requires: [ARTIFACT_TYPES.IDEA],

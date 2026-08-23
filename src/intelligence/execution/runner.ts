@@ -4,6 +4,7 @@ import { appendLedgerEntry, startStage, transitionStage } from '../../lifecycle/
 import { assertResearchAuthority } from '../research/gateway.js';
 import { resolveIntelligencePolicy } from '../research/capability.js';
 import { parseToolSurface } from '../../agents/toolPolicy.js';
+import { ScopedCanonWriter, allowedTypesFor } from './authority.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import {
   DecisionPurpose,
@@ -19,6 +20,7 @@ import type {
   RunnerDeps,
 } from './types.js';
 import type { z } from 'zod';
+import type { Transaction } from '../../store/store.js';
 
 /**
  * THE ONE INTELLIGENCE DEPARTMENT RUNNER.
@@ -141,6 +143,18 @@ export async function runDepartment<S extends z.ZodTypeAny>(
   };
   const diagnostics: string[] = [];
   const stageDeps = { ids: deps.ids, clock: deps.clock, actor: ledgerActor(config) };
+
+  /*
+   * The authorised write set, computed once, before anything runs.
+   *
+   * `allowedTypesFor` intersects what the department declares with what its contract
+   * permits, so neither side can widen the other. The department never sees the
+   * transaction itself and therefore cannot commit, cannot roll back, and cannot write
+   * outside the intersection.
+   */
+  const allowedTypes = allowedTypesFor(config, deps.registry);
+  const scopedWriter = (tx: Transaction): ScopedCanonWriter =>
+    new ScopedCanonWriter(tx, config.agentId, config.id, allowedTypes);
 
   const refuse = (outcome: DepartmentOutcome, reason: string): DepartmentResult => {
     const tx = deps.store.begin();
@@ -384,9 +398,11 @@ export async function runDepartment<S extends z.ZodTypeAny>(
       /*
        * The empty payload is deliberate: a deterministic department derives everything
        * from the Store, so there is no model output to validate. It goes through the same
-       * transaction and the same ledger path as every other department.
+       * transaction, the same SCOPED WRITER and the same ledger path as every other
+       * department — computing an artifact is not a reason to be trusted with a wider
+       * write surface than reasoning about one.
        */
-      computed = config.persist(dtx, undefined as never, ctx);
+      computed = config.persist(scopedWriter(dtx), undefined as never, ctx);
       dtx.commit();
     } catch (e) {
       dtx.rollback();
@@ -592,7 +608,13 @@ export async function runDepartment<S extends z.ZodTypeAny>(
   let persisted;
   const tx = deps.store.begin();
   try {
-    persisted = config.persist(tx, parsed.data as z.output<S>, ctx);
+    /*
+     * The department writes through a scope it cannot widen. An artifact type outside its
+     * canonical authority is refused at the call, before anything is staged — so a
+     * violation leaves no partial state, and the transaction either commits everything
+     * this department was entitled to write or nothing at all.
+     */
+    persisted = config.persist(scopedWriter(tx), parsed.data as z.output<S>, ctx);
     tx.commit();
   } catch (e) {
     tx.rollback();

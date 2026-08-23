@@ -756,15 +756,54 @@ export const E2E_SCRIPT: readonly (readonly [string, Record<string, unknown>])[]
           captures: ['who', 'which order', 'when', 'the previous state'],
         },
       ],
-      controls: [
+      /* No controls and no adminSections: those are SC-AGENT-141's, and it runs next. */
+    }),
+  ],
+
+  /* --- 023 the architecture DECISION, by SC-AGENT-070, over 071's evaluation --- */
+  [
+    'SC-AGENT-070',
+    envelope({
+      decisions: [
         {
-          name: 'Re-open cancelled order',
-          effect: 'returns a cancelled order to TAKEN',
-          destructive: false,
-          reversible: true,
+          evaluationId: '__TECHEVAL_0__',
+          chosen: 'SQLite',
+          rationale:
+            'A single-site bakery has one writer and no operational staff. SQLite removes a server nobody would maintain, and the evaluation shows no requirement that needs more.',
+          rejectedReasons: ['PostgreSQL adds an operational surface the shop has nobody to run'],
+          consequences: ['a second site would require revisiting this'],
+          reversalCost: 'MEDIUM',
+          reevaluationTrigger: 'a second site, or concurrent writers',
         },
       ],
-      adminSections: [{ name: 'Shift', purpose: 'view today and adjust hours' }],
+    }),
+  ],
+
+  /* --- 026 admin experience, by SC-AGENT-141, over 140's classifications --- */
+  [
+    'SC-AGENT-141',
+    envelope({
+      adminSections: [
+        {
+          name: 'Today',
+          purpose: 'what is happening in the shop right now',
+          contains: ['open orders', 'orders taken in the last hour'],
+        },
+        {
+          name: 'Settings',
+          purpose: 'the few things an owner may change',
+          contains: ['opening hours', 'collection window'],
+        },
+      ],
+      controls: [
+        {
+          name: 'Cancel an order',
+          effect: 'marks an order CANCELLED and frees the stock',
+          destructive: true,
+          reversible: false,
+          guardrail: 'the operator types the customer name to confirm',
+        },
+      ],
     }),
   ],
 
@@ -783,6 +822,13 @@ export const E2E_SCRIPT: readonly (readonly [string, Record<string, unknown>])[]
         },
       ],
       outOfScope: ['load testing beyond a single site'],
+    }),
+  ],
+
+  /* --- 030 test cases: a SEPARATE run, by SC-AGENT-211, from the same specification --- */
+  [
+    'SC-AGENT-211',
+    envelope({
       cases: [
         {
           title: 'An order saved during a rush is retrievable after the shift',
@@ -801,6 +847,7 @@ export const E2E_SCRIPT: readonly (readonly [string, Record<string, unknown>])[]
           expected: 'the transition is refused',
         },
       ],
+      notCovered: ['anything requiring a real payment provider'],
     }),
   ],
 ];
@@ -837,6 +884,7 @@ const PLACEHOLDERS: readonly (readonly [RegExp, string])[] = [
   [/__FINDING_(\d+)__/g, ARTIFACT_TYPES.RESEARCH_FINDING],
   [/__REQ_(\d+)__/g, ARTIFACT_TYPES.REQUIREMENT],
   [/__NFR_(\d+)__/g, ARTIFACT_TYPES.NFR],
+  [/__TECHEVAL_(\d+)__/g, ARTIFACT_TYPES.TECHNOLOGY_EVALUATION],
 ];
 
 export function resolvePlaceholders<T>(store: Store, payload: T): T {

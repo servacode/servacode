@@ -97,6 +97,17 @@ export const productValidationDepartment: DepartmentConfig<typeof ProductOutputS
   stageId: 'SC-STAGE-004',
   agentId: AGENT,
   title: 'Product Validation',
+  produces: [
+    ARTIFACT_TYPES.PRODUCT_SCOPE,
+    ARTIFACT_TYPES.FEATURE,
+    ARTIFACT_TYPES.VALIDATION_RECOMMENDATION,
+  ],
+  producesBeyondContract: [
+    {
+      type: ARTIFACT_TYPES.FEATURE,
+      why: 'SC-AGENT-020 is canonically authorised for ProductScope and FeaturePriority[] — the scope a feature sits in and the priority it carries — but 32 never names the Feature itself. SF-12.',
+    },
+  ],
   outputSchema: ProductOutputSchema,
   outputJsonSchema: PRODUCT_JSON_SCHEMA,
   requires: [ARTIFACT_TYPES.PROJECT_GOAL, ARTIFACT_TYPES.DISCOVERY_FINDINGS],

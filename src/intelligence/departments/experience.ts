@@ -133,6 +133,13 @@ export const uxDepartment: DepartmentConfig<typeof UxOutputSchema> = {
   stageId: 'SC-STAGE-024',
   agentId: UX,
   title: 'UX Design',
+  produces: [
+    ARTIFACT_TYPES.USER_JOURNEY,
+    ARTIFACT_TYPES.FLOW,
+    ARTIFACT_TYPES.INFORMATION_ARCHITECTURE,
+    ARTIFACT_TYPES.NAVIGATION_MODEL,
+    ARTIFACT_TYPES.STATE_COVERAGE,
+  ],
   outputSchema: UxOutputSchema,
   outputJsonSchema: jsonSchemaFor(UxOutputSchema),
   requires: [ARTIFACT_TYPES.REQUIREMENT],
@@ -326,6 +333,7 @@ export const uxReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
   stageId: 'SC-STAGE-024',
   agentId: UX_REVIEWER,
   title: 'UX Review',
+  produces: [],
   outputSchema: ReviewOutput,
   outputJsonSchema: jsonSchemaFor(ReviewOutput),
   requires: [ARTIFACT_TYPES.FLOW],
@@ -484,6 +492,13 @@ export const designSystemDepartment: DepartmentConfig<typeof DesignSystemOutputS
   stageId: 'SC-STAGE-025',
   agentId: DESIGN_OWNER,
   title: 'Design System',
+  produces: [
+    ARTIFACT_TYPES.DESIGN_TOKEN_SET,
+    ARTIFACT_TYPES.COMPONENT_SPEC,
+    ARTIFACT_TYPES.LAYOUT_SYSTEM,
+    ARTIFACT_TYPES.RTL_RULES,
+    ARTIFACT_TYPES.ACCESSIBILITY_SPEC,
+  ],
   outputSchema: DesignSystemOutputSchema,
   outputJsonSchema: jsonSchemaFor(DesignSystemOutputSchema),
   requires: [ARTIFACT_TYPES.FLOW],
@@ -643,6 +658,7 @@ export const uiDepartment: DepartmentConfig<typeof UiOutputSchema> = {
   stageId: 'SC-STAGE-025',
   agentId: UI_DESIGNER,
   title: 'UI Composition',
+  produces: [ARTIFACT_TYPES.SCREEN_COMPOSITION],
   outputSchema: UiOutputSchema,
   outputJsonSchema: jsonSchemaFor(UiOutputSchema),
   requires: [ARTIFACT_TYPES.COMPONENT_SPEC],
@@ -745,6 +761,7 @@ export const designReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
   stageId: 'SC-STAGE-025',
   agentId: DESIGN_REVIEWER,
   title: 'Design System Review',
+  produces: [],
   outputSchema: ReviewOutput,
   outputJsonSchema: jsonSchemaFor(ReviewOutput),
   requires: [ARTIFACT_TYPES.DESIGN_TOKEN_SET],
@@ -889,22 +906,14 @@ export const OperabilityOutputSchema = z
           .strict(),
       )
       .default([]),
-    controls: z
-      .array(
-        z
-          .object({
-            name: z.string().min(1),
-            effect: z.string().min(1),
-            destructive: z.boolean(),
-            reversible: z.boolean(),
-            guardrail: z.string().min(1).optional(),
-          })
-          .strict(),
-      )
-      .default([]),
-    adminSections: z
-      .array(z.object({ name: z.string().min(1), purpose: z.string().min(1) }).strict())
-      .min(1),
+    /*
+     * No `controls` and no `adminSections`.
+     *
+     * Removed with the write authority rather than left behind as fields the runner would
+     * ignore. A schema that keeps asking for something the department may not persist
+     * trains the model to produce it, wastes the tokens producing it, and leaves the next
+     * reader wondering where the output went.
+     */
   })
   .strict();
 
@@ -915,6 +924,12 @@ export const operabilityDepartment: DepartmentConfig<typeof OperabilityOutputSch
   stageId: 'SC-STAGE-026',
   agentId: OPERABILITY,
   title: 'Admin Operability',
+  produces: [
+    ARTIFACT_TYPES.ADMIN_OPERABILITY_REVIEW,
+    ARTIFACT_TYPES.CONFIGURATION_REGISTER,
+    ARTIFACT_TYPES.PROTECTED_RULE,
+    ARTIFACT_TYPES.ADMIN_AUDIT_REQUIREMENT,
+  ],
   outputSchema: OperabilityOutputSchema,
   outputJsonSchema: jsonSchemaFor(OperabilityOutputSchema),
   requires: [ARTIFACT_TYPES.FEATURE],
@@ -1051,6 +1066,168 @@ export const operabilityDepartment: DepartmentConfig<typeof OperabilityOutputSch
       ids.push(id);
     }
 
+    /*
+     * The operational controls and the admin information architecture are NOT written
+     * here. They are SC-AGENT-141's canon, and this department runs as SC-AGENT-140.
+     *
+     * It used to write them, and the result looked entirely correct — one department, one
+     * run, every artifact a reader expects. What it actually did was merge two
+     * authorities the catalogue keeps apart: the classifier decides what an operator may
+     * change, and the experience designer decides how they change it. One run doing both
+     * means the second decision is never independently made.
+     */
+    return { artifactIds: ids, notes };
+  },
+};
+
+/* ========================================== SC-AGENT-141 — admin experience, stage 026 */
+
+const ADMIN_EXPERIENCE = 'SC-AGENT-141';
+
+export const AdminExperienceOutputSchema = z
+  .object({
+    adminSections: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            purpose: z.string().min(1),
+            contains: z.array(z.string().min(1)).default([]),
+          })
+          .strict(),
+      )
+      .min(1),
+    controls: z
+      .array(
+        z
+          .object({
+            name: z.string().min(1),
+            effect: z.string().min(1),
+            destructive: z.boolean(),
+            reversible: z.boolean(),
+            guardrail: z.string().min(1).optional(),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
+
+export const ADMIN_EXPERIENCE_JSON_SCHEMA: Record<string, unknown> = jsonSchemaFor(
+  AdminExperienceOutputSchema,
+);
+
+/**
+ * ADMIN EXPERIENCE — SC-AGENT-141, stage 026.
+ *
+ * A separate governed run from SC-AGENT-140, reading its ACCEPTED output.
+ *
+ * The separation is the point. 140 classifies: what may be seen, changed, overridden, and
+ * what must never be configurable. 141 designs the experience of doing it. Collapsing them
+ * lets the design quietly relax the classification — a control that "obviously" needs an
+ * override button, added while drawing the screen it lives on — and nobody ever records
+ * that the protection changed.
+ *
+ * So 141 receives the classifications as context and cannot write them: its scope holds
+ * AdminIA and OperationalControl and nothing else.
+ */
+export const adminExperienceDepartment: DepartmentConfig<typeof AdminExperienceOutputSchema> = {
+  id: 'DEPT-ADMIN-EXPERIENCE',
+  stageId: 'SC-STAGE-026',
+  agentId: ADMIN_EXPERIENCE,
+  title: 'Admin Experience',
+  produces: [ARTIFACT_TYPES.ADMIN_IA, ARTIFACT_TYPES.OPERATIONAL_CONTROL],
+  outputSchema: AdminExperienceOutputSchema,
+  outputJsonSchema: ADMIN_EXPERIENCE_JSON_SCHEMA,
+  /* It cannot run before the classification exists, which is what makes it downstream. */
+  requires: [ARTIFACT_TYPES.ADMIN_OPERABILITY_REVIEW],
+
+  buildContext(ctx: DepartmentContext): DepartmentContextSpec {
+    const reviews = repository(
+      ctx.store,
+      ARTIFACT_TYPES.ADMIN_OPERABILITY_REVIEW,
+      AdminOperabilityReviewSchema,
+    ).list();
+    const protectedRules = repository(
+      ctx.store,
+      ARTIFACT_TYPES.PROTECTED_RULE,
+      ProtectedRuleSchema,
+    ).list();
+    const registers = repository(
+      ctx.store,
+      ARTIFACT_TYPES.CONFIGURATION_REGISTER,
+      ConfigurationRegisterSchema,
+    ).list();
+    return {
+      canon: [
+        contextFrom(
+          'operability',
+          'ADMIN_OPERABILITY_REVIEW',
+          reviews,
+          (r) =>
+            'configurable: ' +
+            r.whatIsConfigurable.join('; ') +
+            ' | NEVER configurable: ' +
+            r.whatMustNeverBeConfigurable.join('; '),
+          1,
+        ),
+        contextFrom('protected', 'PROTECTED_RULE', protectedRules, (r) => r.rule, 1),
+        contextFrom(
+          'configuration',
+          'CONFIGURATION_REGISTER',
+          registers,
+          (r) => r.entries.map((e) => e.element).join(', '),
+          0.8,
+        ),
+      ].filter((c): c is NonNullable<typeof c> => c !== undefined),
+      excluded: [
+        {
+          subject: 'implementation and architecture',
+          reason: 'the admin experience is designed from the classification, not from the code',
+        },
+      ],
+    };
+  },
+
+  task(): string {
+    return [
+      'Design the admin experience over classifications that are ALREADY DECIDED.',
+      '',
+      'The classification is not yours to revisit. Anything marked never-configurable stays',
+      'never-configurable: if designing the screen makes you believe an operator needs to',
+      'change it, that is a finding to raise, not a control to add.',
+      '',
+      'Group the sections around what an operator actually does, not around the shape of',
+      'the data. An admin area organised by table is an admin area nobody can use under',
+      'pressure.',
+      '',
+      'Every destructive control needs a guardrail, and say what it is. "Are you sure?" is',
+      'not a guardrail — it is a habit people learn to click through.',
+    ].join('\n');
+  },
+
+  scopeBoundary(): string {
+    return 'Admin information architecture and operational controls only. Do not change any operability classification, protected rule or configuration entry.';
+  },
+
+  persist(tx, output, ctx) {
+    const ids: string[] = [];
+    const at = ctx.clock.now();
+
+    const iaId = ctx.ids.next('SC-AIA');
+    repository(ctx.store, ARTIFACT_TYPES.ADMIN_IA, AdminIaSchema).put(tx, {
+      id: iaId,
+      createdAt: at,
+      sections: output.adminSections,
+      meta: derived(
+        ctx,
+        ADMIN_EXPERIENCE,
+        ['operability reviews'],
+        'admin information architecture',
+      ),
+    });
+    ids.push(iaId);
+
     for (const c of output.controls) {
       const id = ctx.ids.next('SC-OC');
       repository(ctx.store, ARTIFACT_TYPES.OPERATIONAL_CONTROL, OperationalControlSchema).put(tx, {
@@ -1061,21 +1238,12 @@ export const operabilityDepartment: DepartmentConfig<typeof OperabilityOutputSch
         destructive: c.destructive,
         reversible: c.reversible,
         ...(c.guardrail === undefined ? {} : { guardrail: c.guardrail }),
-        meta: derived(ctx, OPERABILITY, ['features'], 'operational control'),
+        meta: derived(ctx, ADMIN_EXPERIENCE, ['operability reviews'], 'operational control'),
       });
       ids.push(id);
     }
 
-    const iaId = ctx.ids.next('SC-AIA');
-    repository(ctx.store, ARTIFACT_TYPES.ADMIN_IA, AdminIaSchema).put(tx, {
-      id: iaId,
-      createdAt: at,
-      sections: output.adminSections,
-      meta: derived(ctx, OPERABILITY, ['features'], 'admin information architecture'),
-    });
-    ids.push(iaId);
-
-    return { artifactIds: ids, notes };
+    return { artifactIds: ids, notes: [] };
   },
 };
 
@@ -1086,6 +1254,8 @@ export const EXPERIENCE_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze
   uiDepartment as DepartmentConfig,
   designReviewDepartment as DepartmentConfig,
   operabilityDepartment as DepartmentConfig,
+  /* SC-AGENT-141 designs the experience over 140's accepted classifications. */
+  adminExperienceDepartment as DepartmentConfig,
 ]);
 
 /** Re-exported for the deterministic checks, which use the same list. */

@@ -70,7 +70,15 @@ export interface AuditInput {
   readonly causationId?: string;
 }
 
-export function audit(tx: Transaction, input: AuditInput): void {
+/**
+ * Append an audit entry.
+ *
+ * Takes anything that can append to a trace, so a department writing through a scoped
+ * canonical writer still produces the same audit trail as a runtime writing through a
+ * transaction. Auditing is not a privilege; it is an obligation, and narrowing the write
+ * surface must not narrow the record.
+ */
+export function audit(tx: { appendTrace: Transaction['appendTrace'] }, input: AuditInput): void {
   tx.appendTrace(AUDIT_STREAM, {
     type: input.action,
     payload: {

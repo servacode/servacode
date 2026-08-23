@@ -1,5 +1,6 @@
 import type { z } from 'zod';
-import type { Store, Transaction } from '../../store/store.js';
+import type { Store } from '../../store/store.js';
+import type { ScopedCanonWriter } from './authority.js';
 import type { Clock } from '../../core/clock.js';
 import type { IdSource } from '../../core/ids.js';
 import type { ContractRegistry } from '../../agents/registry.js';
@@ -132,6 +133,43 @@ export interface DepartmentConfig<S extends z.ZodTypeAny = z.ZodTypeAny> {
   readonly requires?: readonly ArtifactType[];
 
   /**
+   * The canonical artifact families this department writes.
+   *
+   * REQUIRED, and validated at construction against the agent's contract in `32`. The
+   * runner turns it into a writer that physically cannot commit anything else, so a
+   * persist function is constrained rather than trusted.
+   *
+   * Declaring it is not a formality. A department with no declaration cannot be scoped,
+   * and an unscoped writer is how the Admin Operability department came to write
+   * SC-AGENT-141's canon while running only SC-AGENT-140.
+   */
+  readonly produces: readonly ArtifactType[];
+
+  /**
+   * Artifacts this department writes that NO canonical contract claims.
+   *
+   * Not a loophole — a record of a gap in R4, kept where the gap actually bites. Three
+   * kinds of artifact fall here today:
+   *
+   *   the intake framing artifacts (ClientInput, ProjectGoal, Constraint, OpenQuestion),
+   *   which every downstream stage depends on and which `32` assigns to nobody;
+   *
+   *   Feature, where SC-AGENT-020's contract names ProductScope and FeaturePriority[] —
+   *   the thing prioritised and the scope it sits in — but not the Feature itself;
+   *
+   *   Risk, which Serva COMPUTES from persisted canon rather than asking anybody, so it
+   *   is not agent output at all.
+   *
+   * Each entry states why. `authorityRefusal` accepts them and refuses one with no reason,
+   * and a catalogue test enumerates the whole set — so this list can grow, but only
+   * deliberately and only in a diff somebody has to read. See SF-12.
+   */
+  readonly producesBeyondContract?: readonly {
+    readonly type: ArtifactType;
+    readonly why: string;
+  }[];
+
+  /**
    * Actors this run must NOT be.
    *
    * SPEC: §40. A requirements verifier that is the requirements author verifies nothing;
@@ -182,7 +220,7 @@ export interface DepartmentConfig<S extends z.ZodTypeAny = z.ZodTypeAny> {
    * The runner owns the transaction and commits it. A department that opened its own
    * would be able to leave half its artifacts behind on a failure.
    */
-  persist(tx: Transaction, output: z.output<S>, ctx: DepartmentContext): PersistResult;
+  persist(tx: ScopedCanonWriter, output: z.output<S>, ctx: DepartmentContext): PersistResult;
 }
 
 export const DepartmentOutcome = {

@@ -95,6 +95,7 @@ export const costDepartment: DepartmentConfig<typeof CostOutputSchema> = {
   stageId: 'SC-STAGE-015',
   agentId: COST,
   title: 'Cost Engineering',
+  produces: [ARTIFACT_TYPES.COST_MODEL, ARTIFACT_TYPES.COST_ASSESSMENT],
   outputSchema: CostOutputSchema,
   outputJsonSchema: jsonSchemaFor(CostOutputSchema),
   requires: [ARTIFACT_TYPES.REQUIREMENT],
@@ -299,6 +300,12 @@ export const infrastructureDepartment: DepartmentConfig<typeof InfrastructureOut
   stageId: 'SC-STAGE-020',
   agentId: INFRA,
   title: 'Infrastructure Architecture',
+  produces: [
+    ARTIFACT_TYPES.ENVIRONMENT_MODEL,
+    ARTIFACT_TYPES.DEPLOYMENT_STRATEGY,
+    ARTIFACT_TYPES.OBSERVABILITY_SPEC,
+    ARTIFACT_TYPES.ROLLBACK_SPEC,
+  ],
   outputSchema: InfrastructureOutputSchema,
   outputJsonSchema: jsonSchemaFor(InfrastructureOutputSchema),
   requires: [ARTIFACT_TYPES.ARCHITECTURE_MODEL],
@@ -428,39 +435,10 @@ export const TestOutputSchema = z
       )
       .default([]),
     outOfScope: z.array(z.string().min(1)).default([]),
-    cases: z
-      .array(
-        z
-          .object({
-            title: z.string().min(1),
-            derivedFromIds: z.array(z.string().min(1)).min(1),
-            level: z.enum([
-              'UNIT',
-              'INTEGRATION',
-              'CONTRACT',
-              'END_TO_END',
-              'MANUAL',
-              'SECURITY',
-              'PERFORMANCE',
-              'ACCESSIBILITY',
-            ]),
-            kind: z.enum([
-              'HAPPY_PATH',
-              'NEGATIVE',
-              'BOUNDARY',
-              'PERMISSION',
-              'STATE_TRANSITION',
-              'ERROR_HANDLING',
-              'REGRESSION',
-              'BUSINESS_INVARIANT',
-              'SECURITY_BEHAVIOUR',
-            ]),
-            steps: z.array(z.string().min(1)).min(1),
-            expected: z.string().min(1),
-          })
-          .strict(),
-      )
-      .default([]),
+    /*
+     * No `cases`. They are SC-AGENT-211's output, and asking for them here would produce
+     * work the runner then refuses to persist.
+     */
   })
   .strict();
 
@@ -470,7 +448,8 @@ export const testDepartment: DepartmentConfig<typeof TestOutputSchema> = {
   id: 'DEPT-TEST-DESIGN',
   stageId: 'SC-STAGE-030',
   agentId: TEST_STRATEGIST,
-  title: 'Test Strategy and Cases',
+  title: 'Test Strategy',
+  produces: [ARTIFACT_TYPES.TEST_STRATEGY],
   outputSchema: TestOutputSchema,
   outputJsonSchema: jsonSchemaFor(TestOutputSchema),
   requires: [ARTIFACT_TYPES.REQUIREMENT],
@@ -523,8 +502,9 @@ export const testDepartment: DepartmentConfig<typeof TestOutputSchema> = {
       'techniques without saying what each one covers cannot answer the only question a',
       'gate asks — is there anything we promised that nothing checks?',
       '',
-      'Write cases for the happy path AND for negatives, boundaries, permissions, state',
-      'transitions, error handling and business invariants.',
+      'You are writing the STRATEGY, not the cases. SC-AGENT-211 writes those, from the',
+      'same specification and without the implementation — say what must be covered and at',
+      'which level, and leave the steps to them.',
       '',
       'You have NOT been shown the implementation. That is deliberate: your cases must',
       'describe what was asked for, not what happens to have been built.',
@@ -534,7 +514,7 @@ export const testDepartment: DepartmentConfig<typeof TestOutputSchema> = {
   },
 
   scopeBoundary(): string {
-    return 'Test strategy and specification-derived cases. Do not execute tests or read implementation.';
+    return 'Test strategy only. Do not write individual test cases, execute tests, or read implementation.';
   },
 
   persist(tx, output, ctx) {
@@ -574,6 +554,178 @@ export const testDepartment: DepartmentConfig<typeof TestOutputSchema> = {
     });
     ids.push(strategyId);
 
+    /*
+     * The CASES are not written here. TestCase is SC-AGENT-211's canon, and this
+     * department runs as SC-AGENT-210.
+     *
+     * The strategy says what must be verified and how; the cases say exactly what to do.
+     * Writing both in one run means the coverage map and the cases can never disagree —
+     * which sounds like a virtue and is the opposite. Their disagreement is the signal
+     * that something promised has no case behind it.
+     */
+    return { artifactIds: ids, notes };
+  },
+};
+
+const TEST_CASE_DESIGNER = 'SC-AGENT-211';
+
+export const TestCaseOutputSchema = z
+  .object({
+    cases: z
+      .array(
+        z
+          .object({
+            title: z.string().min(1),
+            derivedFromIds: z.array(z.string().min(1)).min(1),
+            level: z.enum([
+              'UNIT',
+              'INTEGRATION',
+              'CONTRACT',
+              'END_TO_END',
+              'MANUAL',
+              'SECURITY',
+              'PERFORMANCE',
+              'ACCESSIBILITY',
+            ]),
+            kind: z.enum([
+              'HAPPY_PATH',
+              'NEGATIVE',
+              'BOUNDARY',
+              'PERMISSION',
+              'STATE_TRANSITION',
+              'ERROR_HANDLING',
+              'BUSINESS_INVARIANT',
+            ]),
+            steps: z.array(z.string().min(1)).min(1),
+            expected: z.string().min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+    notCovered: z.array(z.string().min(1)).default([]),
+  })
+  .strict();
+
+export const TEST_CASE_JSON_SCHEMA: Record<string, unknown> = jsonSchemaFor(TestCaseOutputSchema);
+
+/**
+ * TEST CASE DESIGN — SC-AGENT-211, stage 030.
+ *
+ * A separate governed run from the strategist, and deliberately a narrower one.
+ *
+ * SPEC §29 is the reason this department exists at all: a case designer shown the
+ * implementation writes cases that pass. They describe what was built rather than what was
+ * asked for, and the gap between those two is the entire point of testing. So the context
+ * here is specification-derived truth only — requirements, acceptance criteria, business
+ * rules, state machines, flows, NFRs — and never code, architecture or technology.
+ *
+ * It reads the strategy to know what coverage was promised. It cannot write it.
+ */
+export const testCaseDepartment: DepartmentConfig<typeof TestCaseOutputSchema> = {
+  id: 'DEPT-TEST-CASES',
+  stageId: 'SC-STAGE-030',
+  agentId: TEST_CASE_DESIGNER,
+  title: 'Test Case Design',
+  produces: [ARTIFACT_TYPES.TEST_CASE],
+  outputSchema: TestCaseOutputSchema,
+  outputJsonSchema: TEST_CASE_JSON_SCHEMA,
+  requires: [ARTIFACT_TYPES.TEST_STRATEGY],
+
+  buildContext(ctx: DepartmentContext): DepartmentContextSpec {
+    const reqs = repository(ctx.store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).list();
+    const acs = repository(
+      ctx.store,
+      ARTIFACT_TYPES.ACCEPTANCE_CRITERION,
+      AcceptanceCriterionSchema,
+    ).list();
+    const nfrs = repository(ctx.store, ARTIFACT_TYPES.NFR, NfrSchema).list();
+    const rules = repository(ctx.store, ARTIFACT_TYPES.BUSINESS_RULE, BusinessRuleSchema).list();
+    const machines = repository(ctx.store, ARTIFACT_TYPES.STATE_MACHINE, StateMachineSchema).list();
+    const flows = repository(ctx.store, ARTIFACT_TYPES.FLOW, FlowSchema).list();
+    const strategies = repository(
+      ctx.store,
+      ARTIFACT_TYPES.TEST_STRATEGY,
+      TestStrategySchema,
+    ).list();
+
+    return {
+      canon: [
+        contextFrom('requirements', 'REQUIREMENT', reqs, (r) => r.id + ': ' + r.statement, 1),
+        contextFrom('acceptance', 'ACCEPTANCE', acs, (a) => a.id + ': ' + a.criterion, 1),
+        contextFrom('nfrs', 'NFR', nfrs, (n) => n.id + ': ' + n.target, 1),
+        contextFrom('rules', 'BUSINESS_RULE', rules, (r) => r.id + ': ' + r.statement, 1),
+        contextFrom(
+          'state-machines',
+          'STATE_MACHINE',
+          machines,
+          (m) => m.transitions.map((t) => t.from + '->' + t.to + ' when ' + t.guard).join('; '),
+          1,
+        ),
+        contextFrom('flows', 'FLOW', flows, (f) => f.id + ': ' + f.name, 1),
+        contextFrom(
+          'strategy',
+          'TEST_STRATEGY',
+          strategies,
+          (t) => t.coverage.map((c) => c.targetRef.id + ' at ' + c.level).join('; '),
+          0.9,
+        ),
+      ].filter((c): c is NonNullable<typeof c> => c !== undefined),
+      excluded: [
+        {
+          /* SPEC §29. The exclusion IS the department. */
+          subject: 'any implementation, code or technical design',
+          reason:
+            'a case designer shown the implementation writes cases that pass: they describe what was built rather than what was asked for, and the gap between those two is what testing exists to find',
+        },
+        {
+          subject: 'the architecture and technology decisions',
+          reason: 'a specification-derived case must not depend on how the system was built',
+        },
+      ],
+    };
+  },
+
+  task(): string {
+    return [
+      'Write the cases the strategy promised.',
+      '',
+      'Every case derives from something specific — a requirement, an acceptance criterion,',
+      'a business rule, a state transition, an NFR or a flow — and names it. A case that',
+      'derives from nothing verifies nothing, however sensible it looks.',
+      '',
+      'Cover the happy path AND the negatives, boundaries, permissions, state transitions,',
+      'error handling and business invariants. The happy path is the part that gets tested',
+      'anyway; the rest is why this stage exists.',
+      '',
+      'You have NOT been shown the implementation, and that is deliberate. Describe what',
+      'the specification asks for. If the specification is ambiguous, say so rather than',
+      'resolving it — resolving it invents a requirement nobody agreed to.',
+      '',
+      'State what you are deliberately NOT covering.',
+    ].join('\n');
+  },
+
+  scopeBoundary(): string {
+    return 'Specification-derived test cases only. Do not write the test strategy, execute anything, or read implementation.';
+  },
+
+  persist(tx, output, ctx) {
+    const ids: string[] = [];
+    const notes: string[] = [];
+    const at = ctx.clock.now();
+
+    const traceable = new Set<string>([
+      ...repository(ctx.store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).ids(),
+      ...repository(
+        ctx.store,
+        ARTIFACT_TYPES.ACCEPTANCE_CRITERION,
+        AcceptanceCriterionSchema,
+      ).ids(),
+      ...repository(ctx.store, ARTIFACT_TYPES.NFR, NfrSchema).ids(),
+      ...repository(ctx.store, ARTIFACT_TYPES.BUSINESS_RULE, BusinessRuleSchema).ids(),
+      ...repository(ctx.store, ARTIFACT_TYPES.FLOW, FlowSchema).ids(),
+    ]);
+
     for (const c of output.cases) {
       const real = c.derivedFromIds.filter((d) => traceable.has(d));
       if (real.length === 0) {
@@ -591,13 +743,17 @@ export const testDepartment: DepartmentConfig<typeof TestOutputSchema> = {
         preconditions: [],
         steps: c.steps,
         expected: c.expected,
-        /* Derived from the specification, with no implementation in context. */
+        /*
+         * FALSE, and structurally guaranteed rather than promised: the context this run
+         * received contains no implementation, so it could not have been informed by one.
+         */
         implementationInformed: false,
-        meta: derived(ctx, TEST_STRATEGIST, real, 'case derived from the specification'),
+        meta: derived(ctx, TEST_CASE_DESIGNER, real, 'case derived from the specification'),
       });
       ids.push(id);
     }
 
+    for (const n of output.notCovered) notes.push('deliberately not covered: ' + n);
     return { artifactIds: ids, notes };
   },
 };
@@ -711,6 +867,13 @@ export const riskDepartment: DepartmentConfig<z.ZodTypeAny> = {
   stageId: 'SC-STAGE-016',
   agentId: 'SC-AGENT-001',
   title: 'Risk Aggregation',
+  produces: [ARTIFACT_TYPES.RISK],
+  producesBeyondContract: [
+    {
+      type: ARTIFACT_TYPES.RISK,
+      why: 'Serva COMPUTES the risk register from persisted canon with no model call, so it is not agent output at all and no contract claims it. SF-12.',
+    },
+  ],
   outputSchema: z.unknown(),
   outputJsonSchema: {},
   deterministic: true,
@@ -743,4 +906,6 @@ export const PLANNING_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
   costDepartment as DepartmentConfig,
   infrastructureDepartment as DepartmentConfig,
   testDepartment as DepartmentConfig,
+  /* SC-AGENT-211 writes the cases the strategy promised, with no implementation. */
+  testCaseDepartment as DepartmentConfig,
 ]);
