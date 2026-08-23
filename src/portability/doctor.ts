@@ -402,17 +402,26 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
   };
 }
 
-/** The owner-facing lines, aligned. What `serva machine doctor` prints. */
+/**
+ * The owner-facing lines, aligned.
+ *
+ * Alignment is not decoration here. This is read under stress — something is broken and
+ * somebody is scanning for the word that is not READY — and a column that wanders because
+ * one project path was long is a column nobody can scan.
+ */
 export function renderDoctor(report: DoctorReport): string {
-  const width = 24;
-  const lines = report.checks.map(
-    (c) => c.label.padEnd(width, ' ').replace(/ (?= *$)/g, '.') + ' ' + c.state,
-  );
+  const WIDTH = 24;
+  const row = (label: string, state: string): string => {
+    /* Long labels are elided from the LEFT: the end of a path identifies it, not the start. */
+    const shown =
+      label.length <= WIDTH ? label.padEnd(WIDTH, '.') : '…' + label.slice(-(WIDTH - 1));
+    return shown + ' ' + state;
+  };
   return [
     'Serva Code ' + report.servaVersion,
     '',
-    ...lines,
-    'Machine qualification'.padEnd(width, '.') + ' ' + report.qualification,
+    ...report.checks.map((c) => row(c.label, c.state)),
+    row('Machine qualification', report.qualification),
     '',
     report.summary,
     ...report.checks

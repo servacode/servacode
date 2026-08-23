@@ -1,0 +1,90 @@
+SERVA CODE — REAL PORTABILITY WALKTHROUGH
+========================================================================
+Workspace: C:\Users\adzor\AppData\Local\Temp\serva-walkthrough-kKbnam
+
+1. CREATE A DISPOSABLE PROJECT
+Initialized Serva project
+  id       SC-PROJ-01M0R9CA1H000C9Y8FBZ9
+  name     WalkthroughShop
+  root     C:\Users\adzor\AppData\Local\Temp\serva-walkthrough-kKbnam\disposable-project
+  store    C:\Users\adzor\AppData\Local\Temp\serva-walkthrough-kKbnam\disposable-project\.serva
+  profile  PRF-NEW-PRODUCT
+
+The Idea has been recorded verbatim and is immutable (03 §2).
+Next: serva status
+
+   files in the project: 4
+
+2. WRITE A VERIFIED BACKUP
+1 project(s), 4 file(s), 1.2 KB — verified
+
+3. PROVE THE BACKUP BEFORE RELYING ON IT
+verified: 4 file(s), 1.2 KB, 1 project(s)
+   exit code: 0  (verified)
+
+4. INSPECT THE RESTORE — THIS WRITES NOTHING
+1 project(s), 4 file(s), 1.2 KB — ready to restore
+  PRJ-disposable-project → C:\Users\adzor\AppData\Local\Temp\serva-walkthrough-kKbnam\restored\PRJ-disposable-project (4 files, EMPTY)
+
+What will NOT be restored:
+  - Machine qualification — HARD is a property of a computer, not of a project. This machine begins UNQUALIFIED and must be measured before write-capable engineering runs.
+  - Claude authentication — credentials are never carried in a backup. Sign in on this machine.
+
+Nothing was written. Re-run with --confirm to restore.
+
+5. RESTORE INTO A SEPARATE FRESH LOCATION
+1 project(s), 4 file(s), 1.2 KB — ready to restore
+  PRJ-disposable-project → C:\Users\adzor\AppData\Local\Temp\serva-walkthrough-kKbnam\restored\PRJ-disposable-project (4 files, EMPTY)
+
+What will NOT be restored:
+  - Machine qualification — HARD is a property of a computer, not of a project. This machine begins UNQUALIFIED and must be measured before write-capable engineering runs.
+  - Claude authentication — credentials are never carried in a backup. Sign in on this machine.
+1 project(s) restored, 4 file(s), 1.2 KB
+  - This machine is UNQUALIFIED. Project truth, history, decisions and evidence are restored; the authority to run write-capable engineering is not, because it was never a property of the project.
+
+6. INVENTORY EQUIVALENCE
+   original:  4 files
+   restored:  4 files
+   excluded by policy: .serva/backups
+   every non-excluded file came back.
+
+7. MACHINE-BOUND AUTHORITY WAS NOT CARRIED
+   canon families restored: 1
+   no machine-bound family is present.
+   manifest records as never carried: machine.qualification, machine.identity, engineering.boundary, engineering.osQualification
+
+8. NO CREDENTIAL TRAVELLED
+   nothing in the bundle matches a credential shape.
+
+9. THE RESTORED PROJECT STILL NEEDS THIS MACHINE TO BE MEASURED
+Serva Code 1.0.0
+
+Machine................. READY
+Node.................... READY
+WSL2.................... READY
+Linux guest............. READY
+Claude Code............. READY
+Claude subscription..... READY
+Sandbox................. READY
+Windows interop......... READY
+Git..................... READY
+…\PRJ-disposable-project READY
+Machine qualification... UNQUALIFIED
+
+prerequisites are present; this machine is not qualified — this machine has never been qualified, so write-capable engineering may not run on it
+   exit code: 1  (engineering NOT permitted)
+
+10. THE RESTORED PROJECT, AS THE OWNER SEES IT
+SERVA CODE 1.0.0
+
+Project: PRJ-disposable-project
+Status:  NOT_STARTED
+
+The project exists and the company has not run yet.
+Next:    Start the company on this project.
+
+Machine: UNQUALIFIED — this machine has not been measured, so write-capable engineering cannot run on it
+Release: NOT_VERIFIED
+
+========================================================================
+The project came back. The clearance did not.
