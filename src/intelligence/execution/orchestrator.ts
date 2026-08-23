@@ -455,11 +455,19 @@ export class IntelligenceOrchestrator {
      * the identical question, the normaliser will correctly report the obligation as
      * already raised, and the lifecycle will deadlock on its own good bookkeeping.
      */
+    const outstandingBlocks: string[] = [];
     {
       const done = new Set(record.completedDepartments);
       const discharged = await this.dischargeOutstanding(record, done);
       record = discharged.record;
       ran.push(...discharged.ran);
+      /*
+       * An obligation this sweep could not discharge is very likely the reason whatever
+       * comes next cannot proceed. Carrying the reason forward is the difference between
+       * a block that says "the department did not complete" and one that says the evidence
+       * it was waiting on had expired.
+       */
+      outstandingBlocks.push(...discharged.blocked);
     }
 
     const completed = new Set(record.completedStages);
@@ -528,7 +536,7 @@ export class IntelligenceOrchestrator {
         const pending: string[] = [];
         const doneDepartments = new Set(record.completedDepartments);
         /** Obligations that could not be discharged, kept for the block reason. */
-        const obligationBlocks: string[] = [];
+        const obligationBlocks: string[] = [...outstandingBlocks];
         /*
          * True when a department stopped BEFORE writing anything. The stage then does not
          * count as run: resuming must execute it again with the owner's answer in context,

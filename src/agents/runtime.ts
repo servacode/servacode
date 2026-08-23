@@ -1,4 +1,5 @@
 import { EnvelopeStatus, RunOutcome } from '../vocab/index.js';
+import type { TrustLevel } from '../vocab/index.js';
 import { fail, isServaError } from '../core/errors.js';
 import {
   AgentRunEventType,
@@ -96,6 +97,15 @@ export interface AgentRunRequest {
     version: string;
     content: string;
     relevance: number;
+    /**
+     * TRUSTED unless the caller says otherwise (19 §4.2).
+     *
+     * The bundle builder used to place every canon element in TRUSTED CONTEXT, which was
+     * right for governed project truth and wrong for the one thing that is never governed
+     * project truth: text retrieved from somewhere else. This is how that distinction
+     * survives the trip from the department to the persisted bundle.
+     */
+    trust?: TrustLevel;
   }[];
   readonly workspace?: readonly {
     source: string;

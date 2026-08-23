@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { TrustLevel } from '../../vocab/index.js';
 import { IdSchema, IsoSchema } from '../../domain/schemas.js';
 import { digestOf } from '../../core/hash.js';
-import { artifact } from '../artifacts/base.js';
+import { RefSchema, artifact } from '../artifacts/base.js';
 
 /**
  * SOURCE CAPTURE — evidence that outlives the web page.
@@ -67,6 +67,18 @@ export const SourceCaptureSchema = artifact({
   validUntil: IsoSchema,
   /** Publication or last-modified date where the source states one. */
   sourceDate: IsoSchema.optional(),
+  /**
+   * The ResearchRequest that authorised this retrieval.
+   *
+   * SPEC: §10. Matching on the question text was not enough to establish that a current
+   * obligation had already been satisfied: two requests can ask the same words, and a
+   * capture fetched for one of them is not evidence that the other was answered. This is
+   * the durable relation, so reuse can be exact rather than approximate.
+   *
+   * Optional only because captures predating the field exist; a capture with no request
+   * ref is never reused to discharge an obligation.
+   */
+  requestRef: RefSchema.optional(),
 });
 export type SourceCapture = z.output<typeof SourceCaptureSchema>;
 
@@ -140,6 +152,38 @@ export function sanitizeForContext(c: SourceCapture): SanitizedSource {
     '--- END UNTRUSTED RETRIEVED CONTENT ---',
   ].join('\n');
   return { text, flags };
+}
+
+/**
+ * A captured source, as a context element — permanently UNTRUSTED.
+ *
+ * The single place any department turns a capture into something an agent can read, so the
+ * trust marking cannot be forgotten at one call site and remembered at another. The fenced
+ * prose is defence in depth; `trust` is the defence, because it is what reaches the
+ * ContextBundle, the persisted record and the UNTRUSTED region of the prompt.
+ *
+ * STORED IS NOT TRUSTED. A capture living inside Serva's Store is still text somebody else
+ * wrote, and the fact that Serva kept a copy changes nothing about who authored it.
+ */
+export function capturedEvidenceElement(c: SourceCapture): {
+  readonly source: string;
+  readonly kind: string;
+  readonly version: string;
+  readonly content: string;
+  readonly relevance: number;
+  readonly trust: TrustLevel;
+  readonly flags: readonly string[];
+} {
+  const { text, flags } = sanitizeForContext(c);
+  return {
+    source: 'capture:' + c.id,
+    kind: 'RETRIEVED_SOURCE',
+    version: '1',
+    content: text,
+    relevance: 1,
+    trust: TrustLevel.UNTRUSTED,
+    flags,
+  };
 }
 
 /**

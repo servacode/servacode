@@ -16,7 +16,12 @@ import {
 } from '../src/intelligence/artifacts/discovery.js';
 import { ResearchRequestSchema } from '../src/intelligence/research/capture.js';
 import { configureResearchSeeds } from '../src/intelligence/research/seeds.js';
-import { marketResearchDepartment } from '../src/intelligence/departments/research.js';
+import {
+  marketResearchDepartment,
+  sourceVerificationDepartment,
+} from '../src/intelligence/departments/research.js';
+import { ResearchFindingSchema } from '../src/intelligence/artifacts/market.js';
+import { ClaimVerificationSchema } from '../src/intelligence/research/verification.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { Retriever } from '../src/intelligence/research/gateway.js';
 import type { DepartmentConfig } from '../src/intelligence/execution/types.js';
@@ -46,6 +51,7 @@ const WORK_ITEM = 'SC-WI-003000';
 const REQUESTER = 'SC-AGENT-052';
 const DATA_ARCHITECT = 'SC-AGENT-080';
 const RESEARCHER = 'SC-AGENT-060';
+const VERIFIER = 'SC-AGENT-063';
 
 /* Every upstream stage except the two each scenario actually wires. */
 const KEEP = (...stages: readonly string[]): Record<string, string> => {
@@ -303,6 +309,40 @@ function researchEnvelope(h: Harness): Record<string, unknown> {
   });
 }
 
+/**
+ * The verifier's verdict, built from whatever findings exist when it runs.
+ *
+ * Lazily, because a verdict names the finding it judges and the findings do not exist
+ * until the researcher has run. A fixture with a hard-coded id would be a test agreeing
+ * with itself rather than with the system.
+ */
+function verificationEnvelope(h: Harness, verdict: string): () => Record<string, unknown> {
+  return () =>
+    envelope({
+      verifications: repository(h.store, ARTIFACT_TYPES.RESEARCH_FINDING, ResearchFindingSchema)
+        .list()
+        .map((f) => ({
+          findingId: f.id,
+          verdict,
+          reasoning:
+            verdict === 'SUPPORTED'
+              ? 'the captured page states the two-hour window in those words'
+              : 'the captured page says nothing about collection windows',
+        })),
+    });
+}
+
+/** The full research chain: retrieve, then verify, then nobody else. */
+function researchChain(): readonly DepartmentConfig[] {
+  return [
+    requester(),
+    marketResearchDepartment as DepartmentConfig,
+    sourceVerificationDepartment as DepartmentConfig,
+  ];
+}
+
+const RESEARCH_AGENTS = [REQUESTER, RESEARCHER, VERIFIER];
+
 /* ==================================================================== RESEARCH */
 
 describe('a research obligation is consumed, not merely recorded', () => {
@@ -314,8 +354,8 @@ describe('a research obligation is consumed, not merely recorded', () => {
     h.engine.script(REQUESTER, { structuredOutput: asking(COMPETITOR_QUESTION) });
 
     const orch = orchestrator(h, {
-      departments: [requester(), marketResearchDepartment as DepartmentConfig],
-      enabled: [REQUESTER, RESEARCHER],
+      departments: researchChain(),
+      enabled: RESEARCH_AGENTS,
       skip: KEEP('SC-STAGE-011', 'SC-STAGE-013'),
       withGateway: true,
     });
@@ -323,9 +363,10 @@ describe('a research obligation is consumed, not merely recorded', () => {
     /*
      * The researcher's answer is scripted lazily, because it must cite the capture ids
      * Serva creates while discharging the obligation — which do not exist until the
-     * gateway has run.
+     * gateway has run. The verifier's is lazy for the same reason.
      */
     h.engine.script(RESEARCHER, { structuredOutputFrom: () => researchEnvelope(h) });
+    h.engine.script(VERIFIER, { structuredOutputFrom: verificationEnvelope(h, 'SUPPORTED') });
     h.engine.script(REQUESTER, {
       structuredOutput: envelope({ note: 'the evidence answers it; proceeding' }),
     });
@@ -347,11 +388,32 @@ describe('a research obligation is consumed, not merely recorded', () => {
     expect(captures.length).toBeGreaterThan(0);
     expect(h.store.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING).length).toBeGreaterThan(0);
 
+    /* Independently verified, by a different agent, in a different governed run. */
+    const verifications = repository(
+      h.store,
+      ARTIFACT_TYPES.CLAIM_VERIFICATION,
+      ClaimVerificationSchema,
+    ).list();
+    expect(verifications.length).toBeGreaterThan(0);
+    expect(verifications[0]?.verifiedByAgentId).toBe(VERIFIER);
+
     /* The obligation is FULFILLED, and says which canon fulfilled it. */
     const questions = repository(h.store, ARTIFACT_TYPES.OPEN_QUESTION, OpenQuestionSchema).list();
     expect(questions).toHaveLength(1);
     expect(questions[0]?.state).toBe('ANSWERED');
-    expect(questions[0]?.resolvedByRefs.length).toBeGreaterThan(0);
+
+    /*
+     * BOUNDED REFS. The verified conclusion and the judgement that made it one — never
+     * the ResearchRequest, and never a raw SourceCapture. Handing back everything the
+     * researcher's run touched is how retrieved text used to arrive downstream dressed as
+     * governed canon.
+     */
+    const refs = questions[0]?.resolvedByRefs.map((r) => r.id) ?? [];
+    expect(refs.length).toBeGreaterThan(0);
+    for (const id of refs) {
+      expect(captures).not.toContain(id);
+      expect(id).not.toBe(requests[0]?.id);
+    }
 
     /* The requester resumed and completed. Nobody asked the owner anything. */
     expect(h.store.listCanonIds(ARTIFACT_TYPES.OWNER_DECISION_REQUEST)).toHaveLength(0);
@@ -368,8 +430,8 @@ describe('a research obligation is consumed, not merely recorded', () => {
     h.engine.script(REQUESTER, { structuredOutput: asking(COMPETITOR_QUESTION) });
 
     const orch = orchestrator(h, {
-      departments: [requester(), marketResearchDepartment as DepartmentConfig],
-      enabled: [REQUESTER, RESEARCHER],
+      departments: researchChain(),
+      enabled: RESEARCH_AGENTS,
       skip: KEEP('SC-STAGE-011', 'SC-STAGE-013'),
       withGateway: true,
     });
@@ -396,8 +458,8 @@ describe('a research obligation is consumed, not merely recorded', () => {
      */
     first.engine.script(REQUESTER, { structuredOutput: asking(COMPETITOR_QUESTION) });
     const before = await orchestrator(first, {
-      departments: [requester(), marketResearchDepartment as DepartmentConfig],
-      enabled: [REQUESTER, RESEARCHER],
+      departments: researchChain(),
+      enabled: RESEARCH_AGENTS,
       skip: KEEP('SC-STAGE-011', 'SC-STAGE-013'),
       withGateway: true,
     }).advance();
@@ -415,13 +477,14 @@ describe('a research obligation is consumed, not merely recorded', () => {
     /* A new process, a new engine, nothing carried but the Store. */
     const h = reopen(first);
     h.engine.script(RESEARCHER, { structuredOutputFrom: () => researchEnvelope(h) });
+    h.engine.script(VERIFIER, { structuredOutputFrom: verificationEnvelope(h, 'SUPPORTED') });
     h.engine.script(REQUESTER, {
       structuredOutput: envelope({ note: 'resuming from the persisted evidence' }),
     });
 
     await orchestrator(h, {
-      departments: [requester(), marketResearchDepartment as DepartmentConfig],
-      enabled: [REQUESTER, RESEARCHER],
+      departments: researchChain(),
+      enabled: RESEARCH_AGENTS,
       skip: KEEP('SC-STAGE-011', 'SC-STAGE-013'),
       withGateway: true,
     }).advance();

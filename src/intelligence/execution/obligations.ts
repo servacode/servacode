@@ -1,6 +1,18 @@
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import { OpenQuestionSchema, OpenQuestionState } from '../artifacts/framing.js';
-import { ResearchRequestSchema, SourceCaptureSchema } from '../research/capture.js';
+import {
+  ResearchRequestSchema,
+  SourceCaptureSchema,
+  captureIsIntact,
+} from '../research/capture.js';
+import { ResearchFindingSchema } from '../artifacts/market.js';
+import {
+  ClaimVerificationSchema,
+  claimIsAuthoritative,
+  verificationRefusal,
+} from '../research/verification.js';
+import { assessFreshness } from '../research/freshness.js';
+import { ValidityState } from '../../vocab/index.js';
 import { AuditAction, audit } from '../../events/audit.js';
 import { runDepartment } from './runner.js';
 import { DepartmentOutcome } from './types.js';
@@ -10,6 +22,9 @@ import type { GatewayDeps } from '../research/gateway.js';
 import type { OpenQuestion } from '../artifacts/framing.js';
 import type { ArtifactType } from '../repository.js';
 import type { Store } from '../../store/store.js';
+import type { ResearchRequest, SourceCapture } from '../research/capture.js';
+import type { ResearchFinding } from '../artifacts/market.js';
+import type { ClaimVerification } from '../research/verification.js';
 
 /**
  * RECORDING AN OBLIGATION IS NOT DISCHARGING ONE.
@@ -174,9 +189,11 @@ export async function dischargeObligations(
         : await dischargeUpstream(deps, question, o.plan, o.workItemId, done);
 
     if (outcome.ran !== undefined) ran.push(outcome.ran);
-    if (outcome.completedDepartment !== undefined) {
-      completedDepartments.push(outcome.completedDepartment);
-      done.add(outcome.completedDepartment);
+    for (const id of outcome.extraCompleted ??
+      (outcome.completedDepartment === undefined ? [] : [outcome.completedDepartment])) {
+      if (done.has(id)) continue;
+      completedDepartments.push(id);
+      done.add(id);
     }
     if (outcome.blocked !== undefined) {
       blocked.push(outcome.blocked);
@@ -195,18 +212,167 @@ interface Discharge {
   readonly blocked?: string;
   readonly ran?: DepartmentResult;
   readonly completedDepartment?: string;
+  /** Every department this discharge ran to completion. A research chain runs two. */
+  readonly extraCompleted?: readonly string[];
 }
 
 const NOTHING = { answer: '', refs: [] as readonly string[] };
 
 /**
- * Hand a research obligation to the canonical research authority.
+ * The evidence that exists for one research request, and whether it may be relied on.
  *
- * The authority is resolved from the registered configuration, not named here: it is the
- * department that declares `usesResearchGateway`, which is the same declaration the runner
- * checks before it will route a question to research at all. Where none is registered, or
- * where the profile does not run its stage, the obligation is BLOCKED with that as the
- * reason — never quietly reassigned to the owner.
+ * EXACT, VERIFIED AND CURRENT — all three, or it is not evidence for THIS obligation.
+ *
+ * Matching on the question text was the previous rule and it was not enough. Two requests
+ * can ask identical words: a capture fetched under one of them proves nothing about the
+ * other, and reusing it would let an unrelated piece of research silently discharge a
+ * current obligation. So the relation is the `requestRef` the gateway stamps at retrieval.
+ *
+ * Currency is assessed with the canonical freshness model rather than a second rule
+ * invented here, and staleness propagates: a finding resting on an expired capture is
+ * expired too, however recently somebody wrote the finding down.
+ */
+interface ResearchEvidence {
+  /** Captures fetched under this exact request, intact and current. */
+  readonly captures: readonly SourceCapture[];
+  /** Captures for this request that have expired or been altered. */
+  readonly unusable: readonly string[];
+  /** Findings resting on those captures. */
+  readonly findings: readonly ResearchFinding[];
+  /** Findings whose verification is authoritative, independent and intact. */
+  readonly authoritative: readonly ResearchFinding[];
+  /** The verifications that made them so. */
+  readonly verifications: readonly ClaimVerification[];
+  /** Why a finding may not be relied on, in the canonical vocabulary. */
+  readonly refusals: readonly string[];
+  /** True when every finding has been judged by a verifier. */
+  readonly verified: boolean;
+}
+
+function researchEvidence(deps: ObligationDeps, request: ResearchRequest): ResearchEvidence {
+  const allCaptures = repository(
+    deps.store,
+    ARTIFACT_TYPES.SOURCE_CAPTURE,
+    SourceCaptureSchema,
+  ).list();
+  /* Bound to THIS authorisation. A capture with no request ref is never reused. */
+  const mine = allCaptures.filter((c) => c.requestRef?.id === request.id);
+
+  const allFindings = repository(
+    deps.store,
+    ARTIFACT_TYPES.RESEARCH_FINDING,
+    ResearchFindingSchema,
+  ).list();
+  const mineIds = new Set(mine.map((c) => c.id));
+  const findings = allFindings.filter((f) => f.sources.some((r) => mineIds.has(r.captureId)));
+
+  /* Freshness across the real dependency graph: findings rest on captures. */
+  const verdicts = new Map(
+    assessFreshness(
+      [
+        ...mine.map((c) => ({ id: c.id, validUntil: c.validUntil })),
+        ...findings.map((f) => ({
+          id: f.id,
+          validUntil: f.freshness.validUntil,
+          dependsOn: f.sources.map((r) => r.captureId),
+        })),
+      ],
+      deps.clock,
+    ).map((v) => [v.id, v]),
+  );
+
+  const unusable: string[] = [];
+  const usable: SourceCapture[] = [];
+  for (const c of mine) {
+    if (!captureIsIntact(c)) {
+      unusable.push('capture ' + c.id + ' no longer matches its content digest');
+      continue;
+    }
+    if (verdicts.get(c.id)?.state === ValidityState.STALE) {
+      unusable.push('capture ' + c.id + ' expired on ' + c.validUntil);
+      continue;
+    }
+    usable.push(c);
+  }
+
+  const allVerifications = repository(
+    deps.store,
+    ARTIFACT_TYPES.CLAIM_VERIFICATION,
+    ClaimVerificationSchema,
+  ).list();
+
+  const authoritative: ResearchFinding[] = [];
+  const verifications: ClaimVerification[] = [];
+  const refusals: string[] = [];
+  let judged = 0;
+
+  for (const f of findings) {
+    const forThis = allVerifications.filter((v) => v.claimRef.id === f.id);
+    if (forThis.length === 0) continue;
+    judged += 1;
+
+    if (verdicts.get(f.id)?.state === ValidityState.STALE) {
+      refusals.push(
+        'finding ' + f.id + ' is stale: ' + (verdicts.get(f.id)?.reason ?? 'it has expired'),
+      );
+      continue;
+    }
+
+    let accepted: ClaimVerification | undefined;
+    for (const v of forThis) {
+      const refusal = verificationRefusal(v, {
+        ...(f.meta.attribution.runId === undefined ? {} : { claimRunId: f.meta.attribution.runId }),
+        ...(f.meta.attribution.agentId === undefined
+          ? {}
+          : { claimAgentId: f.meta.attribution.agentId }),
+        captures: mine,
+      });
+      if (refusal !== undefined) {
+        refusals.push(refusal);
+        continue;
+      }
+      if (!claimIsAuthoritative(v)) {
+        refusals.push('finding ' + f.id + ' was judged ' + v.verdict + ': ' + v.reasoning);
+        continue;
+      }
+      accepted = v;
+      break;
+    }
+    if (accepted === undefined) continue;
+    authoritative.push(f);
+    verifications.push(accepted);
+  }
+
+  return {
+    captures: usable,
+    unusable,
+    findings,
+    authoritative,
+    verifications,
+    refusals,
+    verified: findings.length > 0 && judged === findings.length,
+  };
+}
+
+/**
+ * Hand a research obligation to the canonical research authority, and then to its verifier.
+ *
+ * RETRIEVED IS NOT ESTABLISHED. The previous version resolved the obligation the moment
+ * SC-AGENT-060 completed, which meant a downstream department resumed on findings nobody
+ * had checked against the sources they cite — and the whole point of a separate Source
+ * Verifier is that the researcher's own confidence is not evidence. `SOURCE_MISSING` is
+ * the most common real failure in research, and it was being routed straight into the
+ * requirements of another department.
+ *
+ * The chain, in three governed steps, each resumable on its own:
+ *
+ *   exact ResearchRequest -> SC-AGENT-060 -> SourceCapture (UNTRUSTED) + ResearchFinding
+ *   -> SC-AGENT-063, which cannot fetch and may not be the claimant -> ClaimVerification
+ *   -> only findings whose verdict is authoritative discharge the obligation.
+ *
+ * Each step is skipped when its result already exists for this exact request, so a process
+ * that died between retrieval and verification resumes at verification rather than paying
+ * for the retrieval again.
  */
 async function dischargeResearch(
   deps: ObligationDeps,
@@ -232,117 +398,192 @@ async function dischargeResearch(
     };
   }
 
-  /*
-   * ALREADY RETRIEVED? Then discharge without spending anything.
-   *
-   * A process that captured sources and died before recording the answer must not pay for
-   * the same retrieval again on resume. The captures carry the question they were fetched
-   * for, so this is a fact about the Store rather than a guess about history.
-   */
-  const captured = repository(deps.store, ARTIFACT_TYPES.SOURCE_CAPTURE, SourceCaptureSchema)
-    .list()
-    .filter((c) => c.researchQuestion === request.question);
-  const priorFindings = findingsFor(
-    deps.store,
-    captured.map((c) => c.id),
-  );
-  if (priorFindings.length > 0) {
+  const ran: DepartmentResult[] = [];
+  const completed: string[] = [];
+
+  /* ---------------------------------------- 1. retrieve, unless it has already happened */
+
+  let evidence = researchEvidence(deps, request);
+  if (evidence.findings.length === 0 || evidence.captures.length === 0) {
+    const stale =
+      evidence.unusable.length === 0
+        ? ''
+        : ' (previous evidence is unusable: ' + evidence.unusable.join('; ') + ')';
+
+    const researcher = deps.departments.find((d) => d.usesResearchGateway === true);
+    if (researcher === undefined) {
+      return {
+        ...NOTHING,
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' cannot be discharged: no registered department declares research authority, so nobody may retrieve for it',
+      };
+    }
+    if (done.has(researcher.id)) {
+      return {
+        ...NOTHING,
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' is still open although ' +
+          researcher.title +
+          ' has already run: the retrieval it needs produced nothing that answers it' +
+          stale,
+      };
+    }
+    const ctx = contextFor(deps, researcher, {
+      workItemId,
+      plan,
+      obligation: {
+        questionId: question.id,
+        requestId: request.id,
+        question: request.question,
+      },
+    });
+    if (ctx === undefined) {
+      return {
+        ...NOTHING,
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' is owed by ' +
+          researcher.stageId +
+          ', which ' +
+          plan.profileId +
+          ' does not include: the profile and the obligation contradict each other',
+      };
+    }
+    const result = await runDepartment(deps, researcher, ctx);
+    ran.push(result);
+    if (result.outcome !== DepartmentOutcome.COMPLETED) {
+      return {
+        ...NOTHING,
+        ran: result,
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' could not be discharged: ' +
+          (result.reason ?? researcher.title + ' did not complete') +
+          stale,
+      };
+    }
+    completed.push(researcher.id);
+    evidence = researchEvidence(deps, request);
+  }
+
+  if (evidence.findings.length === 0) {
     return {
-      answer:
-        'Serva retrieved ' +
-        String(captured.length) +
-        ' source(s) under ' +
+      ...NOTHING,
+      ...(ran[0] === undefined ? {} : { ran: ran[0] }),
+      ...(completed[0] === undefined ? {} : { completedDepartment: completed[0] }),
+      blocked:
+        'research obligation ' +
+        question.id +
+        ' produced no finding tied to request ' +
         request.id +
-        ' and the research authority reported its findings.',
-      refs: [...priorFindings, ...captured.map((c) => c.id)],
+        ', so nothing was established',
     };
   }
 
-  const config = deps.departments.find((d) => d.usesResearchGateway === true);
-  if (config === undefined) {
-    return {
-      ...NOTHING,
-      blocked:
-        'research obligation ' +
-        question.id +
-        ' cannot be discharged: no registered department declares research authority, so nobody may retrieve for it',
-    };
+  /* ------------------------------------------- 2. verify, unless that has happened too */
+
+  if (!evidence.verified) {
+    const verifier = deps.departments.find((d) =>
+      d.produces.includes(ARTIFACT_TYPES.CLAIM_VERIFICATION),
+    );
+    if (verifier === undefined) {
+      return {
+        ...NOTHING,
+        ...(ran[0] === undefined ? {} : { ran: ran[0] }),
+        ...(completed[0] === undefined ? {} : { completedDepartment: completed[0] }),
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' has findings that nobody can verify: no registered department produces ' +
+          ARTIFACT_TYPES.CLAIM_VERIFICATION +
+          '. Unverified research does not become another department\u2019s prerequisite.',
+      };
+    }
+    const ctx = contextFor(deps, verifier, { workItemId, plan });
+    if (ctx === undefined) {
+      return {
+        ...NOTHING,
+        ...(ran[0] === undefined ? {} : { ran: ran[0] }),
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' needs verification from ' +
+          verifier.stageId +
+          ', which ' +
+          plan.profileId +
+          ' does not include',
+      };
+    }
+    const result = await runDepartment(deps, verifier, ctx);
+    ran.push(result);
+    if (result.outcome !== DepartmentOutcome.COMPLETED) {
+      return {
+        ...NOTHING,
+        ran: result,
+        ...(completed[0] === undefined ? {} : { completedDepartment: completed[0] }),
+        blocked:
+          'research obligation ' +
+          question.id +
+          ' could not be verified: ' +
+          (result.reason ?? verifier.title + ' did not complete'),
+      };
+    }
+    completed.push(verifier.id);
+    evidence = researchEvidence(deps, request);
   }
-  if (done.has(config.id)) {
+
+  /* ------------------------------------ 3. only authoritative evidence discharges it */
+
+  if (evidence.authoritative.length === 0) {
+    /*
+     * The research happened and did not establish anything. That is a legitimate result
+     * and the one thing it must not do is let a downstream department proceed as though
+     * the question were settled — which is exactly what resolving here would mean.
+     */
     return {
       ...NOTHING,
+      ...(ran[ran.length - 1] === undefined
+        ? {}
+        : { ran: ran[ran.length - 1] as DepartmentResult }),
+      ...(completed[0] === undefined ? {} : { completedDepartment: completed[0] }),
       blocked:
         'research obligation ' +
         question.id +
-        ' is still open although ' +
-        config.title +
-        ' has already run: the retrieval it needs produced nothing that answers it',
+        ' is NOT fulfilled: no finding survived independent verification. ' +
+        (evidence.refusals.length === 0
+          ? 'Nothing was judged authoritative.'
+          : evidence.refusals.join('; ')) +
+        ' No market truth was recorded from unsupported claims.',
     };
   }
 
-  const ctx = contextFor(deps, config, {
-    workItemId,
-    plan,
-    obligation: {
-      questionId: question.id,
-      requestId: request.id,
-      question: request.question,
-    },
-  });
-  if (ctx === undefined) {
-    return {
-      ...NOTHING,
-      blocked:
-        'research obligation ' +
-        question.id +
-        ' is owed by ' +
-        config.stageId +
-        ', which ' +
-        plan.profileId +
-        ' does not include: the profile and the obligation contradict each other',
-    };
-  }
-
-  const result = await runDepartment(deps, config, ctx);
-  if (result.outcome !== DepartmentOutcome.COMPLETED) {
-    return {
-      ...NOTHING,
-      ran: result,
-      blocked:
-        'research obligation ' +
-        question.id +
-        ' could not be discharged: ' +
-        (result.reason ?? config.title + ' did not complete'),
-    };
-  }
-
+  /*
+   * THE REFS ARE CHOSEN, NOT COPIED.
+   *
+   * Handing back `result.artifactIds` would include the ResearchRequest and every raw
+   * SourceCapture, which is how retrieved text used to arrive in a downstream department's
+   * context as though it were governed canon. What a requester needs is the verified
+   * conclusion and the judgement that made it one; the captures stay linked to the
+   * findings for audit, where they remain untrusted.
+   */
   return {
     answer:
-      'Serva retrieved evidence under research request ' +
+      String(evidence.authoritative.length) +
+      ' finding(s) were established under research request ' +
       request.id +
-      ' and ' +
-      config.title +
-      ' reported what the sources say. The findings are canon; the raw captures are untrusted data.',
-    refs: result.artifactIds,
-    ran: result,
-    completedDepartment: config.id,
+      ' and independently verified: ' +
+      evidence.authoritative.map((f) => f.finding).join(' | '),
+    refs: [...evidence.authoritative.map((f) => f.id), ...evidence.verifications.map((v) => v.id)],
+    ...(ran[ran.length - 1] === undefined ? {} : { ran: ran[ran.length - 1] as DepartmentResult }),
+    ...(completed[0] === undefined ? {} : { completedDepartment: completed[0] }),
+    extraCompleted: completed,
   };
-}
-
-/** Findings that cite any of these captures. */
-function findingsFor(store: Store, captureIds: readonly string[]): readonly string[] {
-  if (captureIds.length === 0) return [];
-  const wanted = new Set(captureIds);
-  const out: string[] = [];
-  for (const id of store.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING)) {
-    const env = store.getCanon<{ readonly sources?: readonly { readonly captureId: string }[] }>(
-      ARTIFACT_TYPES.RESEARCH_FINDING,
-      id,
-    );
-    const refs = env?.body.sources ?? [];
-    if (refs.some((r) => wanted.has(r.captureId))) out.push(id);
-  }
-  return out;
 }
 
 /**

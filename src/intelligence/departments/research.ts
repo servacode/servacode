@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { fail } from '../../core/errors.js';
 import { SourceMarking, TrustLevel } from '../../vocab/index.js';
 import { ContractRegistry } from '../../agents/registry.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
@@ -18,7 +19,7 @@ import { ClaimVerificationSchema, claimIsAuthoritative } from '../research/verif
 import {
   ResearchRequestSchema,
   SourceCaptureSchema,
-  sanitizeForContext,
+  capturedEvidenceElement,
 } from '../research/capture.js';
 import { RetrievalOutcome, retrieveForResearch } from '../research/gateway.js';
 import { DEFAULT_VALIDITY_DAYS, validUntilFrom } from '../research/freshness.js';
@@ -276,19 +277,19 @@ export const marketResearchDepartment: DepartmentConfig<typeof ResearchOutputSch
       };
     }
 
-    /* Every capture is fenced as untrusted data before the model sees a word of it. */
-    const canon = result.captures.map((c) => {
-      const { text, flags } = sanitizeForContext(c);
-      return {
-        source: 'capture:' + c.id,
-        kind: 'RETRIEVED_SOURCE',
-        version: '1',
-        content: text + (flags.length === 0 ? '' : '\n[SERVA FLAGGED: ' + flags.join('; ') + ']'),
-        relevance: 1,
-      };
-    });
+    /*
+     * Every capture enters as an UNTRUSTED element — structurally, not by announcement.
+     * The fence inside the text is defence in depth; `trust` is what puts it in the
+     * untrusted region of the bundle, the persisted record and the prompt.
+     */
+    const elements = result.captures.map((c) => capturedEvidenceElement(c));
+    const canon = elements.map(({ flags, ...e }) => ({
+      ...e,
+      content:
+        e.content + (flags.length === 0 ? '' : '\n[SERVA FLAGGED: ' + flags.join('; ') + ']'),
+    }));
 
-    const injectionFlags = result.captures.flatMap((c) => sanitizeForContext(c).flags);
+    const injectionFlags = elements.flatMap((e) => e.flags);
 
     return {
       canon,
@@ -379,7 +380,16 @@ export const marketResearchDepartment: DepartmentConfig<typeof ResearchOutputSch
             sources: real.map((c) => ({ captureId: c })),
             trust: TrustLevel.UNTRUSTED,
           },
-          attribution: { agentId: RESEARCH_AGENT, at },
+          /*
+           * The run, so a later verification can be checked for independence against a
+           * real thing rather than against nothing. Without it `verificationRefusal`'s
+           * same-run rule compared an undefined against a fabricated id and never fired.
+           */
+          attribution: {
+            agentId: RESEARCH_AGENT,
+            ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
+            at,
+          },
           stageId: ctx.stage.stageId,
           workItemId: ctx.workItemId,
         },
@@ -496,15 +506,20 @@ export const sourceVerificationDepartment: DepartmentConfig<typeof VerificationO
       ),
     ].filter((c): c is NonNullable<typeof c> => c !== undefined);
 
-    /* The captured evidence itself, fenced. This is all the verifier gets. */
+    /*
+     * The captured evidence itself, UNTRUSTED. The verifier reads more hostile text than
+     * any other department in the company — it is the one whose whole job is to look at
+     * what a third party wrote — so it is the last place a trusted marking may slip in.
+     */
     for (const c of captures) {
-      const { text } = sanitizeForContext(c);
+      const evidence = capturedEvidenceElement(c);
       canon.push({
-        source: 'capture:' + c.id,
-        kind: 'CAPTURED_EVIDENCE',
-        version: '1',
-        content: text,
-        relevance: 1,
+        source: evidence.source,
+        kind: evidence.kind,
+        version: evidence.version,
+        content: evidence.content,
+        relevance: evidence.relevance,
+        trust: evidence.trust,
       });
     }
 
@@ -557,6 +572,18 @@ export const sourceVerificationDepartment: DepartmentConfig<typeof VerificationO
     const notes: string[] = [];
     let unsupported = 0;
 
+    const runId = ctx.runId;
+    if (runId === undefined) {
+      return fail({
+        code: 'E_VALIDATION',
+        message: 'Source verification produced no governed run to attribute its verdicts to',
+        remedy:
+          'A ClaimVerification names the run that made it, and that reference is what lets a reader check verification actually happened. Synthesising one would make the check unfailable.',
+        details: { departmentId: 'DEPT-SOURCE-VERIFICATION', agentId: VERIFIER_AGENT },
+        specRef: '§12',
+      });
+    }
+
     for (const v of output.verifications) {
       const finding = findings.find((f) => f.id === v.findingId);
       if (finding === undefined) {
@@ -572,9 +599,23 @@ export const sourceVerificationDepartment: DepartmentConfig<typeof VerificationO
         verdict: v.verdict,
         captureRefs: finding.sources.map((s) => ({ id: s.captureId })),
         reasoning: v.reasoning,
-        verifiedByRunId: 'run:' + id,
+        /*
+         * THE ACTUAL RUN. `'run:' + id` was a string shaped like a run id that named the
+         * verification artifact itself — so `verificationRefusal`'s check that the verifier
+         * was not the claimant compared a real run against a fabrication and could never
+         * fire, and nobody could follow the reference to see whether verification had
+         * happened at all. The runner supplies the real one; where it cannot, this refuses
+         * rather than inventing a substitute.
+         */
+        verifiedByRunId: runId,
         verifiedByAgentId: VERIFIER_AGENT,
-        meta: derived(ctx, VERIFIER_AGENT, [finding.id], 'verified against captured evidence'),
+        meta: derived(
+          ctx,
+          VERIFIER_AGENT,
+          [finding.id],
+          'verified against captured evidence',
+          runId,
+        ),
       });
       ids.push(id);
       if (!claimIsAuthoritative(stored)) {

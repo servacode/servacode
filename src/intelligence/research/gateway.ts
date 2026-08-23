@@ -221,6 +221,8 @@ export async function retrieveForResearch(
         contentDigest: captureDigest(excerpt),
         trust: TrustLevel.UNTRUSTED,
         validUntil: validUntilFrom(retrievedAt, days),
+        /* The authorisation this fetch happened under, so reuse can be exact later. */
+        requestRef: { id: o.request.id },
         ...(page.sourceDate === undefined ? {} : { sourceDate: page.sourceDate }),
         meta: {
           provenance: {

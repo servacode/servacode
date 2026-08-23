@@ -3,6 +3,7 @@ import {
   SourceMarking,
   StageExecutionState,
   StageLedgerDisposition,
+  TrustLevel,
 } from '../../vocab/index.js';
 import { AuditAction, audit } from '../../events/audit.js';
 import { appendLedgerEntry, startStage, transitionStage } from '../../lifecycle/stages.js';
@@ -110,6 +111,12 @@ function canonAsContext(store: Store, id: string): ContextElement | undefined {
       version: String(env.version),
       content: JSON.stringify(env.body),
       relevance: 1,
+      /*
+       * STORED IS NOT TRUSTED. A SourceCapture is text a third party wrote that Serva
+       * kept a copy of, and handing it back as governed truth because it has an id in
+       * the Store is exactly the confusion the trust model exists to prevent.
+       */
+      ...(type === ARTIFACT_TYPES.SOURCE_CAPTURE ? { trust: TrustLevel.UNTRUSTED } : {}),
     };
   }
   return undefined;
@@ -742,6 +749,42 @@ export async function runDepartment<S extends z.ZodTypeAny>(
 
   /* ------------------------------------------------------------- 7b. the run */
 
+  const assembled: readonly ContextElement[] = [
+    ...spec.canon,
+    ...prepared.canon,
+    ...answeredForThisDepartment,
+    ...settledObligations,
+    /* Exactly what an earlier attempt asked for, and nothing more. */
+    ...(ctx.supplied ?? []),
+  ];
+
+  /*
+   * RETRIEVED EVIDENCE MAY NOT ENTER TRUSTED CONTEXT.
+   *
+   * Checked against the STORE, not against a name or a kind string: an element whose
+   * source names a SourceCapture is retrieved text, whatever the department called it.
+   * The bundle's structural marking is the authoritative one, so a department that
+   * assembled a capture as trusted is refused here rather than corrected quietly — a
+   * silent downgrade would leave the next department author making the same mistake with
+   * nothing to notice it.
+   */
+  {
+    const captureIds = new Set(deps.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE));
+    const promoted = assembled.filter(
+      (c) =>
+        c.trust !== TrustLevel.UNTRUSTED && [...captureIds].some((id) => c.source.includes(id)),
+    );
+    if (promoted.length > 0) {
+      return refuse(
+        DepartmentOutcome.REFUSED,
+        config.title +
+          ' assembled retrieved evidence as trusted context: ' +
+          promoted.map((c) => c.source).join(', ') +
+          '. A captured source is data about the world and never governed project truth, however long Serva has stored it.',
+      );
+    }
+  }
+
   let run;
   try {
     run = await deps.runtime.run({
@@ -769,19 +812,14 @@ export async function runDepartment<S extends z.ZodTypeAny>(
         basis:
           'company intelligence run: no filesystem, no execution, no network; any external evidence was retrieved by Serva and is present as untrusted data',
       },
-      canon: [
-        ...spec.canon,
-        ...prepared.canon,
-        ...answeredForThisDepartment,
-        ...settledObligations,
-        /* Exactly what an earlier attempt asked for, and nothing more. */
-        ...(ctx.supplied ?? []),
-      ].map((c) => ({
+      canon: assembled.map((c) => ({
         source: c.source,
         kind: c.kind,
         version: c.version,
         content: c.content,
         relevance: c.relevance,
+        /* Carried, so the persisted bundle and the prompt agree with the artifact. */
+        ...(c.trust === undefined ? {} : { trust: c.trust }),
       })),
     });
   } catch (e) {

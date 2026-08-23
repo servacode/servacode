@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { TrustLevel } from '../../vocab/index.js';
 import type { Store } from '../../store/store.js';
 import type { ScopedCanonWriter } from './authority.js';
 import type { Clock } from '../../core/clock.js';
@@ -32,6 +33,21 @@ export interface ContextElement {
   readonly content: string;
   /** Lower is dropped first under budget pressure (19 CX-7). */
   readonly relevance: number;
+  /**
+   * Whether this may be believed. Carried, never inferred.
+   *
+   * SPEC: 19 §4.2. The ContextBundle's structural marking is the authoritative one: a
+   * paragraph inside a TRUSTED element announcing that it is untrusted proves only that
+   * somebody wrote the paragraph. Retrieved evidence went through exactly that shape —
+   * fenced prose, trusted element — until this field existed, so the fence said one thing
+   * and the bundle said another.
+   *
+   * Absent means TRUSTED, because a department's `buildContext` reads governed canon out
+   * of the Store and that is what trusted means. Anything whose text was authored outside
+   * Serva's governance must say UNTRUSTED here, and the runner refuses a bundle that
+   * would carry a SourceCapture as trusted whatever the department declared.
+   */
+  readonly trust?: TrustLevel;
 }
 
 export interface ContextExclusion {
