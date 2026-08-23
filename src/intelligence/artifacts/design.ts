@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { RefSchema, artifact } from './base.js';
+import { RefSchema, artifact, enumOf } from './base.js';
+import { OptionDisposition } from './governance.js';
 
 /**
  * DESIGN SYSTEM AUTHORITY.
@@ -175,6 +176,25 @@ export const MotionSpecSchema = artifact({
 export type MotionSpec = z.output<typeof MotionSpecSchema>;
 
 export const DesignDecisionSchema = artifact({
+  /**
+   * A Proposal this decision rules on, if it rules on one.
+   *
+   * SPEC: §33. The pair below is how an authority's ANSWER becomes durable project
+   * truth rather than something a caller asserts. `accept()` resolves this artifact; it
+   * does not take a disposition as an argument, and there is no argument to take.
+   *
+   * Un-forgeable by construction rather than by checking: the ScopedCanonWriter already
+   * restricts this artifact family to the agent whose contract declares it, so a decision
+   * carrying a disposition was necessarily written by the authority that owns the canon.
+   */
+  proposalRef: RefSchema.optional(),
+  /**
+   * What was decided, in the vocabulary Serva already routes on.
+   *
+   * `OptionDisposition` is reused deliberately: a second verdict taxonomy would be a
+   * second thing to keep in step, and APPROVE / REJECT / DEFER already mean exactly this.
+   */
+  proposalDisposition: enumOf(OptionDisposition).optional(),
   context: z.string().min(1),
   chosen: z.string().min(1),
   alternatives: z.array(z.string().min(1)).default([]),

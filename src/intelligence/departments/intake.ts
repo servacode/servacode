@@ -125,10 +125,6 @@ export const intakeDepartment: DepartmentConfig<typeof IntakeOutputSchema> = {
       type: ARTIFACT_TYPES.CONSTRAINT,
       why: 'As CLIENT_INPUT: no contract in 32 claims the framing artifacts. SF-12.',
     },
-    {
-      type: ARTIFACT_TYPES.OPEN_QUESTION,
-      why: 'As CLIENT_INPUT: no contract in 32 claims the framing artifacts. SF-12.',
-    },
   ],
   outputSchema: IntakeOutputSchema,
   outputJsonSchema: INTAKE_JSON_SCHEMA,

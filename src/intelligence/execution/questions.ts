@@ -1,5 +1,6 @@
 import { ARTIFACT_TYPES } from '../repository.js';
 import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
+import { OpenQuestionSchema } from '../artifacts/framing.js';
 import { repository } from '../repository.js';
 import type { ArtifactType } from '../repository.js';
 import type { Store } from '../../store/store.js';
@@ -43,6 +44,8 @@ import type { Store } from '../../store/store.js';
 export const QuestionRouting = {
   /** Already answered for this work item. Not asked again. */
   ALREADY_ANSWERED: 'ALREADY_ANSWERED',
+  /** An obligation for this is already outstanding with somebody. Not raised twice. */
+  ALREADY_ROUTED: 'ALREADY_ROUTED',
   /** The answer is in the Store; the run was not shown it. */
   EXISTING_STORE_FACT: 'EXISTING_STORE_FACT',
   /** A fact about the world Serva may lawfully retrieve. */
@@ -75,6 +78,10 @@ export interface OpenQuestion {
   readonly why: string;
   /** For ALREADY_ANSWERED, the decision that answered it. */
   readonly answeredBy?: string;
+  /** For EXISTING_STORE_FACT, the exact artifact whose content answers it. */
+  readonly factRef?: string;
+  /** For UPSTREAM_DEPARTMENT, the canon family that is missing. */
+  readonly missingCanon?: string;
 }
 
 /**
@@ -244,6 +251,27 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
     answered.filter((d) => d.state === 'OPEN').map((d) => questionKey(d.question)),
   );
 
+  /*
+   * Obligations already recorded, from any earlier run of any department.
+   *
+   * This is what makes routing survive a restart: an OpenQuestion is canon, so a second
+   * process finds the obligation rather than raising it again. Without it, every resume
+   * would re-route the same question and produce a second research request or a second
+   * upstream obligation for work already outstanding.
+   */
+  const outstanding = new Map<string, string>();
+  for (const q of repository(
+    input.store,
+    ARTIFACT_TYPES.OPEN_QUESTION,
+    OpenQuestionSchema,
+  ).list()) {
+    if (q.state === 'ANSWERED' || q.state === 'WITHDRAWN') {
+      answeredByKey.set(questionKey(q.question), q.id);
+      continue;
+    }
+    outstanding.set(questionKey(q.question), q.askedOf);
+  }
+
   /* ------------------------------------------------------------------ 3. route each one */
   const out: OpenQuestion[] = [];
   for (const [key, q] of merged) {
@@ -276,6 +304,17 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
       continue;
     }
 
+    /* An obligation already exists for this, on somebody. Do not raise a second. */
+    const outstandingWith = outstanding.get(key);
+    if (outstandingWith !== undefined) {
+      out.push({
+        ...base,
+        routing: QuestionRouting.ALREADY_ROUTED,
+        why: 'an obligation for this question is already outstanding with ' + outstandingWith,
+      });
+      continue;
+    }
+
     /*
      * Owner-reserved vocabulary wins over everything below it. A question about a deposit
      * is the owner's even if it also mentions what competitors charge — Serva may find out
@@ -297,6 +336,7 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
         ...base,
         routing: QuestionRouting.EXISTING_STORE_FACT,
         why: namedId + ' is already recorded; this run was not given it',
+        factRef: namedId,
       });
       continue;
     }
@@ -325,6 +365,7 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
           'no ' +
           family +
           ' exists yet, and this department does not write it: the stage that does has not run',
+        missingCanon: family,
       });
       continue;
     }

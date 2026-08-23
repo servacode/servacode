@@ -1,83 +1,90 @@
 
  RUN  v2.1.9 D:/SEVACODE
 
- ✓ tests/intel.authority.test.ts (16 tests) 16495ms
-   ✓ independence is enforced by the runtime, not by the prompt > the same reviewer reading the ARTIFACT rather than the author runs normally 349ms
-   ✓ external content cannot become instruction > a run that hallucinates an owner approval writes no owner approval 310ms
-   ✓ an owner answer is idempotent and attributable > answering twice with the same answer produces one decision, not two 1563ms
-   ✓ an owner answer is idempotent and attributable > the answer is versioned, so the store can say what was answered and when 707ms
-   ✓ a blocking escalation becomes a question, not an error > the runtime raises the owner decision; the agent writes no canon and no approval 3173ms
-   ✓ a blocking escalation becomes a question, not an error > a run that BLOCKED rather than escalated still gets its question asked 3228ms
-   ✓ a blocking escalation becomes a question, not an error > a run that COMPLETED and merely flagged a concern raises nothing 2120ms
-   ✓ research nobody could have performed is recorded as not performed > a discovery run claiming interviews has the claim overridden, not believed 4501ms
- ✓ tests/intel.ownervalue.test.ts (4 tests) 1449ms
-   ✓ the owner can answer the question they were asked > a value survives a restart and reaches the department as the value 1371ms
- ✓ tests/intel.questions.test.ts (15 tests) 3296ms
-   ✓ where a question routes is decided from the Store > 4. one the Store already answers does not reach the owner 725ms
-   ✓ where a question routes is decided from the Store > 6. a genuine owner question reaches the owner 334ms
-   ✓ provenance and restart > 8. a restart does not re-ask a question the owner has answered 348ms
-   ✓ provenance and restart > a question already OPEN with the owner is not asked twice 434ms
- ✓ tests/intel.governance.test.ts (45 tests) 45667ms
-   ✓ an owner approval is bound to the change it approves > an unrelated answered decision cannot approve it 2938ms
-   ✓ an owner approval is bound to the change it approves > a decision raised for a different purpose cannot approve it 2152ms
-   ✓ an owner approval is bound to the change it approves > the owner choosing REJECT does not approve it 1878ms
-   ✓ an owner approval is bound to the change it approves > the owner choosing DEFER does not approve it either 2153ms
-   ✓ an owner approval is bound to the change it approves > an answer nobody offered is refused when it is given 1545ms
-   ✓ an owner approval is bound to the change it approves > an agent cannot answer it at all 1499ms
-   ✓ an owner approval is bound to the change it approves > the exact bound approval, chosen by a person, is accepted 2374ms
-   ✓ an owner approval is bound to the change it approves > an approval question cannot be raised for an unassessed change 740ms
-   ✓ re-entry re-opens the lifecycle, idempotently > the stages from the re-entry point are no longer complete, and their gates are dropped 2220ms
-   ✓ re-entry re-opens the lifecycle, idempotently > applying the same change twice changes nothing the second time 447ms
-   ✓ re-entry re-opens the lifecycle, idempotently > an approved change cannot be completed by claim 360ms
-   ✓ re-entry re-opens the lifecycle, idempotently > a change whose re-entered stages have not re-run is still outstanding 724ms
-   ✓ re-entry re-opens the lifecycle, idempotently > a partial re-entry is still outstanding 2359ms
-   ✓ re-entry re-opens the lifecycle, idempotently > stages that re-ran but whose gate has not accepted are still outstanding 2225ms
-   ✓ re-entry re-opens the lifecycle, idempotently > a change is carried through once its stages re-ran and its gates accepted 2327ms
-   ✓ a proposal is accepted by an authority acting, not by a name > a spoofed owning-agent name with no run behind it is refused 842ms
-   ✓ a proposal is accepted by an authority acting, not by a name > a run by an actor that does not own the canon is refused 1347ms
-   ✓ a proposal is accepted by an authority acting, not by a name > an unrelated run by the RIGHT actor is refused 903ms
-   ✓ a proposal is accepted by an authority acting, not by a name > an incomplete run by the right actor is refused 1344ms
-   ✓ a proposal is accepted by an authority acting, not by a name > the owning authority acting, on this exact proposal, is accepted 1108ms
-   ✓ a proposal is accepted by an authority acting, not by a name > the proposer cannot accept its own idea, even with a real run 951ms
-   ✓ a proposal is accepted by an authority acting, not by a name > an arbitrary human string is not owner authority 948ms
-   ✓ a proposal is accepted by an authority acting, not by a name > an owner decision for a DIFFERENT proposal is refused 1887ms
-   ✓ a proposal is accepted by an authority acting, not by a name > the owner choosing REJECT does not accept it 1913ms
-   ✓ a proposal is accepted by an authority acting, not by a name > an exact PROPOSAL_APPROVAL answered by a person is accepted 1534ms
-   ✓ a proposal is accepted by an authority acting, not by a name > an agent cannot answer a proposal approval 992ms
-   ✓ a proposal is accepted by an authority acting, not by a name > it cannot be accepted before it is assessed 522ms
-   ✓ a proposal is accepted by an authority acting, not by a name > incorporation must point at canon that exists 1649ms
-   ✓ a proposal is accepted by an authority acting, not by a name > a rejection keeps its rationale, and is terminal 660ms
-   ✓ a proposal is accepted by an authority acting, not by a name > deferred is a real answer, and revisitable 1779ms
- ✓ tests/intel.security.test.ts (15 tests) 53190ms
- ✓ tests/intel.writeauthority.test.ts (15 tests) 53331ms
-   ✓ the write boundary itself refuses, atomically > refuses the unauthorised write and commits NOTHING 479ms
-   ✓ the write boundary itself refuses, atomically > a restart reveals no partial mutation 1753ms
-   ✓ the write boundary itself refuses, atomically > an authorised department still writes normally 2573ms
-   ✓ the split departments write only their own canon > ADRs are authored by the architect, and test cases by the case designer 48177ms
- ✓ tests/intel.scenarios.test.ts (3 tests) 67381ms
-   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 52227ms
-   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 3214ms
-   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 11934ms
- ✓ tests/intel.e2e.test.ts (5 tests) 93696ms
-   ✓ the whole company runs > takes an idea through every department to an engineering handoff 51082ms
-   ✓ the whole company runs > readiness is DERIVED from the Store, with nothing handed to it 12296ms
-   ✓ the whole company runs > a review stops counting once the thing it reviewed changes 10230ms
-   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 9905ms
-   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 10180ms
- ✓ tests/intel.restart.test.ts (10 tests) 134565ms
-   ✓ readiness survives the process that produced it > reconstructs the independent reviews from disk and reaches READY 52376ms
-   ✓ readiness survives the process that produced it > generates the Phase 4 handoff from disk, with nothing injected 13440ms
-   ✓ readiness survives the process that produced it > a caller cannot assert a review it does not have 9855ms
-   ✓ a stage that half-completed does not half-repeat > the completed department is not re-run, and its canon is not written twice 9904ms
-   ✓ a stage that half-completed does not half-repeat > no owner decision is raised twice by a resumed stage 9742ms
-   ✓ the production CLI path, in a separate process > serva intelligence readiness and handoff work from disk alone 9513ms
-   ✓ review evidence belongs to one work item and one gate cycle > another work item’s AR-2 cannot satisfy this one 7180ms
-   ✓ review evidence belongs to one work item and one gate cycle > an evaluation the current gate result did not rest on does not count 7549ms
-   ✓ a caller cannot waive a required gate > there is no waiveGates parameter to pass 7837ms
-   ✓ a caller cannot waive a required gate > a failing required gate keeps readiness NOT_READY, whatever a caller wants 7164ms
+ ✓ tests/intel.routing.test.ts (10 tests) 8220ms
+   ✓ A. EXISTING_STORE_FACT is supplied, not merely named > the exact fact is handed back and the retry succeeds 692ms
+   ✓ A. EXISTING_STORE_FACT is supplied, not merely named > B. asking again after being given the fact fails explicitly, and does not loop 857ms
+   ✓ C. research capability is not the presence of a gateway > an ordinary department gains nothing from a globally available gateway 373ms
+   ✓ D. a RESEARCH route becomes a governed obligation > a research-authorised department records a request and retrieves nothing itself 480ms
+   ✓ E. an UPSTREAM route names the stage that owes the canon > the obligation records the family, the owing stage and who asked 600ms
+   ✓ E. an UPSTREAM route names the stage that owes the canon > canon owed by a stage this profile does not run is reported as a contradiction 1044ms
+   ✓ E. an UPSTREAM route names the stage that owes the canon > canon no registered department produces is reported, not waited on 489ms
+   ✓ F. a route survives the process that made it > a reopened Store finds the obligation and does not raise a second 1318ms
+   ✓ G. the field-choice invariant holds through the runner > the same question in either field produces the same operational route 1574ms
+   ✓ G. the field-choice invariant holds through the runner > the same question in BOTH fields produces one obligation 787ms
+ ✓ tests/intel.authority.test.ts (16 tests) 6845ms
+   ✓ independence is enforced by the runtime, not by the prompt > the same reviewer reading the ARTIFACT rather than the author runs normally 753ms
+   ✓ external content cannot become instruction > a run that hallucinates an owner approval writes no owner approval 1003ms
+   ✓ an owner answer is idempotent and attributable > answering twice with the same answer produces one decision, not two 313ms
+   ✓ an owner answer is idempotent and attributable > the answer is versioned, so the store can say what was answered and when 305ms
+   ✓ a blocking escalation becomes a question, not an error > the runtime raises the owner decision; the agent writes no canon and no approval 1071ms
+   ✓ a blocking escalation becomes a question, not an error > a run that BLOCKED rather than escalated still gets its question asked 867ms
+   ✓ a blocking escalation becomes a question, not an error > a run that COMPLETED and merely flagged a concern raises nothing 739ms
+   ✓ research nobody could have performed is recorded as not performed > a discovery run claiming interviews has the claim overridden, not believed 1135ms
+ ✓ tests/intel.ownervalue.test.ts (4 tests) 806ms
+   ✓ the owner can answer the question they were asked > a value survives a restart and reaches the department as the value 746ms
+ ✓ tests/intel.questions.test.ts (15 tests) 493ms
+ ✓ tests/intel.governance.test.ts (49 tests) 20102ms
+   ✓ a change is assessed before it is anything else > a complete analysis records what re-entry will cost 324ms
+   ✓ an owner approval is bound to the change it approves > an M4 change with no owner decision is refused 412ms
+   ✓ an owner approval is bound to the change it approves > an unrelated answered decision cannot approve it 993ms
+   ✓ an owner approval is bound to the change it approves > a decision raised for a different purpose cannot approve it 544ms
+   ✓ an owner approval is bound to the change it approves > the owner choosing REJECT does not approve it 581ms
+   ✓ an owner approval is bound to the change it approves > the owner choosing DEFER does not approve it either 589ms
+   ✓ an owner approval is bound to the change it approves > an answer nobody offered is refused when it is given 590ms
+   ✓ an owner approval is bound to the change it approves > an agent cannot answer it at all 520ms
+   ✓ an owner approval is bound to the change it approves > the exact bound approval, chosen by a person, is accepted 698ms
+   ✓ re-entry re-opens the lifecycle, idempotently > the stages from the re-entry point are no longer complete, and their gates are dropped 613ms
+   ✓ re-entry re-opens the lifecycle, idempotently > applying the same change twice changes nothing the second time 977ms
+   ✓ re-entry re-opens the lifecycle, idempotently > an approved change cannot be completed by claim 472ms
+   ✓ re-entry re-opens the lifecycle, idempotently > a change whose re-entered stages have not re-run is still outstanding 950ms
+   ✓ re-entry re-opens the lifecycle, idempotently > a partial re-entry is still outstanding 879ms
+   ✓ re-entry re-opens the lifecycle, idempotently > stages that re-ran but whose gate has not accepted are still outstanding 723ms
+   ✓ re-entry re-opens the lifecycle, idempotently > a change is carried through once its stages re-ran and its gates accepted 944ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > 2. the owning authority explicitly REJECTING it does not accept it 387ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > 3. DEFER does not accept it either 429ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > 4. an explicit typed APPROVE by the owning authority accepts it 335ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > 5. an APPROVE bound to another proposal is refused 354ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > 6. a correct decision recorded by a NON-owning authority is refused 315ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > 8. the ruling still resolves after the process that made it is gone 466ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > an owner decision for a DIFFERENT proposal is refused 456ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > the owner choosing REJECT does not accept it 362ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > an exact PROPOSAL_APPROVAL answered by a person is accepted 446ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > incorporation must point at canon that exists 533ms
+   ✓ a proposal is accepted by a typed ruling, not by a mention > deferred is a real answer, and revisitable 631ms
+   ✓ learning crosses the boundary only as a generalisation > a pattern cannot be applied on the strength of having worked elsewhere 594ms
+   ✓ learning crosses the boundary only as a generalisation > a curator cannot assess that its own pattern applies 440ms
+ ✓ tests/intel.writeauthority.test.ts (15 tests) 30627ms
+   ✓ the write boundary itself refuses, atomically > refuses the unauthorised write and commits NOTHING 681ms
+   ✓ the write boundary itself refuses, atomically > the refusal names the department, the agent and what it may write 688ms
+   ✓ the write boundary itself refuses, atomically > a restart reveals no partial mutation 978ms
+   ✓ the write boundary itself refuses, atomically > an authorised department still writes normally 783ms
+   ✓ the split departments write only their own canon > ADRs are authored by the architect, and test cases by the case designer 27410ms
+ ✓ tests/intel.security.test.ts (15 tests) 24992ms
+ ✓ tests/intel.scenarios.test.ts (3 tests) 58661ms
+   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 29637ms
+   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 4907ms
+   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 24108ms
+ ✓ tests/intel.e2e.test.ts (5 tests) 89038ms
+   ✓ the whole company runs > takes an idea through every department to an engineering handoff 28667ms
+   ✓ the whole company runs > readiness is DERIVED from the Store, with nothing handed to it 22370ms
+   ✓ the whole company runs > a review stops counting once the thing it reviewed changes 17666ms
+   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 10064ms
+   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 10267ms
+ ✓ tests/intel.restart.test.ts (10 tests) 131245ms
+   ✓ readiness survives the process that produced it > reconstructs the independent reviews from disk and reaches READY 29417ms
+   ✓ readiness survives the process that produced it > generates the Phase 4 handoff from disk, with nothing injected 23787ms
+   ✓ readiness survives the process that produced it > a caller cannot assert a review it does not have 17103ms
+   ✓ a stage that half-completed does not half-repeat > the completed department is not re-run, and its canon is not written twice 9967ms
+   ✓ a stage that half-completed does not half-repeat > no owner decision is raised twice by a resumed stage 9755ms
+   ✓ the production CLI path, in a separate process > serva intelligence readiness and handoff work from disk alone 9862ms
+   ✓ review evidence belongs to one work item and one gate cycle > another work item’s AR-2 cannot satisfy this one 7777ms
+   ✓ review evidence belongs to one work item and one gate cycle > an evaluation the current gate result did not rest on does not count 8587ms
+   ✓ a caller cannot waive a required gate > there is no waiveGates parameter to pass 7835ms
+   ✓ a caller cannot waive a required gate > a failing required gate keeps readiness NOT_READY, whatever a caller wants 7150ms
 
- Test Files  9 passed (9)
-      Tests  128 passed (128)
-   Start at  11:20:47
-   Duration  137.88s (transform 5.17s, setup 0ms, collect 19.26s, tests 469.07s, environment 7ms, prepare 2.41s)
+ Test Files  10 passed (10)
+      Tests  142 passed (142)
+   Start at  14:30:43
+   Duration  135.82s (transform 6.44s, setup 0ms, collect 28.58s, tests 371.03s, environment 7ms, prepare 3.03s)
 

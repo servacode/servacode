@@ -50,6 +50,7 @@ export type IdPrefix =
   | 'SC-CON'
   | 'SC-ASSUM'
   | 'SC-OQ'
+  | 'SC-RRQ'
   | 'SC-SEG'
   | 'SC-JTBD'
   | 'SC-ALT'

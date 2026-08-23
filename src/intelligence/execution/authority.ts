@@ -166,6 +166,20 @@ const OUTPUT_NAMES: Readonly<Record<string, ArtifactType>> = Object.freeze({
 const UNIVERSAL: readonly ArtifactType[] = Object.freeze([
   ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
   ARTIFACT_TYPES.ASSUMPTION,
+  /*
+   * An OpenQuestion is the record of something a run could not settle, and of who owes the
+   * answer. Like an owner decision it is governance rather than departmental output: a
+   * department that could not record one could not hand its question to anybody, and the
+   * question would exist only in a log.
+   */
+  ARTIFACT_TYPES.OPEN_QUESTION,
+  /*
+   * A ResearchRequest is a DECLARATION of intent to retrieve, not retrieval. Recording one
+   * grants nothing: the gateway still checks the canonical contract before a single byte
+   * leaves, and a department with no network scope that records a request has recorded a
+   * request somebody else will have to fulfil.
+   */
+  ARTIFACT_TYPES.RESEARCH_REQUEST,
 ]);
 
 export interface ContractOutputs {

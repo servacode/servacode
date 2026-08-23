@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
 import { ProjectGoalSchema } from '../src/intelligence/artifacts/framing.js';
+import { ProductDecisionSchema } from '../src/intelligence/artifacts/product.js';
+import { ProposalSchema } from '../src/intelligence/artifacts/governance.js';
 import {
   DecisionPurpose,
   OptionDisposition,
@@ -563,7 +565,7 @@ describe('re-entry re-opens the lifecycle, idempotently', () => {
   });
 });
 
-describe('a proposal is accepted by an authority acting, not by a name', () => {
+describe('a proposal is accepted by a typed ruling, not by a mention', () => {
   const ASSESSMENT = {
     userOrBusinessValue: 'repeat custom',
     evidenceBasis: 'none yet — an idea',
@@ -587,62 +589,168 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
   }
 
   /** A completed governed run, written the way the runtime writes one. */
-  function completedRun(
-    f: ReturnType<typeof setup>,
-    o: { readonly agentId: string; readonly mentions?: string },
-  ): string {
+  function completedRun(f: ReturnType<typeof setup>, agentId: string): string {
     const runId = f.deps.ids.next('SC-RUN');
     const tx = f.store.begin();
-    tx.appendTrace('agentrun/' + runId, {
-      type: 'RUN_COMPLETED',
-      payload: { runId, agentId: o.agentId, mentions: o.mentions ?? '' },
-    });
-    tx.putCanon('agentRunRecord', runId, {
-      runId,
-      agentId: o.agentId,
-      outcome: 'COMPLETED',
-      terminal: true,
-    });
+    tx.appendTrace('agentrun/' + runId, { type: 'RUN_COMPLETED', payload: { runId, agentId } });
+    tx.putCanon('agentRunRecord', runId, { runId, agentId, outcome: 'COMPLETED', terminal: true });
     tx.commit();
     return runId;
   }
 
-  it('a spoofed owning-agent name with no run behind it is refused', () => {
+  /**
+   * A canonical ProductDecision recording a typed ruling.
+   *
+   * Written directly here, but only because a test cannot conveniently run SC-AGENT-020.
+   * In the product it is written through the ScopedCanonWriter, which restricts
+   * `intel.productDecision` to the agent whose contract declares it — so a decision
+   * carrying a disposition exists only because the owning authority produced one.
+   */
+  function ruling(
+    f: ReturnType<typeof setup>,
+    o: {
+      readonly proposalId?: string;
+      readonly disposition?: string;
+      readonly agentId?: string;
+      readonly runId?: string;
+    },
+  ): string {
+    const at = f.deps.clock.now();
+    const id = f.deps.ids.next('SC-PDEC');
+    const tx = f.store.begin();
+    repository(f.store, ARTIFACT_TYPES.PRODUCT_DECISION, ProductDecisionSchema).put(tx, {
+      id,
+      createdAt: at,
+      ...(o.proposalId === undefined ? {} : { proposalRef: { id: o.proposalId } }),
+      ...(o.disposition === undefined ? {} : { proposalDisposition: o.disposition }),
+      context: 'Whether loyalty points belong in the first release',
+      options: [
+        { option: 'Accept', consequence: 'the release grows by a fortnight' },
+        { option: 'Decline', consequence: 'the release ships as scoped' },
+      ],
+      chosen: String(o.disposition ?? 'Decline'),
+      rationale: 'weighed against the first release',
+      meta: {
+        provenance: { marking: 'DERIVED', from: ['product scope'], rationale: 'product ruling' },
+        attribution: {
+          agentId: o.agentId ?? 'SC-AGENT-020',
+          ...(o.runId === undefined ? {} : { runId: o.runId }),
+          at,
+        },
+      },
+    } as never);
+    tx.commit();
+    return id;
+  }
+
+  it('1. a completed owning-agent run that merely mentions the proposal is refused', () => {
     const f = setup();
     const p = assessedProposal(f);
+    const runId = completedRun(f, 'SC-AGENT-020');
 
     /*
-     * The old rule was satisfied by the STRING "SC-AGENT-020". There is nowhere to put it
-     * now: acceptance takes a reference to an event, and resolves it against the Store.
+     * The run happened, by the right actor, and its trace names the proposal. Under the
+     * previous rule that was acceptance. There is now nothing to pass: `accept` takes a
+     * decision, and a run is not a decision.
      */
-    expect(() => accept(f, { proposalId: p.id })).toThrow(/needs that authority/);
-    expect(() => accept(f, { proposalId: p.id, authorityRunId: 'SC-RUN-NOPE' })).toThrow(
-      /no governed run/,
+    expect(() => accept(f, { proposalId: p.id })).toThrow(/needs a recorded decision/);
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: runId })).toThrow(
+      /no decision/,
     );
   });
 
-  it('a run by an actor that does not own the canon is refused', () => {
+  it('2. the owning authority explicitly REJECTING it does not accept it', () => {
     const f = setup();
     const p = assessedProposal(f);
+    const runId = completedRun(f, 'SC-AGENT-020');
+    const decision = ruling(f, { proposalId: p.id, disposition: 'REJECT', runId });
+
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
+      /recorded REJECT/,
+    );
+    /* And the proposal is untouched: a refused acceptance changes nothing. */
+    expect(repository(f.store, ARTIFACT_TYPES.PROPOSAL, ProposalSchema).get(p.id)?.state).toBe(
+      'ASSESSED',
+    );
+  });
+
+  it('3. DEFER does not accept it either', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    const runId = completedRun(f, 'SC-AGENT-020');
+    const decision = ruling(f, { proposalId: p.id, disposition: 'DEFER', runId });
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
+      /recorded DEFER/,
+    );
+  });
+
+  it('4. an explicit typed APPROVE by the owning authority accepts it', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    const runId = completedRun(f, 'SC-AGENT-020');
+    const decision = ruling(f, { proposalId: p.id, disposition: 'APPROVE', runId });
+    expect(accept(f, { proposalId: p.id, authorityDecisionId: decision }).state).toBe('ACCEPTED');
+  });
+
+  it('5. an APPROVE bound to another proposal is refused', () => {
+    const f = setup();
+    const mine = assessedProposal(f);
+    const other = propose(f, {
+      title: 'Something else',
+      origin: 'SC-AGENT-120',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
+      description: 'a different idea',
+    });
+    const runId = completedRun(f, 'SC-AGENT-020');
+    const decision = ruling(f, { proposalId: other.id, disposition: 'APPROVE', runId });
+
+    expect(() => accept(f, { proposalId: mine.id, authorityDecisionId: decision })).toThrow(
+      /rules on .*, not on/,
+    );
+  });
+
+  it('6. a correct decision recorded by a NON-owning authority is refused', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    const runId = completedRun(f, 'SC-AGENT-090');
     /* The security architect owns threat models, not product scope. */
-    const run = completedRun(f, { agentId: 'SC-AGENT-090', mentions: p.id });
-    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(/does not own/);
+    const decision = ruling(f, {
+      proposalId: p.id,
+      disposition: 'APPROVE',
+      agentId: 'SC-AGENT-090',
+      runId,
+    });
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
+      /does not own/,
+    );
   });
 
-  it('an unrelated run by the RIGHT actor is refused', () => {
+  it('7. the proposer cannot rule on its own proposal', () => {
+    const f = setup();
+    /* SC-AGENT-020 both raises it and owns the canon it affects. */
+    const p = assessedProposal(f, 'SC-AGENT-020');
+    const runId = completedRun(f, 'SC-AGENT-020');
+    const decision = ruling(f, { proposalId: p.id, disposition: 'APPROVE', runId });
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
+      /ruled on by itself/,
+    );
+  });
+
+  it('a ruling not attributed to a governed run is refused', () => {
     const f = setup();
     const p = assessedProposal(f);
-    /* A real Product Manager run that never mentions this proposal. */
-    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: 'something else entirely' });
-    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(/never mentions/);
+    /* No runId: nothing records the act of deciding. */
+    const decision = ruling(f, { proposalId: p.id, disposition: 'APPROVE' });
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
+      /not attributed to a governed run/,
+    );
   });
 
-  it('an incomplete run by the right actor is refused', () => {
+  it('a ruling citing an incomplete run is refused', () => {
     const f = setup();
     const p = assessedProposal(f);
     const runId = f.deps.ids.next('SC-RUN');
     const tx = f.store.begin();
-    tx.appendTrace('agentrun/' + runId, { type: 'RUN_FAILED', payload: { runId, mentions: p.id } });
     tx.putCanon('agentRunRecord', runId, {
       runId,
       agentId: 'SC-AGENT-020',
@@ -650,23 +758,44 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
       terminal: true,
     });
     tx.commit();
-    expect(() => accept(f, { proposalId: p.id, authorityRunId: runId })).toThrow(/decided nothing/);
+    const decision = ruling(f, { proposalId: p.id, disposition: 'APPROVE', runId });
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
+      /decided nothing/,
+    );
   });
 
-  it('the owning authority acting, on this exact proposal, is accepted', () => {
-    const f = setup();
-    const p = assessedProposal(f);
-    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
-    expect(accept(f, { proposalId: p.id, authorityRunId: run }).state).toBe('ACCEPTED');
-  });
+  it('8. the ruling still resolves after the process that made it is gone', async () => {
+    const { store, root, deps } = freshStore();
+    roots.push(root);
+    const f = { store, clock: deps.clock, ids: deps.ids, deps };
 
-  it('the proposer cannot accept its own idea, even with a real run', () => {
-    const f = setup();
-    /* SC-AGENT-020 both raises it and owns the canon it affects. */
-    const p = assessedProposal(f, 'SC-AGENT-020');
-    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
-    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(
-      /accepted by its own run/,
+    const p = assessedProposal(f as never);
+    const runId = completedRun(f as never, 'SC-AGENT-020');
+    const decision = ruling(f as never, {
+      proposalId: p.id,
+      disposition: 'APPROVE',
+      runId,
+    });
+
+    /* --- a fresh process, with no memory of any of it --- */
+    const { Store } = await import('../src/store/store.js');
+    const { FixedClock } = await import('../src/core/clock.js');
+    /*
+     * The id source is carried across. Production uses `TimeOrderedIdSource`, which is
+     * monotonic between processes; the deterministic test source restarts at 1, and a
+     * second process minting SC-TX-000001 again collides with the first process's trace.
+     * A property of the test double, modelled here rather than worked around in the
+     * product.
+     */
+    const reopened = Store.open(root, {
+      clock: new FixedClock(),
+      ids: deps.ids,
+      actor: 'RULING_TEST_2',
+    });
+
+    const fresh = { store: reopened, clock: deps.clock, ids: deps.ids };
+    expect(accept(fresh as never, { proposalId: p.id, authorityDecisionId: decision }).state).toBe(
+      'ACCEPTED',
     );
   });
 
@@ -680,8 +809,6 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
       description: 'Add a goal about reducing wasted stock',
     });
     assess(f, { proposalId: p.id, assessment: ASSESSMENT });
-
-    /* "owner@bakery" used to be accepted purely for not starting with SC-AGENT-. */
     expect(() => accept(f, { proposalId: p.id })).toThrow(/needs an owner decision/);
   });
 
@@ -694,7 +821,6 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
       description: 'one thing',
     });
     assess(f, { proposalId: mine.id, assessment: ASSESSMENT });
-
     const other = propose(f, {
       title: 'Goal B',
       origin: 'SC-AGENT-030',
@@ -709,7 +835,6 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
       chosenOption: 'Accept it into scope',
       answeredBy: 'owner@bakery',
     });
-
     expect(() => accept(f, { proposalId: mine.id, ownerDecisionId: request.id })).toThrow(
       /does not name/,
     );
@@ -744,7 +869,6 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
       description: 'a thing',
     });
     assess(f, { proposalId: p.id, assessment: ASSESSMENT });
-
     const request = requestProposalApproval(f, { proposalId: p.id });
     expect(request.purpose).toBe(DecisionPurpose.PROPOSAL_APPROVAL);
     expect(request.targetRef?.id).toBe(p.id);
@@ -784,8 +908,9 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
       affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'Reward repeat phone orders',
     });
-    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
-    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(
+    const runId = completedRun(f, 'SC-AGENT-020');
+    const decision = ruling(f, { proposalId: p.id, disposition: 'APPROVE', runId });
+    expect(() => accept(f, { proposalId: p.id, authorityDecisionId: decision })).toThrow(
       /cannot go from PROPOSED to ACCEPTED/,
     );
   });
@@ -794,8 +919,11 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
     const f = setup();
     const goal = seedGoal(f.store, f.deps);
     const p = assessedProposal(f);
-    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
-    accept(f, { proposalId: p.id, authorityRunId: run });
+    const runId = completedRun(f, 'SC-AGENT-020');
+    accept(f, {
+      proposalId: p.id,
+      authorityDecisionId: ruling(f, { proposalId: p.id, disposition: 'APPROVE', runId }),
+    });
 
     expect(() =>
       incorporate(f, {
@@ -835,11 +963,16 @@ describe('a proposal is accepted by an authority acting, not by a name', () => {
   it('deferred is a real answer, and revisitable', () => {
     const f = setup();
     const p = assessedProposal(f);
-    const deferred = defer(f, { proposalId: p.id, rationale: 'not for the first release' });
-    expect(deferred.state).toBe('DEFERRED');
-
-    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
-    expect(accept(f, { proposalId: p.id, authorityRunId: run }).state).toBe('ACCEPTED');
+    expect(defer(f, { proposalId: p.id, rationale: 'not for the first release' }).state).toBe(
+      'DEFERRED',
+    );
+    const runId = completedRun(f, 'SC-AGENT-020');
+    expect(
+      accept(f, {
+        proposalId: p.id,
+        authorityDecisionId: ruling(f, { proposalId: p.id, disposition: 'APPROVE', runId }),
+      }).state,
+    ).toBe('ACCEPTED');
   });
 });
 

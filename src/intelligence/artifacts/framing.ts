@@ -118,9 +118,35 @@ export const OpenQuestionSchema = artifact({
   question: z.string().min(1),
   /** What cannot proceed until this is answered. An empty list means it is not blocking. */
   blocks: z.array(IdSchema).default([]),
-  askedOf: z.enum(['OWNER', 'RESEARCH', 'EXPERT']),
+  /**
+   * Who owes the answer.
+   *
+   * `UPSTREAM_DEPARTMENT` joins the original three because classification without routing
+   * is just a label: a question Serva can prove another department owes must become an
+   * obligation on that department, not a sentence in a log and a generic failure.
+   */
+  askedOf: z.enum(['OWNER', 'RESEARCH', 'EXPERT', 'UPSTREAM_DEPARTMENT']),
   state: enumOf(OpenQuestionState),
   answer: z.string().min(1).optional(),
   answeredAt: IsoSchema.optional(),
+
+  /**
+   * Where the question came from, and what would settle it.
+   *
+   * All of it durable, because the process that raises a question is rarely the process
+   * that answers it. An obligation that lives only in a running orchestrator disappears
+   * on restart, and one that cannot say which canon it is waiting for cannot be closed by
+   * anything except a person noticing.
+   */
+  raisedBy: z.string().min(1).optional(),
+  raisedByRun: z.string().min(1).optional(),
+  /** The envelope field(s) the run filed it in. Provenance; never routing. */
+  sourceFields: z.array(z.string().min(1)).default([]),
+  /** The canon family that would answer it, where Serva can name one. */
+  missingCanon: z.string().min(1).optional(),
+  /** The stage that owes that canon. */
+  owedByStage: z.string().min(1).optional(),
+  /** The research request raised to answer it, for an askedOf === RESEARCH question. */
+  researchRequestRef: RefSchema.optional(),
 });
 export type OpenQuestion = z.output<typeof OpenQuestionSchema>;

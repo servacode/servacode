@@ -130,10 +130,14 @@ describe('every registered department is inside its canonical contract', () => {
     const exceptions = UPSTREAM_DEPARTMENTS.flatMap((d) =>
       (d.producesBeyondContract ?? []).map((e) => d.id + ':' + e.type),
     ).sort();
+    /*
+     * `intel.openQuestion` is deliberately absent: it became UNIVERSAL when routing made
+     * it governance rather than departmental output, and the validator refused the
+     * now-redundant exception the moment it did.
+     */
     expect(exceptions).toEqual([
       'DEPT-INTAKE:intel.clientInput',
       'DEPT-INTAKE:intel.constraint',
-      'DEPT-INTAKE:intel.openQuestion',
       'DEPT-INTAKE:intel.projectGoal',
       'DEPT-PRODUCT-VALIDATION:intel.feature',
       'DEPT-RISK:intel.risk',

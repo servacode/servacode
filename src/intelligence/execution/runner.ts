@@ -1,4 +1,9 @@
-import { RunOutcome, StageExecutionState, StageLedgerDisposition } from '../../vocab/index.js';
+import {
+  RunOutcome,
+  SourceMarking,
+  StageExecutionState,
+  StageLedgerDisposition,
+} from '../../vocab/index.js';
 import { AuditAction, audit } from '../../events/audit.js';
 import { appendLedgerEntry, startStage, transitionStage } from '../../lifecycle/stages.js';
 import { assertResearchAuthority } from '../research/gateway.js';
@@ -8,6 +13,8 @@ import { ScopedCanonWriter, allowedTypesFor } from './authority.js';
 import { QuestionRouting, normalizeOpenQuestions } from './questions.js';
 import type { OpenQuestion } from './questions.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
+import { ResearchRequestSchema } from '../research/capture.js';
+import { OpenQuestionSchema } from '../artifacts/framing.js';
 import {
   DecisionPurpose,
   OwnerDecisionRequestSchema,
@@ -16,6 +23,7 @@ import {
 } from '../artifacts/governance.js';
 import { DepartmentOutcome } from './types.js';
 import type {
+  ContextElement,
   DepartmentConfig,
   DepartmentContext,
   DepartmentResult,
@@ -23,7 +31,8 @@ import type {
   RunnerDeps,
 } from './types.js';
 import type { z } from 'zod';
-import type { Transaction } from '../../store/store.js';
+import type { Store, Transaction } from '../../store/store.js';
+import type { IntelligenceMeta } from '../provenance.js';
 
 /**
  * THE ONE INTELLIGENCE DEPARTMENT RUNNER.
@@ -52,6 +61,194 @@ import type { Transaction } from '../../store/store.js';
 /** Everything the ledger needs to describe one attempt. */
 function ledgerActor(config: DepartmentConfig): string {
   return config.agentId;
+}
+
+/**
+ * How many times a department may be handed a fact it asked for.
+ *
+ * Two: the original run, and one retry with the answer in hand. A run that asks again
+ * after being given the answer has not been unlucky, it has failed to read — and a third
+ * attempt would be a loop with a nicer name.
+ */
+const MAX_FACT_ATTEMPTS = 2;
+
+/** The exact artifact, rendered as one context element. Nothing else travels with it. */
+function canonAsContext(store: Store, id: string): ContextElement | undefined {
+  for (const type of Object.values(ARTIFACT_TYPES)) {
+    const env = store.getCanon<unknown>(type, id);
+    if (env === undefined) continue;
+    return {
+      source: id,
+      kind: type,
+      version: String(env.version),
+      content: JSON.stringify(env.body),
+      relevance: 1,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Record research obligations, and retrieve nothing.
+ *
+ * A ResearchRequest is a DECLARATION: the question, the purpose, the hosts it may reach and
+ * exactly what project material is allowed to leave — which here is nothing, because a
+ * department raising a question has not been authorised to disclose anything to answer it.
+ *
+ * The originating department does not fetch. It cannot: its granted policy has no network
+ * and `assertResearchAuthority` refuses it at the gateway. The request is canon, so the
+ * research department finds it on a later stage and the requester resumes from persisted
+ * evidence rather than from a retrieval of its own.
+ */
+function raiseResearchObligations(
+  deps: RunnerDeps,
+  config: DepartmentConfig<z.ZodTypeAny>,
+  ctx: DepartmentContext,
+  questions: readonly OpenQuestion[],
+): readonly string[] {
+  const at = deps.clock.now();
+  const ids: string[] = [];
+  const tx = deps.store.begin();
+  try {
+    for (const q of questions) {
+      const requestId = deps.ids.next('SC-RRQ');
+      repository(deps.store, ARTIFACT_TYPES.RESEARCH_REQUEST, ResearchRequestSchema).put(tx, {
+        id: requestId,
+        createdAt: at,
+        question: q.detail,
+        purpose: 'raised by ' + config.id + ' while it could not proceed',
+        scope: 'MARKET_LANDSCAPE',
+        allowedHosts: [],
+        /* Nothing about this project may leave in the asking. */
+        dataAllowedToLeave: [],
+        maxSources: 5,
+        meta: openQuestionMeta(config, ctx, q, at),
+      });
+
+      const questionId = deps.ids.next('SC-OQ');
+      repository(deps.store, ARTIFACT_TYPES.OPEN_QUESTION, OpenQuestionSchema).put(tx, {
+        id: questionId,
+        createdAt: at,
+        question: q.detail,
+        blocks: [],
+        askedOf: 'RESEARCH',
+        state: 'OPEN',
+        raisedBy: config.id,
+        ...(q.runId === undefined ? {} : { raisedByRun: q.runId }),
+        sourceFields: [...q.sources],
+        researchRequestRef: { id: requestId },
+        meta: openQuestionMeta(config, ctx, q, at),
+      });
+      ids.push(requestId, questionId);
+    }
+    tx.commit();
+  } catch {
+    /* Nothing partial survives: the obligation is recorded whole or not at all. */
+    tx.rollback();
+    return [];
+  }
+  return ids;
+}
+
+/**
+ * Record upstream obligations, naming the stage that owes the canon.
+ *
+ * Returns a contradiction instead when the owning stage is not in the active profile.
+ * Nobody will ever produce that canon, so waiting is not a plan — and asking the owner
+ * would be asking them to do Serva's departmental work.
+ */
+function raiseUpstreamObligations(
+  deps: RunnerDeps,
+  config: DepartmentConfig<z.ZodTypeAny>,
+  ctx: DepartmentContext,
+  questions: readonly OpenQuestion[],
+): { readonly artifactIds: readonly string[]; readonly contradiction?: string } {
+  const at = deps.clock.now();
+  const ids: string[] = [];
+  const plannedStages = new Set(ctx.plan.upstreamToRun.map((st) => st.stageId));
+
+  for (const q of questions) {
+    const owner = deps.departments?.find(
+      (d) => q.missingCanon !== undefined && d.produces.includes(q.missingCanon as never),
+    );
+    if (owner === undefined) {
+      return {
+        artifactIds: [],
+        contradiction:
+          config.title +
+          ' is waiting on ' +
+          String(q.missingCanon) +
+          ', which no registered department produces: nothing will ever satisfy it',
+      };
+    }
+    if (!plannedStages.has(owner.stageId)) {
+      return {
+        artifactIds: [],
+        contradiction:
+          config.title +
+          ' is waiting on ' +
+          String(q.missingCanon) +
+          ', owed by ' +
+          owner.stageId +
+          ', which ' +
+          ctx.plan.profileId +
+          ' does not run: the profile and the dependency contradict each other',
+      };
+    }
+  }
+
+  const tx = deps.store.begin();
+  try {
+    for (const q of questions) {
+      const owner = deps.departments?.find(
+        (d) => q.missingCanon !== undefined && d.produces.includes(q.missingCanon as never),
+      );
+      const id = deps.ids.next('SC-OQ');
+      repository(deps.store, ARTIFACT_TYPES.OPEN_QUESTION, OpenQuestionSchema).put(tx, {
+        id,
+        createdAt: at,
+        question: q.detail,
+        blocks: [],
+        askedOf: 'UPSTREAM_DEPARTMENT',
+        state: 'OPEN',
+        raisedBy: config.id,
+        ...(q.runId === undefined ? {} : { raisedByRun: q.runId }),
+        sourceFields: [...q.sources],
+        ...(q.missingCanon === undefined ? {} : { missingCanon: q.missingCanon }),
+        ...(owner === undefined ? {} : { owedByStage: owner.stageId }),
+        meta: openQuestionMeta(config, ctx, q, at),
+      });
+      ids.push(id);
+    }
+    tx.commit();
+  } catch {
+    tx.rollback();
+    return { artifactIds: [] };
+  }
+  return { artifactIds: ids };
+}
+
+/** Provenance for a routed question: who asked, in which run, from which field. */
+function openQuestionMeta(
+  config: DepartmentConfig<z.ZodTypeAny>,
+  ctx: DepartmentContext,
+  q: OpenQuestion,
+  at: string,
+): IntelligenceMeta {
+  return {
+    provenance: {
+      marking: SourceMarking.SYSTEM,
+      component:
+        'intelligence-runner: routed from ' + config.agentId + ' via ' + q.sources.join('+'),
+    },
+    attribution: {
+      ...(q.runId === undefined ? {} : { runId: q.runId }),
+      agentId: config.agentId,
+      at,
+    },
+    stageId: config.stageId,
+    workItemId: ctx.workItemId,
+  };
 }
 
 /**
@@ -488,7 +685,13 @@ export async function runDepartment<S extends z.ZodTypeAny>(
         basis:
           'company intelligence run: no filesystem, no execution, no network; any external evidence was retrieved by Serva and is present as untrusted data',
       },
-      canon: [...spec.canon, ...prepared.canon, ...answeredForThisDepartment].map((c) => ({
+      canon: [
+        ...spec.canon,
+        ...prepared.canon,
+        ...answeredForThisDepartment,
+        /* Exactly what an earlier attempt asked for, and nothing more. */
+        ...(ctx.supplied ?? []),
+      ].map((c) => ({
         source: c.source,
         kind: c.kind,
         version: c.version,
@@ -580,7 +783,24 @@ export async function runDepartment<S extends z.ZodTypeAny>(
       store: deps.store,
       workItemId: ctx.workItemId,
       produces: config.produces,
-      canResearch: ctx.gateway !== undefined,
+      /*
+       * RESEARCH AUTHORITY IS NOT THE PRESENCE OF A GATEWAY.
+       *
+       * The orchestrator puts one gateway in the context for the whole run, so testing
+       * `ctx.gateway !== undefined` would have let any department claim a research route
+       * merely because the project has a research capability at all — a UX designer
+       * included.
+       *
+       * Authority comes from the same three things the gateway itself checks: the
+       * department declares it uses research, the canonical contract grants network scope,
+       * and a gateway exists to do it with. `assertResearchAuthority` is untouched and
+       * still refuses at the point of retrieval; this only stops Serva ROUTING a question
+       * somewhere it could never be answered.
+       */
+      canResearch:
+        config.usesResearchGateway === true &&
+        parseToolSurface(contract).net &&
+        ctx.gateway !== undefined,
       ...(run.runId === undefined ? {} : { runId: run.runId }),
     });
 
@@ -599,7 +819,142 @@ export async function runDepartment<S extends z.ZodTypeAny>(
       );
     }
 
+    /* --------------------------------------------------- EXISTING_STORE_FACT: supply it */
+
+    const facts = questions.filter((q) => q.routing === QuestionRouting.EXISTING_STORE_FACT);
+    if (facts.length > 0 && attempt < MAX_FACT_ATTEMPTS) {
+      /*
+       * The answer is already canon and this run was not shown it. Saying so in a log and
+       * failing would be describing the fix rather than applying it.
+       *
+       * So the exact artifact is bound into the context and the department runs once more.
+       * ONCE: `MAX_FACT_ATTEMPTS` is 2, so a run that asks the same question again after
+       * being handed the answer fails explicitly rather than looping. The whole Store is
+       * not opened up — only the artifacts the questions actually named.
+       */
+      const supplied = facts
+        .map((q) => q.factRef)
+        .filter((id): id is string => id !== undefined)
+        .map((id) => canonAsContext(deps.store, id))
+        .filter((c): c is ContextElement => c !== undefined);
+
+      if (supplied.length > 0) {
+        diagnostics.push(
+          'supplying ' +
+            supplied.map((c) => c.source).join(', ') +
+            ' and retrying ' +
+            config.title +
+            ' once',
+        );
+        /*
+         * The retry's diagnostics are prepended with this attempt's, so the trace shows
+         * that a question was asked, what was supplied and that a second attempt happened.
+         * A recursive call with a fresh diagnostics array would leave the record saying
+         * the department simply worked, which is not what happened.
+         */
+        const retried = await runDepartment(deps, config, { ...ctx, supplied }, attempt + 1);
+        return { ...retried, diagnostics: [...diagnostics, ...retried.diagnostics] };
+      }
+    }
+    if (facts.length > 0) {
+      /*
+       * Second time round with the fact in hand, still asking. That is a run that did not
+       * use what it was given, and retrying again would be a loop with a nicer name.
+       */
+      return {
+        ...refuse(
+          DepartmentOutcome.FAILED,
+          config.title +
+            ' was given ' +
+            facts.map((q) => q.factRef ?? '(unnamed)').join(', ') +
+            ' and asked for it again: ' +
+            facts.map((q) => q.detail).join('; '),
+        ),
+        runId: run.runId,
+      };
+    }
+
+    /* ------------------------------------------------------- RESEARCH: a real obligation */
+
+    const forResearch = questions.filter((q) => q.routing === QuestionRouting.RESEARCH);
+    if (forResearch.length > 0) {
+      const raised = raiseResearchObligations(deps, config, ctx, forResearch);
+      return {
+        ...base,
+        outcome: DepartmentOutcome.PREREQUISITE_MISSING,
+        runId: run.runId,
+        artifactIds: raised,
+        diagnostics,
+        reason:
+          config.title +
+          ' needs evidence Serva must retrieve: ' +
+          forResearch.map((q) => q.detail).join('; ') +
+          '. Recorded as ' +
+          String(raised.length) +
+          ' research obligation(s); this department does not retrieve for itself.',
+      };
+    }
+
+    /* --------------------------------------------- UPSTREAM_DEPARTMENT: a real obligation */
+
+    const forUpstream = questions.filter((q) => q.routing === QuestionRouting.UPSTREAM_DEPARTMENT);
+    if (forUpstream.length > 0) {
+      const { artifactIds, contradiction } = raiseUpstreamObligations(
+        deps,
+        config,
+        ctx,
+        forUpstream,
+      );
+      if (contradiction !== undefined) {
+        /*
+         * The canon is owed by a stage this profile does not run. Nobody will ever produce
+         * it, so waiting is not a plan and asking the owner would be asking them to do
+         * Serva's departmental work.
+         */
+        return { ...refuse(DepartmentOutcome.FAILED, contradiction), runId: run.runId };
+      }
+      return {
+        ...base,
+        outcome: DepartmentOutcome.PREREQUISITE_MISSING,
+        runId: run.runId,
+        artifactIds,
+        diagnostics,
+        reason:
+          config.title +
+          ' is waiting on canon another department owes: ' +
+          forUpstream.map((q) => String(q.missingCanon)).join(', '),
+      };
+    }
+
+    /* ------------------------------------------------------ ALREADY_ROUTED / _ANSWERED */
+
+    const settled = questions.filter(
+      (q) =>
+        q.routing === QuestionRouting.ALREADY_ANSWERED ||
+        q.routing === QuestionRouting.ALREADY_ROUTED,
+    );
+    if (settled.length > 0 && settled.length === questions.length) {
+      /*
+       * Everything it asked has already been asked or answered, and it asked anyway. No
+       * duplicate is created — that property is the whole point — but the run has failed
+       * to use authoritative context it was given, and that is worth saying out loud
+       * rather than quietly retrying.
+       */
+      return {
+        ...refuse(
+          DepartmentOutcome.FAILED,
+          config.title +
+            ' raised only questions that are already settled or outstanding, and did not use the answers it was given: ' +
+            settled.map((q) => q.detail).join('; '),
+        ),
+        runId: run.runId,
+      };
+    }
+
+    /* --------------------------------------------------------------- OWNER_DECISION */
+
     const forOwner = questions.filter((q) => q.routing === QuestionRouting.OWNER_DECISION);
+
     if (forOwner.length > 0) {
       const raised = raiseEscalationDecisions(deps, config, ctx, forOwner);
       if (raised.length > 0) {

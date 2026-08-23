@@ -9,10 +9,12 @@ import {
   ProposalState,
   approvalRefusal,
 } from './artifacts/governance.js';
-import { readTerminalSnapshot, runStream } from '../events/agentRun.js';
+import { readTerminalSnapshot } from '../events/agentRun.js';
 import { RunOutcome } from '../vocab/index.js';
 import { ContractRegistry } from '../agents/registry.js';
 import { contractOutputTypes } from './execution/authority.js';
+import { ProductDecisionSchema } from './artifacts/product.js';
+import { DesignDecisionSchema } from './artifacts/design.js';
 import type { OwnerDecisionRequest, Proposal } from './artifacts/governance.js';
 import type { Store } from '../store/store.js';
 import type { Clock } from '../core/clock.js';
@@ -238,9 +240,11 @@ export function requestProposalApproval(
  *
  * Acceptance now requires a durable event:
  *
- *   agent-owned canon — a completed, governed AgentRun by an owning authority, whose
- *   result names this exact proposal. The run is looked up in the Store; the caller
- *   supplies its id, not its conclusion.
+ *   agent-owned canon — a canonical decision artifact recording an explicit typed
+ *   disposition on this exact proposal, written by an authority that owns the affected
+ *   family and attributed to a completed governed run. A mention is not a ruling: the
+ *   previous version accepted any completed owning-agent run whose trace contained the
+ *   proposal id, which passed a run that had recorded REJECT.
  *
  *   owner-reserved canon — an answered OwnerDecisionRequest with purpose
  *   PROPOSAL_APPROVAL, targeting this proposal, on an option whose disposition is APPROVE.
@@ -249,7 +253,7 @@ export function requestProposalApproval(
 export function acceptanceRefusal(
   store: Store,
   p: Proposal,
-  o: { readonly authorityRunId?: string; readonly ownerDecisionId?: string },
+  o: { readonly authorityDecisionId?: string; readonly ownerDecisionId?: string },
 ): string | undefined {
   const owners = owningAuthorities(p.affectsCanon);
 
@@ -275,7 +279,7 @@ export function acceptanceRefusal(
     });
   }
 
-  /* ------------------------------------------- agent-owned: a governed run must exist */
+  /* ------------------------------------- agent-owned: a typed decision must exist */
   if (o.ownerDecisionId !== undefined) {
     /* The owner outranks the owning agent, so an owner approval is accepted here too. */
     const decision = repository(
@@ -289,7 +293,7 @@ export function acceptanceRefusal(
     });
   }
 
-  if (o.authorityRunId === undefined) {
+  if (o.authorityDecisionId === undefined) {
     return (
       'proposal ' +
       p.id +
@@ -297,59 +301,107 @@ export function acceptanceRefusal(
       p.affectsCanon +
       ', which belongs to ' +
       [...owners].sort().join(' or ') +
-      '. Acceptance needs that authority\u2019s governed run, or an owner decision — not a name.'
+      '. Acceptance needs a recorded decision by that authority, or an owner decision.'
     );
   }
 
-  const snapshot = readTerminalSnapshot(store, o.authorityRunId) as
-    { readonly agentId?: string; readonly outcome?: string } | undefined;
-  if (snapshot === undefined) {
-    return 'no governed run ' + o.authorityRunId + ' exists in this project';
+  const ruling = findProposalRuling(store, o.authorityDecisionId);
+  if (ruling === undefined) {
+    return 'no decision ' + o.authorityDecisionId + ' exists in this project';
   }
-  if (snapshot.outcome !== RunOutcome.COMPLETED) {
+
+  /*
+   * THE DECISION, NOT THE MENTION.
+   *
+   * The previous rule accepted a completed run by an owning authority whose immutable
+   * trace contained the proposal id. That proves the run was ABOUT the proposal and says
+   * nothing about what it concluded — a run that recorded "REJECT SC-PROP-000001" passed
+   * it, and so did a run that merely had the proposal in its context.
+   *
+   * What is resolved now is a canonical decision artifact carrying an explicit typed
+   * disposition. It is un-forgeable by construction rather than by checking: the
+   * ScopedCanonWriter restricts each decision family to the agent whose contract declares
+   * it, so a ProductDecision exists only because SC-AGENT-020 wrote one.
+   */
+  if (ruling.proposalRef?.id !== p.id) {
     return (
-      'run ' + o.authorityRunId + ' ended ' + String(snapshot.outcome) + ', so it decided nothing'
+      'decision ' +
+      o.authorityDecisionId +
+      ' rules on ' +
+      String(ruling.proposalRef?.id) +
+      ', not on ' +
+      p.id
     );
   }
-  if (snapshot.agentId === undefined || !owners.has(snapshot.agentId)) {
+
+  const author = ruling.meta.attribution.agentId;
+  if (author === undefined || !owners.has(author)) {
     return (
-      'run ' +
-      o.authorityRunId +
-      ' was made by ' +
-      String(snapshot.agentId) +
+      'decision ' +
+      o.authorityDecisionId +
+      ' was recorded by ' +
+      String(author) +
       ', which does not own ' +
       p.affectsCanon
     );
   }
-  if (snapshot.agentId === p.origin) {
+  if (author === p.origin) {
     return (
       'proposal ' +
       p.id +
       ' was raised by ' +
       p.origin +
-      ' and accepted by its own run: an actor accepting its own idea is how scope grows without anybody agreeing to it'
+      ' and ruled on by itself: an actor accepting its own idea is how scope grows without anybody agreeing to it'
     );
   }
 
-  /*
-   * The run must be ABOUT this proposal.
-   *
-   * Checked against the run's own immutable event log rather than a summary, because the
-   * terminal record does not carry the payload and a summary is the thing a caller would
-   * be tempted to shape. A completed Product Manager run that happened to exist is not a
-   * decision to accept something it never mentioned.
-   */
-  const mentioned = store
-    .readTrace(runStream(o.authorityRunId))
-    .some((e) => JSON.stringify(e.payload).includes(p.id));
-  if (!mentioned) {
+  const runId = ruling.meta.attribution.runId;
+  if (runId === undefined) {
     return (
-      'run ' +
-      o.authorityRunId +
-      ' never mentions proposal ' +
-      p.id +
-      ': an unrelated run by the right actor is not a decision about this one'
+      'decision ' +
+      o.authorityDecisionId +
+      ' is not attributed to a governed run, so nothing records the act of deciding'
     );
+  }
+  const snapshot = readTerminalSnapshot(store, runId) as
+    { readonly outcome?: string; readonly agentId?: string } | undefined;
+  if (snapshot === undefined) {
+    return 'decision ' + o.authorityDecisionId + ' cites run ' + runId + ', which does not exist';
+  }
+  if (snapshot.outcome !== RunOutcome.COMPLETED) {
+    return 'run ' + runId + ' ended ' + String(snapshot.outcome) + ', so it decided nothing';
+  }
+
+  const disposition = ruling.proposalDisposition;
+  if (disposition !== OptionDisposition.APPROVE) {
+    return (
+      'the owning authority recorded ' + String(disposition) + ' on ' + p.id + ', not an approval'
+    );
+  }
+  return undefined;
+}
+
+/** A ruling on a proposal, from whichever canonical decision family recorded it. */
+interface ProposalRuling {
+  readonly proposalRef?: { readonly id: string };
+  readonly proposalDisposition?: string;
+  readonly meta: { readonly attribution: { readonly agentId?: string; readonly runId?: string } };
+}
+
+/**
+ * Find the decision artifact with this id, in any family that can rule on a proposal.
+ *
+ * Two families today — ProductDecision and DesignDecision — because those are the two `32`
+ * declares as canon. Looking across them rather than requiring the caller to say which is
+ * deliberate: the caller supplies an id, and Serva works out what it is.
+ */
+function findProposalRuling(store: Store, decisionId: string): ProposalRuling | undefined {
+  for (const [type, schema] of [
+    [ARTIFACT_TYPES.PRODUCT_DECISION, ProductDecisionSchema],
+    [ARTIFACT_TYPES.DESIGN_DECISION, DesignDecisionSchema],
+  ] as const) {
+    const found = repository(store, type, schema).get(decisionId);
+    if (found !== undefined) return found as ProposalRuling;
   }
   return undefined;
 }
@@ -419,8 +471,13 @@ export function accept(
   deps: ProposalDeps,
   o: {
     readonly proposalId: string;
-    /** A completed governed run by the authority that owns the affected canon. */
-    readonly authorityRunId?: string;
+    /**
+     * A canonical decision artifact recording the owning authority's typed ruling.
+     *
+     * Not a run id and not a disposition. The caller says which decision; Serva reads what
+     * it says, who wrote it and which run produced it.
+     */
+    readonly authorityDecisionId?: string;
     /** An answered PROPOSAL_APPROVAL decision targeting this proposal. */
     readonly ownerDecisionId?: string;
   },
@@ -457,7 +514,7 @@ export function accept(
     deps,
     { ...p, state: ProposalState.ACCEPTED },
     {
-      authorityRunId: o.authorityRunId ?? null,
+      authorityDecisionId: o.authorityDecisionId ?? null,
       ownerDecisionId: o.ownerDecisionId ?? null,
     },
   );

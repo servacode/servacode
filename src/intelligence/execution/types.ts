@@ -63,6 +63,14 @@ export interface DepartmentContext {
   readonly ownerRequest?: string;
   /** Present only for research-class departments. Absent everywhere else. */
   readonly gateway?: GatewayDeps;
+  /**
+   * Exact canon the runner is handing back after a question it could answer.
+   *
+   * Set only on a bounded retry, and only with the artifacts the run's own questions
+   * named. Not a widening of context: a department that asked about SC-REQ-000003 gets
+   * SC-REQ-000003, not the requirements baseline.
+   */
+  readonly supplied?: readonly ContextElement[];
 }
 
 /** The outcome of Serva's pre-run work for a department. */
@@ -268,6 +276,18 @@ export interface DepartmentResult {
 
 export interface RunnerDeps {
   readonly store: Store;
+  /**
+   * Every registered department, so the runner can resolve which stage owes a canon family.
+   *
+   * Read-only, and used for exactly that: routing an upstream obligation needs to know who
+   * produces the missing artifact, and guessing from a naming convention would be a second
+   * source of truth about ownership.
+   */
+  readonly departments?: readonly {
+    readonly id: string;
+    readonly stageId: string;
+    readonly produces: readonly ArtifactType[];
+  }[];
   readonly clock: Clock;
   readonly ids: IdSource;
   readonly registry: ContractRegistry;
