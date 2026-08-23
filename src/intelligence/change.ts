@@ -17,6 +17,7 @@ import {
 import { readOrchestratorRecord, writeOrchestratorRecord } from './execution/orchestrator.js';
 import { GateVerdict } from '../vocab/index.js';
 import { resolveApplicability } from './applicability.js';
+import { UPSTREAM_DEPARTMENTS } from './app.js';
 import type {
   ChangeRequest,
   ImpactAnalysis,
@@ -99,6 +100,24 @@ export interface ChangeDeps {
   readonly store: Store;
   readonly clock: Clock;
   readonly ids: IdSource;
+  /** The registered departments, for resolving which belong to a re-entered stage. */
+  readonly departments?: readonly { readonly id: string; readonly stageId: string }[];
+}
+
+/**
+ * Which department ids belong to these stages.
+ *
+ * Read from the registered configuration rather than from a naming convention: a
+ * department id that happens to contain a stage number is a coincidence, and re-entry
+ * clearing the wrong departments would either repeat work nobody asked for or skip work
+ * somebody did.
+ */
+function departmentsOfStages(deps: ChangeDeps, stages: ReadonlySet<string>): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const d of deps.departments ?? UPSTREAM_DEPARTMENTS) {
+    if (stages.has(d.stageId)) ids.add(d.id);
+  }
+  return ids;
 }
 
 /** Raise a change. Recording it is not approving it, and it is not scope. */
@@ -638,6 +657,13 @@ export function applyReentry(
       state: 'RUNNING',
       completedStages: record.completedStages.filter((s) => !rerun.has(s)),
       ranStages: record.ranStages.filter((s) => !rerun.has(s)),
+      /*
+       * The per-department progress for the re-run stages goes too. Leaving it would make
+       * the resume skip exactly the departments the re-entry exists to repeat.
+       */
+      completedDepartments: record.completedDepartments.filter(
+        (id) => !departmentsOfStages(deps, rerun).has(id),
+      ),
       gateResults: record.gateResults.filter((g) => !gatesOfRerun.has(g.gateId)),
       pendingOwnerDecisions: [],
       updatedAt: deps.clock.now(),

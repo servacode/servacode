@@ -76,6 +76,17 @@ export const OrchestratorRecordSchema = z
      * the gate, not re-run the department and write them twice.
      */
     ranStages: z.array(z.string().min(1)).default([]),
+    /**
+     * Departments that have COMPLETED, by id.
+     *
+     * Stage-level progress is too coarse for a stage with several departments. Stage 011
+     * runs the requirements author, the NFR specialist and the independent verifier; if
+     * the author completes and the specialist times out, the stage is neither complete nor
+     * un-run. Recording only the stage means a resume re-runs the author, writes its canon
+     * a second time, and spends the money again — and the live suite has already produced
+     * exactly that timeout, so this is not a hypothetical.
+     */
+    completedDepartments: z.array(z.string().min(1)).default([]),
     /** The stage that stopped us, when we stopped. */
     haltedAtStage: z.string().min(1).optional(),
     /** Open owner decisions blocking the halted stage. */
@@ -183,6 +194,7 @@ export class IntelligenceOrchestrator {
         state: OrchestratorState.NOT_STARTED,
         completedStages: [],
         ranStages: [],
+        completedDepartments: [],
         pendingOwnerDecisions: [],
         gateResults: [],
         updatedAt: this.deps.clock.now(),
@@ -345,6 +357,48 @@ export class IntelligenceOrchestrator {
       return { state: record.state, record, ran };
     }
 
+    /*
+     * WHICH BLOCKED STATES MAY BE RETRIED.
+     *
+     * Not all of them, and `serva intelligence resume` must not treat BLOCKED as blanket
+     * permission to try again. Three kinds of blockage look identical in the record and
+     * are not the same thing at all:
+     *
+     *   a TRANSIENT failure — a timeout, an engine error, a provider hiccup. Retrying is
+     *   the correct response, and the per-department progress above means it costs only
+     *   the department that failed.
+     *
+     *   a REFUSED run — the department was not enabled, independence did not hold, its
+     *   contract does not authorise what it tried to write. Retrying is pointless: the
+     *   configuration will refuse it again, identically, for free. What it needs is a
+     *   change to the configuration, not another attempt.
+     *
+     *   a GATE that returned FAIL — the evidence was assessed and found wanting.
+     *   Re-running the same departments over the same canon produces the same verdict;
+     *   what has to change is the canon, which is a change request rather than a retry.
+     *
+     * So a resume advances the transient case and reports the other two, naming which it
+     * is. Retrying a refusal in a loop is how an operator learns to ignore the reason.
+     */
+    if (record.state === OrchestratorState.BLOCKED) {
+      const reason = record.blockedReason ?? '';
+      const terminal =
+        /is not enabled for execution|marking your own work is not review|not among its canonical outputs|no department is wired|returned FAIL/.test(
+          reason,
+        );
+      if (terminal) {
+        return {
+          state: OrchestratorState.BLOCKED,
+          record,
+          ran,
+          reason:
+            'this run is blocked by something a retry cannot change: ' +
+            reason +
+            ' — resolve it and start the affected stage again rather than resuming',
+        };
+      }
+    }
+
     const completed = new Set(record.completedStages);
     const alreadyRan = new Set(record.ranStages);
 
@@ -409,6 +463,7 @@ export class IntelligenceOrchestrator {
         };
 
         const pending: string[] = [];
+        const doneDepartments = new Set(record.completedDepartments);
         /*
          * True when a department stopped BEFORE writing anything. The stage then does not
          * count as run: resuming must execute it again with the owner's answer in context,
@@ -416,8 +471,19 @@ export class IntelligenceOrchestrator {
          */
         let mustRerunStage = false;
         for (const config of configs) {
+          /*
+           * A department that already completed does not run again. Its canon is written,
+           * its judgements reached the gate, and re-running it would duplicate all three —
+           * the artifacts, the owner decisions, and the model spend.
+           */
+          if (doneDepartments.has(config.id)) continue;
+
           const result = await runDepartment(this.deps, config, ctx);
           ran.push(result);
+          if (result.outcome === DepartmentOutcome.COMPLETED) {
+            doneDepartments.add(config.id);
+            record = this.write({ ...record, completedDepartments: [...doneDepartments] });
+          }
           for (const j of result.judgements ?? []) this.judgements.set(j.criterionRef, j);
 
           if (result.outcome === DepartmentOutcome.OWNER_DECISION_REQUIRED) {
@@ -468,6 +534,7 @@ export class IntelligenceOrchestrator {
               gateResults,
               completedStages: [...completed],
               ranStages: [...alreadyRan],
+              completedDepartments: [...doneDepartments],
             });
             return {
               state: OrchestratorState.BLOCKED,
@@ -493,6 +560,7 @@ export class IntelligenceOrchestrator {
             pendingOwnerDecisions: pending,
             completedStages: [...completed],
             ranStages: [...alreadyRan],
+            completedDepartments: [...doneDepartments],
           });
           return {
             state: OrchestratorState.WAITING_FOR_OWNER,
@@ -539,6 +607,13 @@ export class IntelligenceOrchestrator {
       }
 
       completed.add(stage.stageId);
+      /*
+       * The stage is done, so its per-department bookkeeping has served its purpose. It is
+       * kept rather than cleared: re-entry removes the stage from `completedStages`, and
+       * without clearing these too the re-run would skip every department it is supposed
+       * to repeat. `applyReentry` does the clearing, where it knows which stages are
+       * affected — doing it here would clear them for stages nobody is re-running.
+       */
       record = this.write({
         ...record,
         state: OrchestratorState.RUNNING,

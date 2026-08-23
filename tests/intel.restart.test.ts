@@ -12,6 +12,7 @@ import { configureResearchSeeds } from '../src/intelligence/departments/research
 import { assessReadiness } from '../src/intelligence/readiness.js';
 import { generateWorkItems } from '../src/intelligence/handoff.js';
 import { readCriterionEvaluations } from '../src/gates/engine.js';
+import { ARTIFACT_TYPES } from '../src/intelligence/repository.js';
 import { cleanup, tempRoot } from './helpers.js';
 import { E2E_SCRIPT, resolvingEngine, seedRetriever } from './fixtures/intelE2E.js';
 
@@ -169,5 +170,134 @@ describe('readiness survives the process that produced it', () => {
     };
     expect(Object.keys(input).sort()).toEqual(['clock', 'ids', 'store', 'workItemId']);
     expect('reviews' in input).toBe(false);
+  }, 180_000);
+});
+
+describe('a stage that half-completed does not half-repeat', () => {
+  const PARTIAL = 'SC-WI-000961';
+
+  /**
+   * Stage 011 runs three departments: the requirements author, the NFR specialist and the
+   * independent verifier. This scripts the author to succeed and the specialist to fail,
+   * which is exactly what a live run produced when the NFR specialist exceeded its
+   * wall-clock budget.
+   */
+  function scripted(store: Store, clock: FixedClock, ids: SequentialIdSource, failNfr: boolean) {
+    const engine = new FakeEngineAdapter({ clock });
+    for (const [agentId, output] of E2E_SCRIPT) {
+      if (failNfr && agentId === 'SC-AGENT-051') continue;
+      engine.script(agentId, { structuredOutput: output });
+    }
+    configureResearchSeeds({ hosts: ['example.com'], urls: ['https://example.com/rival-a'] });
+    return {
+      store,
+      clock,
+      ids,
+      engine: resolvingEngine(engine, store),
+      projectRoot: '/nowhere',
+      gateway: { store, clock, ids, retriever: seedRetriever() },
+    };
+  }
+
+  it('the completed department is not re-run, and its canon is not written twice', async () => {
+    const root = tempRoot();
+    roots.push(root);
+    const clock = new FixedClock();
+    const ids = new SequentialIdSource();
+    const store = Store.initialize(root, { clock, ids, actor: 'PARTIAL_TEST' });
+
+    /* --- first process: the author completes, the NFR specialist has no response --- */
+    recordIdea(scripted(store, clock, ids, true), 'bakery order capture');
+    const first = await intelligenceOrchestrator(
+      scripted(store, clock, ids, true),
+      PARTIAL,
+      'PRF-NEW-PRODUCT',
+    ).advance();
+
+    expect(first.state).toBe(OrchestratorState.BLOCKED);
+    const firstRuns = first.ran.map((r) => r.agentId + ':' + r.outcome);
+    expect(firstRuns).toContain('SC-AGENT-050:COMPLETED');
+    expect(firstRuns.join(' ')).toContain('SC-AGENT-051:FAILED');
+
+    const requirementsAfterFirst = store.listCanonIds(ARTIFACT_TYPES.REQUIREMENT);
+    expect(requirementsAfterFirst.length).toBeGreaterThan(0);
+    const versionsAfterFirst = requirementsAfterFirst.map((id) =>
+      store.listCanonVersions(ARTIFACT_TYPES.REQUIREMENT, id),
+    );
+
+    /*
+     * --- a fresh process, with the NFR specialist now answering ---
+     *
+     * The id source is carried across rather than recreated. Production uses
+     * `TimeOrderedIdSource`, which is monotonic across processes by construction; the
+     * deterministic `SequentialIdSource` these tests use restarts at 1, and a second
+     * process minting SC-RUN-000001 again would collide with the first process's trace.
+     * That is a property of the test double, not of the Store, so it is modelled here
+     * rather than worked around in the product.
+     */
+    const clock2 = new FixedClock();
+    const ids2 = ids;
+    const reopened = Store.open(root, { clock: clock2, ids: ids2, actor: 'PARTIAL_TEST_2' });
+    const second = await intelligenceOrchestrator(
+      scripted(reopened, clock2, ids2, false),
+      PARTIAL,
+      'PRF-NEW-PRODUCT',
+    ).advance();
+
+    /* The author does NOT run again. */
+    const secondRuns = second.ran.map((r) => r.agentId);
+    const detail =
+      'state=' +
+      second.state +
+      ' reason=' +
+      (second.reason ?? '-') +
+      ' ran=' +
+      second.ran.map((r) => r.agentId + ':' + r.outcome + '(' + (r.reason ?? '') + ')').join(', ');
+    expect(secondRuns).not.toContain('SC-AGENT-050');
+    /* The specialist does, and so does the verifier that was waiting behind it. */
+    expect(secondRuns).toContain('SC-AGENT-051');
+    expect(secondRuns, detail).toContain('SC-AGENT-052');
+
+    /* And the requirements are exactly the ones the first process wrote. */
+    expect(reopened.listCanonIds(ARTIFACT_TYPES.REQUIREMENT)).toEqual(requirementsAfterFirst);
+    expect(
+      requirementsAfterFirst.map((id) =>
+        reopened.listCanonVersions(ARTIFACT_TYPES.REQUIREMENT, id),
+      ),
+    ).toEqual(versionsAfterFirst);
+
+    configureResearchSeeds({ hosts: [], urls: [] });
+  }, 180_000);
+
+  it('no owner decision is raised twice by a resumed stage', async () => {
+    const root = tempRoot();
+    roots.push(root);
+    const clock = new FixedClock();
+    const ids = new SequentialIdSource();
+    const store = Store.initialize(root, { clock, ids, actor: 'PARTIAL_TEST' });
+
+    recordIdea(scripted(store, clock, ids, true), 'bakery order capture');
+    await intelligenceOrchestrator(
+      scripted(store, clock, ids, true),
+      PARTIAL,
+      'PRF-NEW-PRODUCT',
+    ).advance();
+    const decisionsAfterFirst = store.listCanonIds(ARTIFACT_TYPES.OWNER_DECISION_REQUEST);
+
+    const clock2 = new FixedClock();
+    const ids2 = ids;
+    const reopened = Store.open(root, { clock: clock2, ids: ids2, actor: 'PARTIAL_TEST_2' });
+    await intelligenceOrchestrator(
+      scripted(reopened, clock2, ids2, false),
+      PARTIAL,
+      'PRF-NEW-PRODUCT',
+    ).advance();
+
+    /* Whatever the first pass asked, the second does not ask again. */
+    const afterSecond = reopened.listCanonIds(ARTIFACT_TYPES.OWNER_DECISION_REQUEST);
+    for (const id of decisionsAfterFirst) expect(afterSecond).toContain(id);
+    expect(new Set(afterSecond).size).toBe(afterSecond.length);
+
+    configureResearchSeeds({ hosts: [], urls: [] });
   }, 180_000);
 });
