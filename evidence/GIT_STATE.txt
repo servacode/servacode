@@ -1,22 +1,19 @@
  M evidence/BASELINE_COMMIT.txt
  M evidence/GIT_STATE.txt
 --- log ---
-7340e7c docs: Phase 5 report, manifest and evidence
-05466e3 intelligence: a run that did not complete has its question asked, whatever it called it
-a421938 intelligence: an ESCALATED run is blocked whatever it ticked
-54aabb6 cli: serva intelligence changes
-c6055f7 intelligence: Serva states what research happened, not the agent
-9eef627 intelligence: a blocking escalation is a question, not an error
-cac65d5 intelligence: security acceptance, the real retriever, live intelligence suite
-3a2a62a intelligence: scenarios B, C and D; re-entry is a delta, not a suffix
-73d2862 intelligence: change, proposals, learning, owner CLI, authority proofs
-61425a2 intelligence: all 26 departments execute, 12 gates, readiness, Phase 4 handoff
-c4b5fc1 serva: Phase 5 design authority — architecture through admin operability
-fd3e970 serva: Phase 5 research chain — gather, verify, interpret, propose
-41b1c57 serva: Phase 5 intelligence execution core
-00af7d3 serva: Phase 5 research trust boundary and deterministic checkers
-d36dea1 serva: Phase 5 artifact schemas and the canon repository
-42c1fc5 serva: Phase 5 foundation — profiles, applicability, provenance, first artifacts
-f4866b2 serva: Phase 4 final baseline report
+e4e4a77 docs: Phase 5 final closure report
+7efdfce live: the test owner answers an option that was actually offered
+98d3c15 closure 8c: an unclassified obligation is now impossible, not merely caught
+146e71c closure 8b: the ledger caught a green no-op in the ledger
+b795457 closure 11: the production CLI path, proved in a separate process
+150b6c7 closure 8: a live test cannot pass for an assertion it never reached
+c2db858 closure 6: the learning roles run on the governed substrate
+d39af14 closure 7: a stage that half-completed does not half-repeat
+5adff93 closure 4+5: a change must be carried through, a proposal accepted by its owner
+62c8f87 closure 3: canonical output authority, enforced at the write boundary
+d38f650 closure 2: readiness reconstructs its reviews from the Store
+1a7b4a7 closure 1: an owner approval is bound to what it approves
+a37cdde docs: manifest test count
+8190fef docs: manifest names both commits
 --- branch ---
 phase-5-company-intelligence

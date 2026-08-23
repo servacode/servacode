@@ -10,308 +10,757 @@
   "artifactTypes": 110,
   "departments": [
     {
+      "id": "DEPT-INTAKE",
       "stage": "SC-STAGE-002",
       "agent": "SC-AGENT-020",
       "title": "Intake",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.clientInput",
+        "intel.projectGoal",
+        "intel.constraint",
+        "intel.openQuestion"
+      ],
+      "beyondContract": [
+        "intel.clientInput",
+        "intel.projectGoal",
+        "intel.constraint",
+        "intel.openQuestion"
+      ],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.productScope",
+        "intel.validationRecommendation"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-DISCOVERY",
       "stage": "SC-STAGE-003",
       "agent": "SC-AGENT-030",
       "title": "Discovery",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.userSegment",
+        "intel.jobToBeDone",
+        "intel.currentAlternative",
+        "intel.pain",
+        "intel.discoveryFindings"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.userSegment",
+        "intel.jobToBeDone",
+        "intel.currentAlternative",
+        "intel.pain",
+        "intel.discoveryFindings"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-PRODUCT-VALIDATION",
       "stage": "SC-STAGE-004",
       "agent": "SC-AGENT-020",
       "title": "Product Validation",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.productScope",
+        "intel.feature",
+        "intel.validationRecommendation"
+      ],
+      "beyondContract": [
+        "intel.feature"
+      ],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.productScope",
+        "intel.validationRecommendation"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-BUSINESS-ANALYSIS",
       "stage": "SC-STAGE-010",
       "agent": "SC-AGENT-040",
       "title": "Business Analysis",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.actor",
+        "intel.role",
+        "intel.businessRule",
+        "intel.processModel",
+        "intel.stateMachine",
+        "intel.glossary",
+        "intel.financialLogic"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.businessRule",
+        "intel.actor",
+        "intel.role",
+        "intel.processModel",
+        "intel.stateMachine",
+        "intel.glossary",
+        "intel.financialLogic"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-REQUIREMENTS",
       "stage": "SC-STAGE-011",
       "agent": "SC-AGENT-050",
       "title": "Requirements Engineering",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.requirement",
+        "intel.acceptanceCriterion"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.requirement",
+        "intel.acceptanceCriterion",
+        "intel.requirementBaseline"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-NFR",
       "stage": "SC-STAGE-011",
       "agent": "SC-AGENT-051",
       "title": "NFR Specification",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.nfr"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.nfr"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-REQUIREMENTS-VERIFIER",
       "stage": "SC-STAGE-011",
       "agent": "SC-AGENT-052",
       "title": "Requirements Quality Verification",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption"
+      ],
       "independentOf": [
         "SC-AGENT-050",
         "SC-AGENT-051"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-MARKET-RESEARCH",
       "stage": "SC-STAGE-013",
       "agent": "SC-AGENT-060",
       "title": "Market Research",
-      "deterministic": false,
-      "usesResearchGateway": true,
-      "independentOf": []
+      "produces": [
+        "intel.researchFinding",
+        "intel.competitorProfile"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.researchFinding",
+        "intel.competitorProfile"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-SOURCE-VERIFICATION",
       "stage": "SC-STAGE-013",
       "agent": "SC-AGENT-063",
       "title": "Source Verification",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [
+        "intel.claimVerification"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.claimVerification"
+      ],
       "independentOf": [
         "SC-AGENT-060",
         "SC-AGENT-061",
         "SC-AGENT-062"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-COMPETITIVE-ANALYSIS",
       "stage": "SC-STAGE-013",
       "agent": "SC-AGENT-061",
       "title": "Competitive Analysis",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [
+        "intel.tableStakes",
+        "intel.marketGap"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.tableStakes",
+        "intel.marketGap"
+      ],
       "independentOf": [
         "SC-AGENT-063"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-INNOVATION-STRATEGY",
       "stage": "SC-STAGE-013",
       "agent": "SC-AGENT-062",
       "title": "Innovation Strategy",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [
+        "intel.differentiator",
+        "intel.competitivePosition",
+        "intel.proposal"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.differentiator",
+        "intel.competitivePosition",
+        "intel.proposal"
+      ],
       "independentOf": [
         "SC-AGENT-063"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-ARCHITECTURE",
       "stage": "SC-STAGE-020",
       "agent": "SC-AGENT-070",
       "title": "Software Architecture",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.architectureModel",
+        "intel.moduleContract",
+        "intel.ssotRegister",
+        "intel.complexityJustification",
+        "intel.nfrMapping"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.architectureModel",
+        "intel.moduleContract",
+        "intel.adr",
+        "intel.ssotRegister",
+        "intel.complexityJustification",
+        "intel.nfrMapping"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-ARCHITECTURE-REVIEW",
       "stage": "SC-STAGE-020",
       "agent": "SC-AGENT-072",
       "title": "Architecture Review",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption"
+      ],
       "independentOf": [
         "SC-AGENT-070",
         "SC-AGENT-071"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-TECHNOLOGY",
       "stage": "SC-STAGE-023",
       "agent": "SC-AGENT-071",
       "title": "Technology Selection",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.technologyEvaluation"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.technologyEvaluation",
+        "intel.researchFinding"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-ARCH-DECISION",
+      "stage": "SC-STAGE-023",
+      "agent": "SC-AGENT-070",
+      "title": "Architecture Decision Record",
+      "produces": [
+        "intel.adr"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.architectureModel",
+        "intel.moduleContract",
+        "intel.adr",
+        "intel.ssotRegister",
+        "intel.complexityJustification",
+        "intel.nfrMapping"
+      ],
+      "independentOf": [],
+      "deterministic": false
+    },
+    {
+      "id": "DEPT-DATA",
       "stage": "SC-STAGE-021",
       "agent": "SC-AGENT-080",
       "title": "Data Architecture",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.dataModel",
+        "intel.entityOwnership",
+        "intel.dataClassification",
+        "intel.retentionPolicy",
+        "intel.migrationStrategy"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.dataModel",
+        "intel.entityOwnership",
+        "intel.dataClassification",
+        "intel.retentionPolicy",
+        "intel.migrationStrategy"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-DATA-REVIEW",
       "stage": "SC-STAGE-021",
       "agent": "SC-AGENT-082",
       "title": "Data Model Review",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption"
+      ],
       "independentOf": [
         "SC-AGENT-080"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-SECURITY",
       "stage": "SC-STAGE-022",
       "agent": "SC-AGENT-090",
       "title": "Security & Privacy Architecture",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.threatModel",
+        "intel.trustBoundary",
+        "intel.abuseCase",
+        "intel.authDesign",
+        "intel.authorizationModel",
+        "intel.secretsDesign",
+        "intel.privacyDesign",
+        "intel.residualRisk"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.threatModel",
+        "intel.trustBoundary",
+        "intel.abuseCase",
+        "intel.authDesign",
+        "intel.authorizationModel",
+        "intel.secretsDesign",
+        "intel.privacyDesign",
+        "intel.securityNfr",
+        "intel.residualRisk"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-UX",
       "stage": "SC-STAGE-024",
       "agent": "SC-AGENT-120",
       "title": "UX Design",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.userJourney",
+        "intel.flow",
+        "intel.informationArchitecture",
+        "intel.navigationModel",
+        "intel.stateCoverage"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.userJourney",
+        "intel.flow",
+        "intel.informationArchitecture",
+        "intel.navigationModel",
+        "intel.stateCoverage"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-UX-REVIEW",
       "stage": "SC-STAGE-024",
       "agent": "SC-AGENT-123",
       "title": "UX Review",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption"
+      ],
       "independentOf": [
         "SC-AGENT-120"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-DESIGN-SYSTEM",
       "stage": "SC-STAGE-025",
       "agent": "SC-AGENT-130",
       "title": "Design System",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.designTokenSet",
+        "intel.componentSpec",
+        "intel.layoutSystem",
+        "intel.rtlRules",
+        "intel.accessibilitySpec"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.designTokenSet",
+        "intel.componentSpec",
+        "intel.layoutSystem",
+        "intel.rtlRules",
+        "intel.accessibilitySpec",
+        "intel.motionSpec",
+        "intel.designDecision",
+        "intel.designException"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-UI",
       "stage": "SC-STAGE-025",
       "agent": "SC-AGENT-131",
       "title": "UI Composition",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.screenComposition"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.screenComposition",
+        "intel.layoutSystem"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-DESIGN-REVIEW",
       "stage": "SC-STAGE-025",
       "agent": "SC-AGENT-133",
       "title": "Design System Review",
-      "deterministic": false,
-      "usesResearchGateway": false,
+      "produces": [],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption"
+      ],
       "independentOf": [
         "SC-AGENT-130",
         "SC-AGENT-131"
-      ]
+      ],
+      "deterministic": false
     },
     {
+      "id": "DEPT-OPERABILITY",
       "stage": "SC-STAGE-026",
       "agent": "SC-AGENT-140",
       "title": "Admin Operability",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.adminOperabilityReview",
+        "intel.configurationRegister",
+        "intel.protectedRule",
+        "intel.adminAuditRequirement"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.adminOperabilityReview",
+        "intel.configurationRegister",
+        "intel.protectedRule",
+        "intel.adminAuditRequirement"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-ADMIN-EXPERIENCE",
+      "stage": "SC-STAGE-026",
+      "agent": "SC-AGENT-141",
+      "title": "Admin Experience",
+      "produces": [
+        "intel.adminIa",
+        "intel.operationalControl"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.adminIa",
+        "intel.operationalControl"
+      ],
+      "independentOf": [],
+      "deterministic": false
+    },
+    {
+      "id": "DEPT-RISK",
       "stage": "SC-STAGE-016",
       "agent": "SC-AGENT-001",
       "title": "Risk Aggregation",
-      "deterministic": true,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.risk"
+      ],
+      "beyondContract": [
+        "intel.risk"
+      ],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption"
+      ],
+      "independentOf": [],
+      "deterministic": true
     },
     {
+      "id": "DEPT-COST",
       "stage": "SC-STAGE-015",
       "agent": "SC-AGENT-110",
       "title": "Cost Engineering",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.costModel",
+        "intel.costAssessment"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.costModel",
+        "intel.costAssessment"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-INFRASTRUCTURE",
       "stage": "SC-STAGE-020",
       "agent": "SC-AGENT-100",
       "title": "Infrastructure Architecture",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "produces": [
+        "intel.environmentModel",
+        "intel.deploymentStrategy",
+        "intel.observabilitySpec",
+        "intel.rollbackSpec"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.environmentModel",
+        "intel.deploymentStrategy",
+        "intel.configurationDelivery",
+        "intel.observabilitySpec",
+        "intel.backupSpec",
+        "intel.rollbackSpec"
+      ],
+      "independentOf": [],
+      "deterministic": false
     },
     {
+      "id": "DEPT-TEST-DESIGN",
       "stage": "SC-STAGE-030",
       "agent": "SC-AGENT-210",
-      "title": "Test Strategy and Cases",
-      "deterministic": false,
-      "usesResearchGateway": false,
-      "independentOf": []
+      "title": "Test Strategy",
+      "produces": [
+        "intel.testStrategy"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.testStrategy"
+      ],
+      "independentOf": [],
+      "deterministic": false
+    },
+    {
+      "id": "DEPT-TEST-CASES",
+      "stage": "SC-STAGE-030",
+      "agent": "SC-AGENT-211",
+      "title": "Test Case Design",
+      "produces": [
+        "intel.testCase"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.testCase"
+      ],
+      "independentOf": [],
+      "deterministic": false
+    },
+    {
+      "id": "DEPT-IMPROVEMENT",
+      "stage": "SC-STAGE-053",
+      "agent": "SC-AGENT-280",
+      "title": "Improvement Analysis",
+      "produces": [
+        "intel.proposal"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.proposal"
+      ],
+      "independentOf": [],
+      "deterministic": false
+    },
+    {
+      "id": "DEPT-CURATION",
+      "stage": "SC-STAGE-053",
+      "agent": "SC-AGENT-290",
+      "title": "Knowledge Curation",
+      "produces": [
+        "intel.lessonLearned",
+        "intel.reusablePattern",
+        "intel.failedApproach"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.lessonLearned",
+        "intel.reusablePattern",
+        "intel.failedApproach"
+      ],
+      "independentOf": [
+        "SC-AGENT-291"
+      ],
+      "deterministic": false
+    },
+    {
+      "id": "DEPT-APPLICABILITY",
+      "stage": "SC-STAGE-053",
+      "agent": "SC-AGENT-291",
+      "title": "Applicability Assessment",
+      "produces": [
+        "intel.applicabilityAssessment"
+      ],
+      "beyondContract": [],
+      "contractPermits": [
+        "intel.ownerDecisionRequest",
+        "intel.assumption",
+        "intel.applicabilityAssessment"
+      ],
+      "independentOf": [
+        "SC-AGENT-290"
+      ],
+      "deterministic": false
     }
   ],
   "gatesDefined": [
     {
       "id": "SC-GATE-INTAKE",
       "blocking": true,
-      "waivable": false,
       "criteria": 3
     },
     {
       "id": "SC-GATE-DISCOVERY",
       "blocking": true,
-      "waivable": false,
       "criteria": 4
     },
     {
       "id": "SC-GATE-PRODUCT_VALIDATION",
       "blocking": true,
-      "waivable": false,
       "criteria": 3
     },
     {
       "id": "SC-GATE-REQUIREMENTS",
       "blocking": true,
-      "waivable": false,
       "criteria": 5
     },
     {
       "id": "SC-GATE-COMPETITIVE",
       "blocking": true,
-      "waivable": false,
       "criteria": 4
     },
     {
       "id": "SC-GATE-FEASIBILITY",
       "blocking": true,
-      "waivable": false,
       "criteria": 3
     },
     {
       "id": "SC-GATE-ARCHITECTURE",
       "blocking": true,
-      "waivable": false,
       "criteria": 4
     },
     {
       "id": "SC-GATE-SECURITY_DESIGN",
       "blocking": true,
-      "waivable": false,
       "criteria": 4
     },
     {
       "id": "SC-GATE-TECHNOLOGY",
       "blocking": true,
-      "waivable": false,
       "criteria": 3
     },
     {
       "id": "SC-GATE-DESIGN",
       "blocking": true,
-      "waivable": false,
       "criteria": 6
     },
     {
       "id": "SC-GATE-PLAN",
       "blocking": true,
-      "waivable": false,
       "criteria": 2
     }
   ]
