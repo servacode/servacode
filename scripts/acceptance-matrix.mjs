@@ -343,7 +343,7 @@ try {
 let tests = 'unknown';
 try {
   const verify = readFileSync(join(root, 'evidence', 'VERIFY.txt'), 'utf8');
-  const match = /Tests\s+(\d+)\s+passed\s+\((\d+)\)/.exec(verify.replace(/\[[0-9;]*m/g, ''));
+  const match = /Tests\s+(\d+)\s+passed\s+\((\d+)\)/.exec(verify.replace(/\u001B\[[0-9;]*m/g, ''));
   if (match !== null) tests = match[1] + ' passed';
 } catch {
   /* Same rule. */

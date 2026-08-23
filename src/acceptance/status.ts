@@ -63,8 +63,7 @@ function evidence(root: string, relative: string): Evidence {
 
 /** Strip terminal colour so a captured log can be read as text. */
 function plain(text: string): string {
-  /* eslint-disable-next-line no-control-regex */
-  return text.replace(/\[[0-9;]*m/g, '');
+  return text.replace(/\u001B\[[0-9;]*m/g, '');
 }
 
 /**
@@ -238,14 +237,32 @@ export function acceptanceStatus(root: string = process.cwd()): AcceptanceStatus
    * saying so is the honest state rather than a disclaimer. PASS here requires the
    * document AND a recorded independent reviewer.
    */
-  const independentlyReviewed = review.exists && /independent reviewer:\s*\S/i.test(review.text);
+  /*
+   * NAMED, and not merely mentioned.
+   *
+   * The first version of this check was `/independent reviewer:\s*\S/i`, which matched the
+   * asterisk in "**Independent reviewer:** *none recorded.*" — so a document whose own
+   * first line said it was a self-review certified itself, and `serva acceptance` printed
+   * PASS. A control that a plausible negative satisfies is not a control.
+   *
+   * So the reviewer must be a real name, the disclaimers are refused explicitly, and a
+   * document containing the words NOT INDEPENDENTLY REVIEWED can never pass whatever else
+   * it says.
+   */
+  const reviewerLine = /independent reviewer:\s*(.+)/i.exec(review.text);
+  const claimed = (reviewerLine?.[1] ?? '').replace(/[*_`]/g, '').trim();
+  const disclaimed =
+    claimed === '' || /^(none|n\/a|not recorded|none recorded|tbd|pending|unknown)/i.test(claimed);
+  const independentlyReviewed =
+    review.exists && !disclaimed && !/NOT INDEPENDENTLY REVIEWED/i.test(review.text);
+
   add(
     'Security Acceptance',
     independentlyReviewed ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
     'evidence/SECURITY_REVIEW.md',
     review.exists
       ? independentlyReviewed
-        ? 'reviewed, with the reviewer recorded'
+        ? 'reviewed by ' + claimed
         : 'a review exists and names no independent reviewer, so it is not an independent review'
       : 'no security review is present',
   );

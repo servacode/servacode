@@ -23,13 +23,44 @@ export function testDeps(actor = 'TEST_RUNTIME'): StoreDeps {
   return { clock: new FixedClock(), ids: new SequentialIdSource(), actor };
 }
 
+/**
+ * Every temporary root this process created, so none of them outlives it.
+ *
+ * Suites that own a root clean it up in `afterEach`, and most do. The ones that do not —
+ * and there are a lot of them, spread over five phases — leaked a directory per test, which
+ * over a few hundred runs filled a disk and turned the whole suite red for a reason that
+ * had nothing to do with the code under test.
+ *
+ * So cleanup is a property of `tempRoot` rather than of the discipline of every caller.
+ */
+const created: string[] = [];
+
 export function tempRoot(prefix = 'serva-test-'): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  created.push(root);
+  return root;
 }
 
 export function cleanup(root: string): void {
   rmSync(root, { recursive: true, force: true });
 }
+
+/*
+ * The backstop, per worker process.
+ *
+ * `exit` handlers must be synchronous, which `rmSync` is. Failures are swallowed: a
+ * directory Windows still holds a handle on is a nuisance, and a test run that failed
+ * during teardown would report the nuisance instead of the result.
+ */
+process.on('exit', () => {
+  for (const root of created.splice(0)) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* Best effort. */
+    }
+  }
+});
 
 export function freshStore(): { store: Store; root: string; deps: StoreDeps } {
   const root = tempRoot();
