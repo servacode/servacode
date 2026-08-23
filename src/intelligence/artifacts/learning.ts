@@ -107,9 +107,33 @@ export type CandidateItem = z.output<typeof CandidateItemSchema>;
  * false negative costs a client's confidentiality.
  */
 const LEAKAGE_PATTERNS: readonly { readonly what: string; readonly re: RegExp }[] = Object.freeze([
-  { what: 'a Serva project identifier', re: /\bSC-(PROJ|WI|CS|RUN)-[0-9A-Z]+/ },
-  { what: 'a file path', re: /(^|\s)(?:[A-Za-z]:\\|\/(?:home|Users|var|opt|mnt)\/)/ },
-  { what: 'a source-code fragment', re: /```|\bfunction\s+\w+\s*\(|\bclass\s+\w+\s*\{/ },
+  /*
+   * INSTANCE ids, not catalogue ids.
+   *
+   * `SC-REQ-000042` names one project's requirement and must never cross; `SC-GATE-QA`
+   * names a canonical gate every project shares and is exactly the vocabulary a general
+   * lesson needs. The numeric suffix tells them apart, so the rule matches on that rather
+   * than on the family — widening this to every `SC-` token would refuse the sentences the
+   * library exists to carry.
+   */
+  { what: 'a Serva project identifier', re: /\bSC-[A-Z]{2,}-(?:\d{4,}|[0-9A-Z]{12,})\b/ },
+  /*
+   * A Windows drive with EITHER separator. The original pattern required a backslash, so
+   * `d:/clients/acme/src/checkout.ts` — the form most tools print — went straight through.
+   * Harmless while a lesson stayed inside its own project; not harmless now that one can
+   * cross into somebody else's.
+   */
+  {
+    what: 'a file path',
+    re: /(^|\s)(?:[A-Za-z]:[\\/]|\/(?:home|Users|var|opt|mnt|srv|clients)\/)/,
+  },
+  /* A path-shaped token with a file extension, wherever it sits in a sentence. */
+  { what: 'a file path', re: /\b[\w.-]+\/[\w.-]+\/[\w.-]+\.[A-Za-z0-9]{1,6}\b/ },
+  {
+    what: 'a source-code fragment',
+    /* Inline backticks around a call are as much code as a fenced block is. */
+    re: /```|`[^`]*\w+\s*\([^`]*`|\bfunction\s+\w+\s*\(|\bclass\s+\w+\s*\{/,
+  },
   { what: 'a URL', re: /https?:\/\//i },
   { what: 'an email address', re: /[\w.+-]+@[\w-]+\.[\w.]+/ },
   { what: 'a credential-shaped value', re: /\b(api[_-]?key|secret|token|password|bearer)\b/i },
