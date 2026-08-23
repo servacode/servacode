@@ -1,4 +1,4 @@
-# SERVA CODE — PHASE 5 BASELINE FINAL — PACKAGE MANIFEST
+# SERVA CODE — PHASE 5 ACCEPTED CANDIDATE — PACKAGE MANIFEST
 
 Company intelligence and product authority, after the final closure. Packaged for
 independent verification.
@@ -26,10 +26,11 @@ describing it.
 | Path | What it is |
 |---|---|
 | `src/` | the implementation, including `src/intelligence/` (55 files) |
-| `tests/` | 40 test files, 973 offline tests, plus three opt-in live suites |
+| `tests/` | 41 test files, 987 offline tests, plus three opt-in live suites |
 | `docs/` | ADRs, prior phase reports, `SPEC_IMPLEMENTATION_FINDINGS.md` |
 | `evidence/` | the outputs below, captured at packaging time |
 | `scripts/` | the catalogue and contract generators |
+| `PHASE_5_LAST_CLOSURE_REPORT.md` | the last closure: typed proposal rulings, and routing that acts |
 | `PHASE_5_AUTHORITY_LOCK_REPORT.md` | the authority lock: five defects plus the field-choice invariant |
 | `PHASE_5_FINAL_CLOSURE_REPORT.md` | the previous closure: nine defects, plus four found while closing them |
 | `PHASE_5_COMPANY_INTELLIGENCE_REPORT.md` | the original 46-item Phase 5 report |
@@ -45,7 +46,7 @@ catalogue can be regenerated with `npm run generate` and diffed against them.
 |---|---|
 | `evidence/GIT_STATE.txt` | branch, HEAD, working-tree status, recent log |
 | `evidence/BASELINE_COMMIT.txt` | the exact commit this package was built from |
-| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 973 tests, build |
+| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 987 tests, build |
 | `evidence/OFFLINE_ACCEPTANCE.txt` | the five acceptance suites: E2E, scenarios B/C/D, security, authority, governance |
 | `evidence/LIVE_INTELLIGENCE.txt` | an earlier live run, which proved the VALUE mechanism end to end |
 | `evidence/LIVE_NORMALIZER_SLICE.txt` | the clean live slice at the final baseline — 10 tests passing |
@@ -64,7 +65,7 @@ the filesystem — so a credential cannot arrive by accident.
 
 ```
 npm ci
-npm run verify          # 973 tests, offline, free
+npm run verify          # 987 tests, offline, free
 npm run generate        # regenerate catalogues; diff against the committed ones
 ```
 
