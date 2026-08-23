@@ -199,6 +199,20 @@ function answerAsOwner(
     ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
     OwnerDecisionRequestSchema,
   ).get(decisionId);
+  /*
+   * A VALUE decision asks a question, so the test owner answers it.
+   *
+   * The answer is deliberately a real one rather than a shrug: the point of the VALUE
+   * model is that "how long is a reservation held?" can be answered "48 hours", and a
+   * harness that replied "out of scope" to everything would never exercise it.
+   */
+  if (decision?.responseMode === 'VALUE') {
+    const value =
+      ANSWERS.find(([pattern]) => pattern.test(decision.question))?.[1] ?? DEFAULT_ANSWER;
+    answerOwnerDecision(intel, { decisionId, value, answeredBy: 'live-test-owner' });
+    return 'VALUE: ' + value;
+  }
+
   const options = decision?.options ?? [];
   const chosen =
     options.find((o) => o.disposition === 'DEFER') ??
@@ -213,6 +227,23 @@ function answerAsOwner(
   });
   return chosen.option + ' (' + chosen.disposition + ')';
 }
+
+/**
+ * What the test owner says, by question.
+ *
+ * A small bookshop owner's real answers, so the departments receive facts they can build
+ * on rather than a uniform refusal. Order matters only in that the first match wins.
+ */
+const ANSWERS: readonly (readonly [RegExp, string])[] = [
+  [/hold|held|window|expir|collect.*by|how long/i, '48 hours, then it goes back on the shelf'],
+  [/payment|deposit|pay|fee|charge/i, 'No payment or deposit online. They pay in the shop.'],
+  [/stock|inventory|track/i, 'No system. Staff check the shelf and keep a paper notebook.'],
+  [/cancel/i, 'A customer can cancel by phoning; staff put the book back.'],
+  [/notify|remind|contact/i, 'A text message when the book is ready, and one reminder.'],
+];
+
+const DEFAULT_ANSWER =
+  'Keep it simple for the first release: whatever a single-site bookshop would do by hand today.';
 
 /** Skip with a stated reason rather than fail. A missing engine is not a defect. */
 function guard(): boolean {
