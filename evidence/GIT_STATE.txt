@@ -1,27 +1,33 @@
 === branch ===
-phase-5-company-intelligence
+phase-6-serva-code-1.0
 
 === HEAD (implementation baseline) ===
-0a8c70a2141cdf4ba1d19b7662575e9da95e4d7e
+31d1f74c7142f506d2c808c40236e1cadaaffe94
 
-=== git status --porcelain, excluding evidence/ ===
+=== accepted Phase 5 baseline in ancestry ===
+0a8c70a: YES
+
+=== git status --porcelain, excluding evidence/ and the report ===
 (nothing between the headings means no src, tests, docs or config file differs
  from the implementation baseline at the moment this evidence was captured)
 
-=== evidence/ at capture time ===
+=== being written by this capture ===
+ M MANIFEST.md
  M evidence/BASELINE_COMMIT.txt
  M evidence/GIT_STATE.txt
- M evidence/OFFLINE_ACCEPTANCE.txt
- M evidence/VERIFY.txt
-(these are the files this capture is writing; they land in the packaging commit
- directly above the baseline, together with the report and the manifest)
+?? SERVA_CODE_1_0_PHASE_6_FINAL_REPORT.md
 
-=== log ===
-0a8c70a research trust: untrusted where it is stored, unverified until somebody checks
-740ec82 package: the final acceptance report, evidence and a manifest that agrees with them
-5d26bbc true final closure: a ruling that can be made, and an obligation that gets discharged
-76383e5 evidence: capture the accepted-candidate state
-eaef376 docs: name the evidence commit precisely
-e68dd24 docs: Phase 5 last closure report
-52e9557 last closure: typed proposal rulings, and routing that acts
-8175c23 evidence: capture the packaged state
+=== phase 6 log ===
+31d1f74 phase 6: the live acceptance ran, blocked honestly, and found a defect in my doctor
+2cb6bcb phase 6: the security review, and two defects it found in the checking of itself
+222481f phase 6: owner documentation, the acceptance matrix, and a status that refuses to lie
+7aff1c3 format the walkthrough script
+a15ff54 phase 6: the real portability walkthrough, on this machine
+518dd04 phase 6: the doctor now reads the real machine, and it was wrong twice
+80a300e phase 6: name the engine where the owner needs to hear it
+3d3ba3a phase 6: CLI parity, and a doctor that admits when it could not look
+19ce4cc phase 6: the cross-project library, and the wall it made matter
+23cc53f phase 6: the VS Code experience, with its security where a test can reach it
+2b99684 phase 6: one company underneath, and one validated door into it
+bfca39a phase 6: portability — backup, verify, restore, migrate, and a machine that must earn HARD
+ed082d1 phase 6: the downstream company, and 26/26 + 19/19 computed rather than claimed

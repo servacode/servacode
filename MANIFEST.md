@@ -1,7 +1,7 @@
-# SERVA CODE — PHASE 5 RESEARCH TRUST FINAL — PACKAGE MANIFEST
+# SERVA CODE 1.0 — PHASE 6 AUDIT — PACKAGE MANIFEST
 
-Company intelligence and product authority, after the research trust closure. Packaged
-for independent verification.
+The final implementation phase: the product experience, portability, and the acceptance that
+refuses to certify itself. Packaged for independent verification.
 
 ---
 
@@ -10,42 +10,52 @@ for independent verification.
 | | |
 |---|---|
 | Repository root | `D:/SEVACODE` |
-| Branch | `phase-5-company-intelligence` |
-| Phase 4 baseline | `f4866b2` (unchanged; no Phase 1–4 invariant was weakened) |
-| **Implementation baseline** | **`0a8c70a`** — the last commit touching `src/` or `tests/` |
-| Packaging commit | directly above it: this manifest, `PHASE_5_RESEARCH_TRUST_FINAL_REPORT.md` and `evidence/`, and nothing else |
+| Branch | `phase-6-serva-code-1.0` |
+| Phase 4 baseline | `f4866b2` (unchanged) |
+| Phase 5 baseline | `0a8c70a` (accepted; confirmed in ancestry) |
+| **Implementation baseline** | **`31d1f74`** — the last commit touching `src/` or `tests/` |
+| Packaging commit | directly above it: this manifest, `SERVA_CODE_1_0_PHASE_6_FINAL_REPORT.md` and `evidence/`, and nothing else |
 | Working tree | clean — `git status --porcelain` returns nothing |
 
 **One baseline, and every artifact says the same thing about it.**
-`evidence/BASELINE_COMMIT.txt`, `evidence/GIT_STATE.txt`, the acceptance report and this
-manifest all name `0a8c70a` as the implementation baseline, and all describe the commit
-above it the same way. Reproduce the implementation by checking out `0a8c70a` and running
+`evidence/BASELINE_COMMIT.txt`, `evidence/GIT_STATE.txt`, the final report and this manifest
+all name `31d1f74`. Reproduce the implementation by checking out `31d1f74` and running
 `npm run verify`.
 
 A file cannot record its own hash, which is why the packaging commit is separate. What it
 contains is checkable rather than asserted:
 
 ```
-git diff --stat 0a8c70a..HEAD -- src tests    # empty
+git diff --stat 31d1f74..HEAD -- src tests    # empty
 ```
 
-Evidence was captured after `0a8c70a`, from that exact tree.
+Evidence was captured after `31d1f74`, from that exact tree.
+
+## Serva's own verdict on itself
+
+```
+serva acceptance
+→ NOT READY — 2 item(s) are not proven
+```
+
+Thirteen of fifteen acceptance lines PASS. Security Acceptance is `NOT_VERIFIED` because the
+security review names no independent reviewer, and Live Acceptance is `NOT_VERIFIED` because
+the live run recorded `RESULT: BLOCKED`. Both are external, both have exact next steps, and
+neither can be closed by writing a better report — which is why the status is computed.
 
 ## What this package contains
 
 | Path | What it is |
 |---|---|
-| `src/` | the implementation, including `src/intelligence/` (61 files) |
-| `tests/` | 44 test files, 1012 offline tests, plus three opt-in live suites |
-| `docs/` | ADRs, prior phase reports, `SPEC_IMPLEMENTATION_FINDINGS.md` |
+| `src/` | the implementation — core, runtime, engineering, intelligence, coverage, portability, learning, extension logic, acceptance |
+| `extension/` | the VS Code extension: manifest, adapter source, stylesheet, panel script |
+| `tests/` | 51 test files, 1146 offline tests, plus four opt-in live suites |
+| `docs/serva-code/` | the 34 R4 specification documents, unmodified |
+| `docs/owner/` | eleven owner-facing documents, from getting started to recovery |
+| `scripts/` | catalogue and contract generators, the acceptance-matrix generator, the portability walkthrough |
 | `evidence/` | the outputs below, captured at packaging time |
-| `scripts/` | the catalogue and contract generators |
-| `PHASE_5_RESEARCH_TRUST_FINAL_REPORT.md` | the research trust closure: untrusted where it is stored, unverified until somebody checks |
-| `PHASE_5_FINAL_ACCEPTANCE_REPORT.md` | the previous closure: a ruling that can be made, and an obligation that gets discharged |
-| `PHASE_5_LAST_CLOSURE_REPORT.md` | the previous closure: typed proposal rulings, and routing that acts |
-| `PHASE_5_AUTHORITY_LOCK_REPORT.md` | the authority lock: five defects plus the field-choice invariant |
-| `PHASE_5_FINAL_CLOSURE_REPORT.md` | the previous closure: nine defects, plus four found while closing them |
-| `PHASE_5_COMPANY_INTELLIGENCE_REPORT.md` | the original 46-item Phase 5 report |
+| `SERVA_CODE_1_0_PHASE_6_FINAL_REPORT.md` | the 37-item Phase 6 report |
+| prior reports | Phase 4 baseline and the five Phase 5 reports, unchanged |
 | config | `package.json`, `tsconfig*`, `vitest*`, `eslint`, `prettier` |
 
 Generated runtime assets are included as source
@@ -56,38 +66,42 @@ catalogue can be regenerated with `npm run generate` and diffed against them.
 
 | File | What it shows |
 |---|---|
-| `evidence/GIT_STATE.txt` | branch, HEAD, working-tree status (source separately from the evidence being written), recent log |
-| `evidence/BASELINE_COMMIT.txt` | the implementation baseline, and how to check what the commit above it contains |
-| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 1012 tests, build |
-| `evidence/OFFLINE_ACCEPTANCE.txt` | fourteen intelligence suites, 176 tests: research trust, obligations, research, security, proposal rulings, routing, questions, governance, authority, restart, write authority, E2E, scenarios, owner values |
-| `evidence/LIVE_INTELLIGENCE.txt` | an earlier live run, which proved the VALUE mechanism end to end |
-| `evidence/LIVE_NORMALIZER_SLICE.txt` | the clean live slice at the final baseline — 10 tests passing |
-| `evidence/PHASE5_SURFACE.json` | every department with its declared outputs, its contract's permitted outputs, and its declared independence |
+| `evidence/VERIFY.txt` | full `npm run verify` — format, lint, typecheck (core and extension), 1146 tests, both builds |
+| `evidence/ACCEPTANCE_MATRIX.md` / `.json` | 33 requirements, each naming the file that proves it; generated, not written |
+| `evidence/SECURITY_REVIEW.md` | the threat surface, the control for each threat, the test that holds it — and no independent reviewer |
+| `evidence/PORTABILITY_WALKTHROUGH.txt` | a real backup and restore on this machine, through the CLI |
+| `evidence/LIVE_SERVA_ACCEPTANCE.txt` | the live attempt: `RESULT: BLOCKED`, with the two prerequisites named |
+| `evidence/LIVE_ENGINEERING_PHASE6.txt` | the full live transcript it rests on |
+| `evidence/BASELINE_COMMIT.txt` | the implementation baseline, and how to check the commit above it |
+| `evidence/GIT_STATE.txt` | branch, HEAD, working-tree status, recent log |
+| `evidence/PHASE5_SURFACE.json` | every department with its declared outputs and its contract's permitted outputs |
+| `evidence/OFFLINE_ACCEPTANCE.txt` | the focused Phase 5 acceptance run, unchanged |
+
+## Reproducing it
+
+```
+npm ci
+npm run verify          # 1146 tests, offline, free
+node dist/cli/main.js acceptance      # Serva's verdict on itself
+node dist/cli/main.js machine doctor  # this computer, measured
+node scripts/acceptance-matrix.mjs    # regenerate the matrix
+node scripts/portability-walkthrough.mjs   # a real backup and restore, disposable
+```
+
+The live suites are separate commands and are not part of `verify`:
+
+```
+npm run test:claude               # Phase 3
+npm run test:engineering-live     # Phase 4 — needs a qualified machine
+npm run test:intelligence-live    # Phase 5
+```
 
 ## What is NOT in this package
 
 Deliberately excluded: `node_modules`, `.git`, `dist`, any `.serva` project store,
-credentials, tokens, temporary AgentRun secrets, and the disposable projects the live
-suites create and delete.
+credentials, tokens, Claude authentication material, temporary run secrets, temporary
+worktrees, and the disposable projects the live suites and the walkthrough create and delete.
 
-Every entry is named by extension under a named directory — nothing is included by walking
-the filesystem — so a credential cannot arrive by accident.
-
-## To verify independently
-
-```
-npm ci
-npm run verify          # 1012 tests, offline, free
-npm run generate        # regenerate catalogues; diff against the committed ones
-```
-
-The two opt-in suites cost money and reach outside the machine, so they are separate
-commands and are excluded from `verify`:
-
-```
-npm run test:claude                # live model calls
-npm run test:intelligence-live     # live model calls AND the public network
-```
-
-Both skip with a stated reason when the engine is unavailable. A machine without an engine
-is a fact about the machine, not a test failure.
+The packager names every tree and every loose file explicitly and scans each one for
+credential shapes on the way in, so nothing arrives by accident. The only matches it permits
+are the named fixtures that exist to prove redaction works.

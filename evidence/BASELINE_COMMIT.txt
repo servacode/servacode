@@ -1,9 +1,9 @@
-PHASE 5 IMPLEMENTATION BASELINE
+PHASE 6 IMPLEMENTATION BASELINE
 -------------------------------
 The commit this package was built from: the last commit that touches src/ or tests/.
 The packaging commit directly above it adds only the report, this evidence and the
 manifest, which is checkable with:
 
-  git diff --stat 0a8c70a2141cdf4ba1d19b7662575e9da95e4d7e..HEAD -- src tests   # must be empty
+  git diff --stat 31d1f74..HEAD -- src tests   # must be empty
 
-0a8c70a2141cdf4ba1d19b7662575e9da95e4d7e
+31d1f74c7142f506d2c808c40236e1cadaaffe94
