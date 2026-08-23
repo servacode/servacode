@@ -1,0 +1,56 @@
+
+> serva-code@0.2.0 test:intelligence-live
+> vitest run --config vitest.intelligence.config.ts
+
+
+ RUN  v2.1.9 D:/SEVACODE
+
+stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > reached at least the competitive stage, or reported honestly why not
+ran: SC-AGENT-020:COMPLETED, SC-AGENT-030:COMPLETED, SC-AGENT-020:COMPLETED, SC-AGENT-040:OWNER_DECISION_REQUIRED, SC-AGENT-050:COMPLETED, SC-AGENT-051:COMPLETED, SC-AGENT-052:FAILED
+  SC-AGENT-040 — no reason
+    · OWNER_DECISION_REQUIRED: financial logic for PRICING is neither owner-confirmed nor legally established, and Serva does not invent money rules
+  SC-AGENT-052 — Requirements Quality Verification run ended FAILED. NO OUTPUT = NOTHING RECORDED.
+    · terminated: TIMEOUT
+BLOCKED — SC-GATE-REQUIREMENTS returned NOT_VERIFIED: Requirements Quality Verification run ended FAILED. NO OUTPUT = NOTHING RECORDED. — RQ-4 INDETERMINATE (EVIDENCE_ABSENT): An INDEPENDENT verifier judged the requirements acceptable
+owner round 1:
+    ? How should pricing work? Serva has drafted: "No fees, commission, deposit, tax, wallet behaviour, refund or online payme
+    ?   -> Confirm the drafted rule as stated (APPROVE)
+
+stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > 2/3. Serva fetched a real page and captured it, hashed and untrusted
+research ran: SC-AGENT-060:PREREQUISITE_MISSING
+research state: BLOCKED
+
+stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > every obligation was classified, and at least one was proved
+
+========================================================================
+LIVE PROOF OBLIGATIONS
+========================================================================
+  PROVEN   LC-1    discovery and product produce schema-valid canon
+                   5 goal(s) and 8 current alternative(s) from one owner sentence
+  BLOCKED  LC-2/3  a real source is retrieved by Serva and captured
+                   the lifecycle did not reach market research
+  NOT_RUN  LC-4    the Source Verifier judges captures and fetches nothing
+                   no capture exists, so nothing to verify
+  BLOCKED  LC-5    competitive output derives from captured evidence
+                   no finding exists; the competitive gate reads NOT_VERIFIED
+  PROVEN   LC-6    a downstream decision consumes PERSISTED canon
+                   16 requirement(s) trace to a feature id their run never saw, across 7 sessions
+  BLOCKED  RS-2/3  the research gateway fetches and captures a real page
+                   no source was retrieved; research is UNAVAILABLE
+  NOT_RUN  RS-4    an INDEPENDENT verifier judges the captures and fetches nothing
+                   no capture exists, so nothing to verify
+  NOT_RUN  RS-5    every finding cites a capture that exists
+                   no finding was produced
+  BLOCKED  RS-6    the competitive chain completes end to end on real sources
+                   the retrieved pages carry no competitor data
+
+  PROVEN: 2   BLOCKED: 4   NOT_RUN: 3
+========================================================================
+
+ ✓ tests/live/intelligence.live.test.ts (10 tests) 2316364ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  10:12:30
+   Duration  2317.83s (transform 716ms, setup 0ms, collect 1.18s, tests 2316.36s, environment 0ms, prepare 95ms)
+
