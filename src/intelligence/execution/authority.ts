@@ -105,6 +105,13 @@ const OUTPUT_NAMES: Readonly<Record<string, ArtifactType>> = Object.freeze({
   RTLRules: ARTIFACT_TYPES.RTL_RULES,
   MotionSpec: ARTIFACT_TYPES.MOTION_SPEC,
   DesignDecision: ARTIFACT_TYPES.DESIGN_DECISION,
+  /*
+   * SC-AGENT-020's contract has always said `ProductDecision[]`, and this table did not
+   * map it — so the Product Manager's own decision family resolved to nothing, and the
+   * one artifact that records what the product authority DECIDED could not be written by
+   * the authority that decides it. The typed proposal ruling had a shape and no path.
+   */
+  ProductDecision: ARTIFACT_TYPES.PRODUCT_DECISION,
   DesignException: ARTIFACT_TYPES.DESIGN_EXCEPTION,
   ScreenComposition: ARTIFACT_TYPES.SCREEN_COMPOSITION,
   AdminOperabilityReview: ARTIFACT_TYPES.ADMIN_OPERABILITY_REVIEW,

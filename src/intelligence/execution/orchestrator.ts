@@ -9,6 +9,7 @@ import { ARTIFACT_TYPES, repository } from '../repository.js';
 import { OwnerDecisionRequestSchema, ownerDecisionRefusal } from '../artifacts/governance.js';
 import { runDepartment } from './runner.js';
 import { validateDepartmentAuthority } from './authority.js';
+import { dischargeObligations } from './obligations.js';
 import { DepartmentOutcome } from './types.js';
 import type { DepartmentConfig, DepartmentContext, DepartmentResult, RunnerDeps } from './types.js';
 import type { ApplicabilityPlan, StageApplicability } from '../applicability.js';
@@ -325,6 +326,53 @@ export class IntelligenceOrchestrator {
   }
 
   /**
+   * Discharge everything Serva has already routed to one of its own departments.
+   *
+   * ROUTING IS NOT FINISHED WHEN THE OBLIGATION IS WRITTEN. A department that stopped
+   * because it needs retrieved evidence, or because another department owes it canon, has
+   * had its question recorded and answered by nobody. This is where the recorded question
+   * becomes an execution.
+   *
+   * Called from two places on purpose. Before the stage loop, so a process that died
+   * between raising an obligation and fulfilling it RESUMES rather than deadlocking on its
+   * own durable record; and immediately after a department stops for want of something,
+   * so a single advance does not report BLOCKED for work it was about to be able to do.
+   *
+   * Whatever it runs is folded into `completedDepartments`, which is the same bookkeeping
+   * an ordinary stage uses. That is what stops the fulfilment being a second scheduler:
+   * when the main loop reaches that department it finds it already done and steps over it,
+   * rather than running it again for the same result at the same cost.
+   */
+  private async dischargeOutstanding(
+    record: OrchestratorRecord,
+    done: Set<string>,
+  ): Promise<{
+    readonly record: OrchestratorRecord;
+    readonly ran: readonly DepartmentResult[];
+    readonly resolved: readonly string[];
+    readonly blocked: readonly string[];
+  }> {
+    const outcome = await dischargeObligations(this.deps, {
+      workItemId: this.workItemId,
+      plan: this.plan,
+      completedDepartments: done,
+    });
+    for (const r of outcome.ran) {
+      for (const j of r.judgements ?? []) this.judgements.set(j.criterionRef, j);
+    }
+    if (outcome.completedDepartments.length === 0) {
+      return { record, ran: outcome.ran, resolved: outcome.resolved, blocked: outcome.blocked };
+    }
+    for (const id of outcome.completedDepartments) done.add(id);
+    return {
+      record: this.write({ ...record, completedDepartments: [...done] }),
+      ran: outcome.ran,
+      resolved: outcome.resolved,
+      blocked: outcome.blocked,
+    };
+  }
+
+  /**
    * Run the lifecycle forward until it completes, blocks, or needs the owner.
    *
    * Idempotent by construction: completed stages are skipped on re-entry, so calling this
@@ -399,6 +447,21 @@ export class IntelligenceOrchestrator {
       }
     }
 
+    /*
+     * Anything already routed to one of Serva's own departments is discharged FIRST.
+     *
+     * This is what makes a restart mid-obligation resume. The requesting department is
+     * about to run again; if the evidence it asked for is still outstanding it will ask
+     * the identical question, the normaliser will correctly report the obligation as
+     * already raised, and the lifecycle will deadlock on its own good bookkeeping.
+     */
+    {
+      const done = new Set(record.completedDepartments);
+      const discharged = await this.dischargeOutstanding(record, done);
+      record = discharged.record;
+      ran.push(...discharged.ran);
+    }
+
     const completed = new Set(record.completedStages);
     const alreadyRan = new Set(record.ranStages);
 
@@ -464,6 +527,8 @@ export class IntelligenceOrchestrator {
 
         const pending: string[] = [];
         const doneDepartments = new Set(record.completedDepartments);
+        /** Obligations that could not be discharged, kept for the block reason. */
+        const obligationBlocks: string[] = [];
         /*
          * True when a department stopped BEFORE writing anything. The stage then does not
          * count as run: resuming must execute it again with the owner's answer in context,
@@ -478,8 +543,28 @@ export class IntelligenceOrchestrator {
            */
           if (doneDepartments.has(config.id)) continue;
 
-          const result = await runDepartment(this.deps, config, ctx);
+          let result = await runDepartment(this.deps, config, ctx);
           ran.push(result);
+
+          /*
+           * A department that stopped for want of something it RECORDED gets that thing
+           * fetched, and then gets to continue. Reporting BLOCKED here instead would be
+           * Serva refusing to do work it had just written down as its own.
+           *
+           * Exactly one retry: if the obligation was discharged and the department still
+           * cannot proceed, the honest answer is the block, not another attempt.
+           */
+          if (result.outcome === DepartmentOutcome.PREREQUISITE_MISSING) {
+            const discharged = await this.dischargeOutstanding(record, doneDepartments);
+            record = discharged.record;
+            ran.push(...discharged.ran);
+            if (discharged.resolved.length > 0) {
+              result = await runDepartment(this.deps, config, ctx);
+              ran.push(result);
+            }
+            if (discharged.blocked.length > 0) obligationBlocks.push(...discharged.blocked);
+          }
+
           if (result.outcome === DepartmentOutcome.COMPLETED) {
             doneDepartments.add(config.id);
             record = this.write({ ...record, completedDepartments: [...doneDepartments] });
@@ -508,7 +593,9 @@ export class IntelligenceOrchestrator {
              * The department's own reason is kept alongside it, because the gate verdict
              * says WHAT is missing and the department reason says WHY.
              */
-            const departmentReason = result.reason ?? config.title + ' did not complete';
+            const departmentReason =
+              (result.reason ?? config.title + ' did not complete') +
+              (obligationBlocks.length === 0 ? '' : ' — ' + obligationBlocks.join('; '));
             const verdict = await this.evaluateGate(stage);
             const gateResults =
               verdict === undefined

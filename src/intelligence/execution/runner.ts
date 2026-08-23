@@ -15,6 +15,7 @@ import type { OpenQuestion } from './questions.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import { ResearchRequestSchema } from '../research/capture.js';
 import { OpenQuestionSchema } from '../artifacts/framing.js';
+import { researchSeeds } from '../research/seeds.js';
 import {
   DecisionPurpose,
   OwnerDecisionRequestSchema,
@@ -32,6 +33,7 @@ import type {
 } from './types.js';
 import type { z } from 'zod';
 import type { Store, Transaction } from '../../store/store.js';
+import type { AgentContract } from '../../agents/schema.js';
 import type { IntelligenceMeta } from '../provenance.js';
 
 /**
@@ -71,6 +73,31 @@ function ledgerActor(config: DepartmentConfig): string {
  * attempt would be a loop with a nicer name.
  */
 const MAX_FACT_ATTEMPTS = 2;
+
+/**
+ * Is there an authority in this company that could lawfully answer a research question?
+ *
+ * Read from the registered configuration and the canonical contracts, never from the
+ * asking department's wishes. Two ways it can be true, and both are a declaration
+ * somebody made deliberately: this department is itself research-authorised, or another
+ * registered department is — in which case the obligation controller hands the question
+ * to it and the asker retrieves nothing.
+ */
+function companyCanResearch(
+  deps: RunnerDeps,
+  config: DepartmentConfig<z.ZodTypeAny>,
+  contract: AgentContract,
+): boolean {
+  if (config.usesResearchGateway === true && parseToolSurface(contract).net) return true;
+  return (deps.departments ?? []).some((d) => {
+    if (d.usesResearchGateway !== true || d.agentId === undefined) return false;
+    try {
+      return parseToolSurface(deps.registry.get(d.agentId)).net;
+    } catch {
+      return false;
+    }
+  });
+}
 
 /** The exact artifact, rendered as one context element. Nothing else travels with it. */
 function canonAsContext(store: Store, id: string): ContextElement | undefined {
@@ -118,7 +145,17 @@ function raiseResearchObligations(
         question: q.detail,
         purpose: 'raised by ' + config.id + ' while it could not proceed',
         scope: 'MARKET_LANDSCAPE',
-        allowedHosts: [],
+        /*
+         * WHERE, from the deployment's policy — not from the asking department.
+         *
+         * The department knows what it needs to find out and has no authority over the
+         * company's network boundary. Recording an empty list here would have made every
+         * obligation unfulfillable by construction: the gateway checks the URL against
+         * exactly this field, so a request nobody may answer would sit OPEN forever while
+         * looking like progress. Where the deployment permits no host, the obligation is
+         * still recorded and consumption BLOCKS with that as the reason.
+         */
+        allowedHosts: [...researchSeeds().hosts],
         /* Nothing about this project may leave in the asking. */
         dataAllowedToLeave: [],
         maxSources: 5,
@@ -576,6 +613,53 @@ export async function runDepartment<S extends z.ZodTypeAny>(
       relevance: 1,
     }));
 
+  /*
+   * OBLIGATIONS THIS DEPARTMENT RAISED, AND SOMEBODY HAS SINCE DISCHARGED.
+   *
+   * The mirror of the owner answers above, and it exists for the same reason: the process
+   * that asked a question is not the process that resumes with the answer. A department
+   * that raised a research obligation, blocked, and is now running again must SEE the
+   * evidence that was retrieved for it — otherwise it asks the identical question, the
+   * normaliser correctly reports the obligation as already outstanding, and the lifecycle
+   * deadlocks on work that was in fact completed.
+   *
+   * The answer AND the canon it points at, because "this was answered" without the
+   * artifacts is a claim rather than evidence.
+   */
+  const settledObligations = repository(
+    deps.store,
+    ARTIFACT_TYPES.OPEN_QUESTION,
+    OpenQuestionSchema,
+  )
+    .list()
+    .filter(
+      (q) =>
+        q.raisedBy === config.id &&
+        q.state === 'ANSWERED' &&
+        (q.meta.workItemId === ctx.workItemId || q.meta.workItemId === undefined),
+    )
+    .flatMap((q) => [
+      {
+        source: 'OBLIGATION',
+        kind: ARTIFACT_TYPES.OPEN_QUESTION,
+        version: String(q.version),
+        content:
+          'You previously could not proceed without: ' +
+          q.question +
+          String.fromCharCode(10) +
+          'That has now been discharged by ' +
+          q.askedOf +
+          ': ' +
+          (q.answer ?? 'see the referenced canon') +
+          String.fromCharCode(10) +
+          'Proceed on it. Do not raise the same question again.',
+        relevance: 1,
+      },
+      ...q.resolvedByRefs
+        .map((r) => canonAsContext(deps.store, r.id))
+        .filter((c): c is ContextElement => c !== undefined),
+    ]);
+
   const forbiddenActors = new Set(config.independentOf ?? []);
   if (forbiddenActors.size > 0) {
     const leaked = spec.canon.filter((c) => forbiddenActors.has(c.source));
@@ -689,6 +773,7 @@ export async function runDepartment<S extends z.ZodTypeAny>(
         ...spec.canon,
         ...prepared.canon,
         ...answeredForThisDepartment,
+        ...settledObligations,
         /* Exactly what an earlier attempt asked for, and nothing more. */
         ...(ctx.supplied ?? []),
       ].map((c) => ({
@@ -788,19 +873,21 @@ export async function runDepartment<S extends z.ZodTypeAny>(
        *
        * The orchestrator puts one gateway in the context for the whole run, so testing
        * `ctx.gateway !== undefined` would have let any department claim a research route
-       * merely because the project has a research capability at all — a UX designer
-       * included.
+       * merely because a gateway OBJECT existed — a UX designer included, in a project
+       * with no researcher at all.
        *
-       * Authority comes from the same three things the gateway itself checks: the
-       * department declares it uses research, the canonical contract grants network scope,
-       * and a gateway exists to do it with. `assertResearchAuthority` is untouched and
-       * still refuses at the point of retrieval; this only stops Serva ROUTING a question
-       * somewhere it could never be answered.
+       * The question this asks is not "may this run fetch?" — it may not, and nothing
+       * here changes that. It is "can the COMPANY lawfully answer this by retrieval?",
+       * which is a fact about the registered configuration: some department declares
+       * research, ITS canonical contract grants network scope, and a gateway exists to do
+       * it with. Where that authority exists, a department with no network of its own may
+       * route a question to it and wait; where it does not, the route is never offered and
+       * the question falls to the owner, which is the honest result.
+       *
+       * `assertResearchAuthority` is untouched and still refuses at the point of
+       * retrieval, so the asking department cannot fetch whatever this decides.
        */
-      canResearch:
-        config.usesResearchGateway === true &&
-        parseToolSurface(contract).net &&
-        ctx.gateway !== undefined,
+      canResearch: ctx.gateway !== undefined && companyCanResearch(deps, config, contract),
       ...(run.runId === undefined ? {} : { runId: run.runId }),
     });
 
@@ -1031,7 +1118,15 @@ export async function runDepartment<S extends z.ZodTypeAny>(
      * violation leaves no partial state, and the transaction either commits everything
      * this department was entitled to write or nothing at all.
      */
-    persisted = config.persist(scopedWriter(tx), parsed.data as z.output<S>, ctx);
+    /*
+     * The run id reaches `persist` here, and only here. A department cannot know it
+     * beforehand — the run does not exist when the context is built — and a caller that
+     * could supply one could attribute canon to a run that never happened.
+     */
+    persisted = config.persist(scopedWriter(tx), parsed.data as z.output<S>, {
+      ...ctx,
+      ...(run.runId === undefined ? {} : { runId: run.runId }),
+    });
     tx.commit();
   } catch (e) {
     tx.rollback();

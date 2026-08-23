@@ -148,5 +148,13 @@ export const OpenQuestionSchema = artifact({
   owedByStage: z.string().min(1).optional(),
   /** The research request raised to answer it, for an askedOf === RESEARCH question. */
   researchRequestRef: RefSchema.optional(),
+  /**
+   * The canon that actually settled it.
+   *
+   * `state` says OPEN or ANSWERED and `answer` says it in words; this says which artifacts
+   * a reader can go and check. Without it a fulfilled obligation is a sentence claiming
+   * evidence exists, which is the shape of every finding this phase has had to unpick.
+   */
+  resolvedByRefs: z.array(RefSchema).default([]),
 });
 export type OpenQuestion = z.output<typeof OpenQuestionSchema>;

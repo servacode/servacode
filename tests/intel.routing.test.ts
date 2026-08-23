@@ -211,7 +211,9 @@ describe('C. research capability is not the presence of a gateway', () => {
     /*
      * The orchestrator puts one gateway in the context for the whole run. SC-AGENT-052 is
      * a verifier: its contract declares no network and its department does not use the
-     * gateway, so it may not have a research route merely because the project has research.
+     * gateway — and no research authority is registered in this company at all. A gateway
+     * OBJECT is not a research capability, so there is no route to offer and the question
+     * is the owner's.
      */
     const result = await runDepartment(
       deps(h),
@@ -225,6 +227,49 @@ describe('C. research capability is not the presence of a gateway', () => {
     expect(h.store.listCanonIds(ARTIFACT_TYPES.RESEARCH_REQUEST)).toHaveLength(0);
     expect(result.outcome).toBe(DepartmentOutcome.ESCALATED_TO_OWNER);
     expect(result.diagnostics.join(' ')).toContain('OWNER_DECISION');
+  }, 60_000);
+
+  it('a registered research authority makes the route real, and the asker still retrieves nothing', async () => {
+    const h = setup();
+    h.engine.script('SC-AGENT-052', {
+      structuredOutput: asking(
+        'unresolved',
+        'What do competitors in this market typically offer for collection?',
+      ),
+    });
+
+    /*
+     * The same department, the same question, the same gateway — and now a company that
+     * employs a researcher. The route exists because a REGISTERED department declares
+     * research and its canonical contract grants network scope, which is a decision
+     * somebody made rather than an object that happened to be in scope.
+     *
+     * What does not change is who may fetch. SC-AGENT-052 records an obligation and
+     * retrieves nothing: `assertResearchAuthority` would refuse it at the gateway, and the
+     * evidence arrives later, from the authority that is allowed to go and get it.
+     */
+    const result = await runDepartment(
+      deps(h, {
+        departments: [
+          {
+            id: 'DEPT-MARKET-RESEARCH',
+            stageId: 'SC-STAGE-013',
+            agentId: 'SC-AGENT-060',
+            produces: [ARTIFACT_TYPES.RESEARCH_FINDING],
+            usesResearchGateway: true,
+          },
+        ],
+      }),
+      department(),
+      context(h, {
+        gateway: { store: h.store, clock: h.clock, ids: h.ids, retriever: OFFLINE_RETRIEVER },
+      }),
+    );
+
+    expect(result.outcome).toBe(DepartmentOutcome.PREREQUISITE_MISSING);
+    expect(h.store.listCanonIds(ARTIFACT_TYPES.RESEARCH_REQUEST)).toHaveLength(1);
+    expect(h.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toHaveLength(0);
+    expect(h.store.listCanonIds(ARTIFACT_TYPES.OWNER_DECISION_REQUEST)).toHaveLength(0);
   }, 60_000);
 });
 

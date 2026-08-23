@@ -71,6 +71,30 @@ export interface DepartmentContext {
    * SC-REQ-000003, not the requirements baseline.
    */
   readonly supplied?: readonly ContextElement[];
+  /**
+   * The exact obligation this run exists to discharge.
+   *
+   * Set only by the obligation controller, and only on the department that owes the
+   * answer. It is what makes "consume the request another department raised" different
+   * from "do your usual job": the research authority given an obligation answers THAT
+   * question, under THAT request's declared policy, rather than composing a generic one
+   * of its own and leaving the original outstanding forever.
+   */
+  readonly obligation?: {
+    readonly questionId: string;
+    readonly requestId?: string;
+    readonly question: string;
+  };
+  /**
+   * The governed run that produced the output being persisted.
+   *
+   * Set by the RUNNER, immediately before `persist`, and never by a caller — it does not
+   * exist until the run does. It is what lets an artifact record the act that produced it
+   * rather than only the actor: `acceptanceRefusal` reads exactly this to check that a
+   * proposal ruling came from a run that actually completed, and an artifact that cannot
+   * name its run cannot be told apart from one somebody wrote by hand.
+   */
+  readonly runId?: string;
 }
 
 /** The outcome of Serva's pre-run work for a department. */
@@ -287,6 +311,9 @@ export interface RunnerDeps {
     readonly id: string;
     readonly stageId: string;
     readonly produces: readonly ArtifactType[];
+    /** Present on a full DepartmentConfig; used to resolve the research authority. */
+    readonly agentId?: string;
+    readonly usesResearchGateway?: boolean;
   }[];
   readonly clock: Clock;
   readonly ids: IdSource;

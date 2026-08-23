@@ -23,6 +23,7 @@ import {
 import { RetrievalOutcome, retrieveForResearch } from '../research/gateway.js';
 import { DEFAULT_VALIDITY_DAYS, validUntilFrom } from '../research/freshness.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
+import { researchSeeds } from '../research/seeds.js';
 import { contextFrom, derived } from './shared.js';
 import type {
   DepartmentConfig,
@@ -92,22 +93,13 @@ export const ResearchOutputSchema = z
 const RESEARCH_AGENT = 'SC-AGENT-060';
 const RESEARCH_STAGE = 'SC-STAGE-013';
 
-/**
- * Seed URLs a deployment permits. Empty by default.
- *
- * Deliberately explicit: with no retriever and no seeds, research is UNAVAILABLE and the
- * competitive gate is NOT_VERIFIED. That is the honest state of an offline installation,
- * and it must never quietly become "we found no competitors".
+/*
+ * The permitted hosts and seed URLs now live in `research/seeds.ts`, because the runner
+ * needs them too: a research obligation raised with no permitted host is one nobody can
+ * ever fulfil. Re-exported here so every existing caller keeps working.
  */
-export interface ResearchSeeds {
-  readonly hosts: readonly string[];
-  readonly urls: readonly string[];
-}
-
-let SEEDS: ResearchSeeds = { hosts: [], urls: [] };
-export function configureResearchSeeds(seeds: ResearchSeeds): void {
-  SEEDS = seeds;
-}
+export { configureResearchSeeds } from '../research/seeds.js';
+export type { ResearchSeeds } from '../research/seeds.js';
 
 export const marketResearchDepartment: DepartmentConfig<typeof ResearchOutputSchema> = {
   id: 'DEPT-MARKET-RESEARCH',
@@ -138,56 +130,106 @@ export const marketResearchDepartment: DepartmentConfig<typeof ResearchOutputSch
       };
     }
 
-    const findings = repository(
-      ctx.store,
-      ARTIFACT_TYPES.DISCOVERY_FINDINGS,
-      DiscoveryFindingsSchema,
-    ).list();
-    const alternatives = repository(
-      ctx.store,
-      ARTIFACT_TYPES.CURRENT_ALTERNATIVE,
-      CurrentAlternativeSchema,
-    ).list();
-
-    const category = alternatives
-      .map((a) => a.description)
-      .slice(0, 3)
-      .join('; ');
-    const question =
-      'What products and services address this need today, and what do they cost? Context: ' +
-      (category === '' ? (findings[0]?.summary ?? 'general market') : category);
-
-    const at = ctx.clock.now();
-    const requestId = ctx.ids.next('SC-RR');
     const request = repository(ctx.store, ARTIFACT_TYPES.RESEARCH_REQUEST, ResearchRequestSchema);
+    const at = ctx.clock.now();
 
-    const tx = ctx.store.begin();
+    /*
+     * AN OBLIGATION IS CONSUMED, NOT REPLACED.
+     *
+     * When another department could not proceed without evidence, Serva recorded the exact
+     * ResearchRequest it needs. Composing a fresh generic question here and answering that
+     * instead would leave the original outstanding forever while looking like research had
+     * happened — the obligation would be discharged by coincidence or not at all.
+     *
+     * So the request is READ, not written: its question, its permitted hosts and its source
+     * cap are the ones the gateway enforces, and the requester's question is the one that
+     * gets answered.
+     */
     let stored;
-    try {
-      stored = request.put(tx, {
-        id: requestId,
-        createdAt: at,
-        question,
-        purpose: 'identify current alternatives and competitors for the competitive position',
-        scope: 'public product and pricing pages',
-        allowedHosts: [...SEEDS.hosts],
-        dataAllowedToLeave: [],
-        maxSources: 8,
-        meta: {
-          provenance: { marking: SourceMarking.SYSTEM, component: 'market-research' },
-          attribution: { agentId: RESEARCH_AGENT, at },
-        },
-      });
-      tx.commit();
-    } catch (e) {
-      tx.rollback();
-      throw e;
+    let requestId: string;
+    if (ctx.obligation !== undefined) {
+      const owed =
+        ctx.obligation.requestId === undefined ? undefined : request.get(ctx.obligation.requestId);
+      if (owed === undefined) {
+        return {
+          canon: [],
+          notes: [],
+          blocked:
+            'RESEARCH_UNAVAILABLE: this run was scheduled to discharge research request ' +
+            String(ctx.obligation.requestId) +
+            ', which does not exist. Nothing was retrieved and no substitute question was invented.',
+        };
+      }
+      if (owed.allowedHosts.length === 0) {
+        /*
+         * The obligation is real and unfulfillable. That is a BLOCK with the actual
+         * reason, not an excuse to widen the policy on the department's own authority.
+         */
+        return {
+          canon: [],
+          notes: [],
+          artifactIds: [owed.id],
+          blocked:
+            'RESEARCH_UNAVAILABLE: request ' +
+            owed.id +
+            ' permits no host, so no source may lawfully be consulted for "' +
+            owed.question +
+            '". Declare permitted research hosts for this installation, or accept that this question cannot be answered by retrieval.',
+        };
+      }
+      stored = owed;
+      requestId = owed.id;
+    } else {
+      const findings = repository(
+        ctx.store,
+        ARTIFACT_TYPES.DISCOVERY_FINDINGS,
+        DiscoveryFindingsSchema,
+      ).list();
+      const alternatives = repository(
+        ctx.store,
+        ARTIFACT_TYPES.CURRENT_ALTERNATIVE,
+        CurrentAlternativeSchema,
+      ).list();
+
+      const category = alternatives
+        .map((a) => a.description)
+        .slice(0, 3)
+        .join('; ');
+      const question =
+        'What products and services address this need today, and what do they cost? Context: ' +
+        (category === '' ? (findings[0]?.summary ?? 'general market') : category);
+
+      requestId = ctx.ids.next('SC-RR');
+      const tx = ctx.store.begin();
+      try {
+        stored = request.put(tx, {
+          id: requestId,
+          createdAt: at,
+          question,
+          purpose: 'identify current alternatives and competitors for the competitive position',
+          scope: 'public product and pricing pages',
+          allowedHosts: [...researchSeeds().hosts],
+          dataAllowedToLeave: [],
+          maxSources: 8,
+          meta: {
+            provenance: { marking: SourceMarking.SYSTEM, component: 'market-research' },
+            attribution: { agentId: RESEARCH_AGENT, at },
+          },
+        });
+        tx.commit();
+      } catch (e) {
+        tx.rollback();
+        throw e;
+      }
     }
+    const question = stored.question;
 
     const retriever = ctx.gateway.retriever;
     const discovered =
-      retriever?.discover === undefined ? [] : await retriever.discover(question, SEEDS.hosts);
-    const urls = [...new Set([...SEEDS.urls, ...discovered])];
+      retriever?.discover === undefined
+        ? []
+        : await retriever.discover(question, researchSeeds().hosts);
+    const urls = [...new Set([...researchSeeds().urls, ...discovered])];
 
     const result = await retrieveForResearch(ctx.gateway, {
       contract: REGISTRY.get(RESEARCH_AGENT),
