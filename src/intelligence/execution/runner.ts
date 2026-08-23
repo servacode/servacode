@@ -5,6 +5,8 @@ import { assertResearchAuthority } from '../research/gateway.js';
 import { resolveIntelligencePolicy } from '../research/capability.js';
 import { parseToolSurface } from '../../agents/toolPolicy.js';
 import { ScopedCanonWriter, allowedTypesFor } from './authority.js';
+import { QuestionRouting, normalizeOpenQuestions } from './questions.js';
+import type { OpenQuestion } from './questions.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import {
   DecisionPurpose,
@@ -64,7 +66,7 @@ function raiseEscalationDecisions(
   deps: RunnerDeps,
   config: DepartmentConfig<z.ZodTypeAny>,
   ctx: DepartmentContext,
-  escalations: readonly { readonly condition: string; readonly detail: string }[],
+  escalations: readonly OpenQuestion[],
 ): readonly string[] {
   const at = deps.clock.now();
   const ids: string[] = [];
@@ -80,8 +82,17 @@ function raiseEscalationDecisions(
       repo.put(tx, {
         id,
         createdAt: at,
-        question: e.condition + ': ' + e.detail,
+        /*
+         * The QUESTION, not a labelled question. The run's own condition word is
+         * provenance and goes below; putting it in front of the text makes the owner read
+         * "INSUFFICIENT_CONTEXT:" before every sentence, and makes the stored question
+         * text depend on which label the run picked.
+         */
+        question: e.detail,
         whyServaCannotDecide:
+          '(' +
+          e.condition +
+          ') ' +
           config.title +
           ' reached the edge of what it is allowed to decide. Answering this means choosing what the product does, which is yours to choose — and a plausible default here becomes a real behaviour nobody agreed to.',
         purpose: DecisionPurpose.SPECIFICATION_GAP,
@@ -108,9 +119,22 @@ function raiseEscalationDecisions(
         meta: {
           provenance: {
             marking: 'SYSTEM',
-            component: 'intelligence-runner: blocking escalation from ' + config.agentId,
+            /*
+             * The originating field is recorded, so a reader can see that a question filed
+             * as `unresolved` was routed identically to one filed as an escalation — which
+             * is the invariant, and is invisible without saying so.
+             */
+            component:
+              'intelligence-runner: open question from ' +
+              config.agentId +
+              ' via ' +
+              e.sources.join('+'),
           },
-          attribution: { agentId: config.agentId, at },
+          attribution: {
+            ...(e.runId === undefined ? {} : { runId: e.runId }),
+            agentId: config.agentId,
+            at,
+          },
           stageId: config.stageId,
           workItemId: ctx.workItemId,
         },
@@ -539,25 +563,45 @@ export async function runDepartment<S extends z.ZodTypeAny>(
      * through here at all, so a concern noted alongside real output raises nothing.
      */
     /*
-     * ESCALATIONS AND UNRESOLVED ITEMS ARE THE SAME THING.
+     * NORMALISE FIRST, ROUTE SECOND.
      *
-     * A third live run, a third version of the same mistake. This one recorded four
-     * genuine owner questions — the budget ceiling, the payment model, the hold duration,
-     * the catchment — in `unresolved` and none in `escalations`, so nothing was raised and
-     * the company stopped with four answerable questions nobody was asked.
+     * Both envelope fields become one deduplicated list, and each question is routed from
+     * what the STORE says rather than from how the run happened to file it. Not everything
+     * a run could not resolve is the owner's: some of it is already recorded, some of it
+     * is a fact about the world Serva may retrieve, and some of it is canon another
+     * department owes.
      *
-     * The envelope has two fields for "I could not resolve this" and Serva was reading
-     * one. An unresolved item IS a question by definition: it is the agent saying it could
-     * not settle something. Both become questions, and an escalation keeps its richer
-     * condition/detail where it has one.
+     * Asking the owner all of it would be asking them to do Serva's job, and would train
+     * them to skim.
      */
-    const questions = [
-      ...escalations.map((e) => ({ condition: e.condition, detail: e.detail })),
-      ...unresolved.map((u) => ({ condition: 'UNRESOLVED', detail: u })),
-    ];
-    const blocking = questions;
-    if (blocking.length > 0) {
-      const raised = raiseEscalationDecisions(deps, config, ctx, blocking);
+    const questions = normalizeOpenQuestions({
+      escalations,
+      unresolved,
+      store: deps.store,
+      workItemId: ctx.workItemId,
+      produces: config.produces,
+      canResearch: ctx.gateway !== undefined,
+      ...(run.runId === undefined ? {} : { runId: run.runId }),
+    });
+
+    for (const q of questions) {
+      diagnostics.push(
+        q.routing +
+          ' [' +
+          q.sources.join('+') +
+          '] ' +
+          q.condition +
+          ' — ' +
+          q.detail +
+          ' (' +
+          q.why +
+          ')',
+      );
+    }
+
+    const forOwner = questions.filter((q) => q.routing === QuestionRouting.OWNER_DECISION);
+    if (forOwner.length > 0) {
+      const raised = raiseEscalationDecisions(deps, config, ctx, forOwner);
       if (raised.length > 0) {
         const ltx = deps.store.begin();
         try {
@@ -573,9 +617,9 @@ export async function runDepartment<S extends z.ZodTypeAny>(
             disposition: StageLedgerDisposition.BLOCKED,
             reason:
               config.title +
-              ' escalated ' +
-              String(blocking.length) +
-              ' question(s) that are the owner’s to answer',
+              ' raised ' +
+              String(forOwner.length) +
+              ' question(s) that are the owner\u2019s to answer',
             attempt,
           });
           ltx.commit();
@@ -588,7 +632,10 @@ export async function runDepartment<S extends z.ZodTypeAny>(
           runId: run.runId,
           ownerDecisionIds: raised,
           diagnostics,
-          reason: config.title + ' cannot proceed without the owner.' + said + open,
+          reason:
+            config.title +
+            ' cannot proceed without the owner: ' +
+            forOwner.map((q) => q.detail).join('; '),
         };
       }
     }
