@@ -798,6 +798,51 @@ describe('the doctor inspects, and never reports READY for something it could no
     expect(backup?.remedy).toContain('will not restore');
   });
 
+  it('a guest that did not answer is UNKNOWN, not "not installed"', () => {
+    /*
+     * The distinction a diagnostic gets wrong most easily. Telling an owner to install an
+     * engine they already have — because the guest was asleep — sends them to fix the
+     * wrong thing, and the root cause (WSL) is already on the same screen.
+     */
+    const report = machineDoctor({
+      probes: {
+        ...READY_PROBES,
+        wsl: () => ({ installed: false, detail: 'no working WSL guest responded' }),
+        distro: () => ({ measured: false, detail: 'no WSL guest responded' }),
+        claude: () => ({
+          installed: false,
+          signedIn: false,
+          measured: false,
+          detail: 'no WSL guest responded',
+        }),
+        sandbox: () => ({ available: false, measured: false, detail: 'no WSL guest responded' }),
+        interop: () => ({ detail: 'no WSL guest responded, so interop could not be measured' }),
+      },
+    });
+
+    for (const id of ['DISTRO', 'CLAUDE', 'CLAUDE_AUTH', 'SANDBOX', 'INTEROP']) {
+      expect(report.checks.find((c) => c.id === id)?.state, id).toBe(CheckState.UNKNOWN);
+    }
+    /* The root cause is the one that says what to do. */
+    expect(report.checks.find((c) => c.id === 'WSL2')?.state).toBe(CheckState.ACTION_REQUIRED);
+    expect(report.checks.find((c) => c.id === 'CLAUDE')?.remedy).toContain('Fix WSL first');
+    /* And nothing is ready. */
+    expect(report.engineeringReady).toBe(false);
+  });
+
+  it('interop that could not be measured is never reported as disabled', () => {
+    const report = machineDoctor({
+      probes: { ...READY_PROBES, interop: () => ({ detail: 'could not be measured' }) },
+    });
+    const interop = report.checks.find((c) => c.id === 'INTEROP');
+    /*
+     * `enabled: false` here would say "interop disabled" — a containment property reported
+     * as safe because nothing answered.
+     */
+    expect(interop?.state).toBe(CheckState.UNKNOWN);
+    expect(interop?.detail).not.toContain('disabled');
+  });
+
   it('renders owner-facing lines with the remedies underneath', () => {
     const rendered = renderDoctor(
       machineDoctor({

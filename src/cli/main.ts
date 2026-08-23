@@ -17,6 +17,17 @@ import {
 } from './commands/engineering.js';
 import { cmdImplement } from './commands/implement.js';
 import { cmdIntelligence, INTELLIGENCE_USAGE } from './commands/intelligence.js';
+import {
+  cmdActions,
+  cmdBackup,
+  cmdLibrary,
+  cmdMachine,
+  cmdMigrate,
+  cmdOverview,
+  cmdRelease,
+  cmdRestore,
+  cmdVerifyBackup,
+} from './commands/portability.js';
 import { SERVA_VERSION, SPEC_BASELINE } from '../app/runtime.js';
 
 /**
@@ -97,6 +108,17 @@ const USAGE = [
   '  changes [<change-set-id>]     Observed change sets and their evidence',
   '  evidence [<id>]               Runtime-captured evidence only',
   '  qualification                 The adversarial qualification catalogue',
+  '',
+  'Product, portability and recovery:',
+  '  overview                      What the status bar shows, in a terminal',
+  '  release                       Derived release readiness, condition by condition',
+  '  actions                       Every validated action the UI can dispatch',
+  '  machine doctor                Inspect this computer. Nothing is repaired.',
+  '  backup --to <path> --confirm  Write a verified backup of this project',
+  '  verify-backup <path>          Prove a bundle before relying on it',
+  '  restore <bundle> --to <dir>   Inspect a restore; --confirm to perform it',
+  '  migrate                       The guided move to another computer',
+  '  library [list|show|forget]    Machine-local generalised knowledge (--enable)',
   '  help                          This message',
   '',
   'Global options:',
@@ -128,6 +150,15 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   change: cmdChanges,
   evidence: cmdEvidence,
   qualification: cmdQualificationCatalogue,
+  overview: cmdOverview,
+  release: cmdRelease,
+  actions: cmdActions,
+  machine: cmdMachine,
+  backup: cmdBackup,
+  'verify-backup': cmdVerifyBackup,
+  restore: cmdRestore,
+  migrate: cmdMigrate,
+  library: cmdLibrary,
   help: () => {
     console.log(USAGE);
     return 0;

@@ -44,6 +44,18 @@ function guest(args: readonly string[]): string | undefined {
   return run('wsl.exe', ['-e', ...args]);
 }
 
+/**
+ * Did the guest respond at all?
+ *
+ * The distinction this exists for is the one a diagnostic gets wrong most easily: a tool
+ * that is NOT INSTALLED and a guest that did not answer look identical from a failed
+ * command, and reporting the second as the first sends the owner to install something they
+ * already have. Every guest-dependent probe below asks this first.
+ */
+function guestResponds(): boolean {
+  return guest(['true']) !== undefined || guest(['sh', '-c', 'exit 0']) !== undefined;
+}
+
 export function nodeDoctorProbes(): DoctorProbes {
   return {
     platform: () => ({ platform: platform(), release: release(), arch: arch() }),
@@ -72,6 +84,12 @@ export function nodeDoctorProbes(): DoctorProbes {
     },
 
     distro: () => {
+      if (!guestResponds()) {
+        return {
+          measured: false,
+          detail: 'no WSL guest responded, so the distribution could not be read',
+        };
+      }
       const name = guest(['sh', '-c', '. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"']);
       const kernel = guest(['uname', '-r']);
       const user = guest(['whoami']);
@@ -87,9 +105,26 @@ export function nodeDoctorProbes(): DoctorProbes {
     },
 
     claude: () => {
+      if (!guestResponds()) {
+        /*
+         * NOT the same as "not installed". Telling an owner to install an engine they
+         * already have, because the guest was asleep, is the failure this branch exists to
+         * prevent.
+         */
+        return {
+          installed: false,
+          signedIn: false,
+          measured: false,
+          detail: 'no WSL guest responded, so the engine could not be looked for',
+        };
+      }
       const location = guest(['sh', '-c', 'command -v claude || true']);
       if (location === undefined) {
-        return { installed: false, signedIn: false, detail: 'claude was not found in the guest' };
+        return {
+          installed: false,
+          signedIn: false,
+          detail: 'the engine was not found in the guest',
+        };
       }
       const version = guest(['claude', '--version']);
       /*
@@ -112,6 +147,13 @@ export function nodeDoctorProbes(): DoctorProbes {
     },
 
     sandbox: () => {
+      if (!guestResponds()) {
+        return {
+          available: false,
+          measured: false,
+          detail: 'no WSL guest responded, so the sandbox could not be looked for',
+        };
+      }
       const bwrap = guest(['sh', '-c', 'command -v bwrap || true']);
       if (bwrap === undefined) {
         return { available: false, detail: 'bubblewrap was not found in the guest' };
@@ -138,14 +180,23 @@ export function nodeDoctorProbes(): DoctorProbes {
        * capability rather than from a configuration file, because the file can say one
        * thing while the running guest does another.
        */
+      if (platform() !== 'win32') {
+        return { detail: 'not a Windows host; interop does not apply here' };
+      }
+      if (!guestResponds()) {
+        /*
+         * `enabled` stays ABSENT, which the doctor reports as UNKNOWN. Returning
+         * `enabled: false` here would have said "interop disabled" — a containment
+         * property reported as safe because nothing answered, which is precisely the
+         * shape of failure this whole phase refuses.
+         */
+        return { detail: 'no WSL guest responded, so interop could not be measured' };
+      }
       const enabled = guest([
         'sh',
         '-c',
         'test -d /proc/sys/fs/binfmt_misc/WSLInterop && echo yes || true',
       ]);
-      if (enabled === undefined && platform() !== 'win32') {
-        return { detail: 'not a Windows host; interop does not apply here' };
-      }
       return {
         enabled: enabled === 'yes',
         detail: enabled === 'yes' ? 'the guest can start Windows executables' : 'interop disabled',

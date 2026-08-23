@@ -70,6 +70,14 @@ export interface DoctorProbes {
     readonly name?: string;
     readonly kernel?: string;
     readonly user?: string;
+    /**
+     * False when the probe could not run at all.
+     *
+     * The distinction a diagnostic gets wrong most easily: a tool that is NOT INSTALLED
+     * and a guest that did not answer look identical from a failed command, and reporting
+     * the second as the first sends the owner to install something they already have.
+     */
+    readonly measured?: boolean;
     readonly detail: string;
   };
   claude(): {
@@ -78,12 +86,16 @@ export interface DoctorProbes {
     readonly version?: string;
     /** Signed in on a subscription, which is the only supported route. */
     readonly signedIn: boolean;
+    /** False when the probe could not run. Absent means it did. */
+    readonly measured?: boolean;
     readonly detail: string;
   };
   sandbox(): {
     readonly mechanism?: string;
     readonly version?: string;
     readonly available: boolean;
+    /** False when the probe could not run. Absent means it did. */
+    readonly measured?: boolean;
     readonly detail: string;
   };
   git(): { readonly installed: boolean; readonly version?: string; readonly detail: string };
@@ -168,22 +180,29 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
     id: 'DISTRO',
     label: 'Linux guest',
     state:
-      distro.name === undefined
-        ? CheckState.ACTION_REQUIRED
-        : distro.user === 'root'
-          ? CheckState.DEGRADED
-          : distroReady
-            ? CheckState.READY
-            : CheckState.UNKNOWN,
+      distro.measured === false
+        ? CheckState.UNKNOWN
+        : distro.name === undefined
+          ? CheckState.ACTION_REQUIRED
+          : distro.user === 'root'
+            ? CheckState.DEGRADED
+            : distroReady
+              ? CheckState.READY
+              : CheckState.UNKNOWN,
     detail: distro.detail,
-    ...(distro.name === undefined
-      ? { remedy: 'Install a distribution: `wsl --install -d Ubuntu`.' }
-      : distro.user === 'root'
-        ? {
-            remedy:
-              'The guest default user is root. Create a normal user and set it as the default: a Producer running as root is not contained by a sandbox that assumes it is not.',
-          }
-        : {}),
+    ...(distro.measured === false
+      ? {
+          remedy:
+            'The guest did not answer, so nothing about it could be established. Fix WSL first.',
+        }
+      : distro.name === undefined
+        ? { remedy: 'Install a distribution: `wsl --install -d Ubuntu`.' }
+        : distro.user === 'root'
+          ? {
+              remedy:
+                'The guest default user is root. Create a normal user and set it as the default: a Producer running as root is not contained by a sandbox that assumes it is not.',
+            }
+          : {}),
     blocksEngineering: true,
   });
 
@@ -195,25 +214,44 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
   checks.push({
     id: 'CLAUDE',
     label: 'Claude Code',
-    state: claude.installed ? CheckState.READY : CheckState.ACTION_REQUIRED,
+    state:
+      claude.measured === false
+        ? CheckState.UNKNOWN
+        : claude.installed
+          ? CheckState.READY
+          : CheckState.ACTION_REQUIRED,
     detail: claude.installed
       ? (claude.location ?? 'installed') + ' ' + (claude.version ?? '')
       : claude.detail,
-    ...(claude.installed ? {} : { remedy: 'Install Claude Code inside the guest distribution.' }),
+    ...(claude.measured === false
+      ? {
+          remedy: 'The guest did not answer, so the engine could not be looked for. Fix WSL first.',
+        }
+      : claude.installed
+        ? {}
+        : { remedy: 'Install the engine inside the guest distribution.' }),
     blocksEngineering: true,
   });
   checks.push({
     id: 'CLAUDE_AUTH',
     label: 'Claude subscription',
-    state: claude.signedIn ? CheckState.READY : CheckState.ACTION_REQUIRED,
+    state:
+      claude.measured === false
+        ? CheckState.UNKNOWN
+        : claude.signedIn
+          ? CheckState.READY
+          : CheckState.ACTION_REQUIRED,
     /* Never the account, the email or the organisation. Signed in is the whole fact. */
-    detail: claude.signedIn ? 'signed in' : 'not signed in',
-    ...(claude.signedIn
-      ? {}
-      : {
-          remedy:
-            'Run `claude` in the guest and sign in. Serva uses your Claude subscription; it never creates an API key and never copies credentials from another machine.',
-        }),
+    detail:
+      claude.measured === false ? 'not measured' : claude.signedIn ? 'signed in' : 'not signed in',
+    ...(claude.measured === false
+      ? { remedy: 'The guest did not answer, so the sign-in state could not be read.' }
+      : claude.signedIn
+        ? {}
+        : {
+            remedy:
+              'Run the engine in the guest and sign in. Serva uses your subscription; it never creates an API key and never copies credentials from another machine.',
+          }),
     blocksEngineering: true,
   });
 
@@ -224,16 +262,26 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
   checks.push({
     id: 'SANDBOX',
     label: 'Sandbox',
-    state: sandbox.available ? CheckState.READY : CheckState.ACTION_REQUIRED,
+    state:
+      sandbox.measured === false
+        ? CheckState.UNKNOWN
+        : sandbox.available
+          ? CheckState.READY
+          : CheckState.ACTION_REQUIRED,
     detail: sandbox.available
       ? (sandbox.mechanism ?? 'available') + ' ' + (sandbox.version ?? '')
       : sandbox.detail,
-    ...(sandbox.available
-      ? {}
-      : {
+    ...(sandbox.measured === false
+      ? {
           remedy:
-            'Install the sandbox mechanism inside the guest (`bubblewrap`). Without it, engineering stays read-only rather than running unconfined.',
-        }),
+            'The guest did not answer, so the sandbox could not be looked for. Fix WSL first.',
+        }
+      : sandbox.available
+        ? {}
+        : {
+            remedy:
+              'Install the sandbox mechanism inside the guest (`bubblewrap`). Without it, engineering stays read-only rather than running unconfined.',
+          }),
     blocksEngineering: true,
   });
 
