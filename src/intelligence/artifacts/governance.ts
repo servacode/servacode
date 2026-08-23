@@ -238,6 +238,29 @@ export const DecisionPurpose = {
 export type DecisionPurpose = (typeof DecisionPurpose)[keyof typeof DecisionPurpose];
 
 /**
+ * Purposes a department may NOT mint.
+ *
+ * `OwnerDecisionRequest` is a universal artifact family — every department must be able to
+ * stop and ask, or the authority boundary has a hole in it. But the FORM of consent is not
+ * the same thing as the ability to ask a question: a decision whose purpose is
+ * CHANGE_APPROVAL or PROPOSAL_APPROVAL is the artifact `approveChange` and `accept` later
+ * read as authorisation.
+ *
+ * A department that could construct one could write its own approval, wait for anybody to
+ * answer it, and hand the result to the function that authorises the thing it wanted. So
+ * these two purposes are reserved to Serva's own authority functions —
+ * `requestChangeApproval` and `requestProposalApproval` — and the write boundary refuses
+ * them to everyone else.
+ *
+ * The informational purposes are deliberately NOT reserved. A department raising
+ * "what is the collection window?" is doing its job.
+ */
+export const RESERVED_PURPOSES: readonly DecisionPurpose[] = Object.freeze([
+  DecisionPurpose.CHANGE_APPROVAL,
+  DecisionPurpose.PROPOSAL_APPROVAL,
+]);
+
+/**
  * A decision that is genuinely the owner's to make.
  *
  * SPEC: §32. Written in business language, with a recommendation — the owner is being
@@ -252,8 +275,52 @@ export type DecisionPurpose = (typeof DecisionPurpose)[keyof typeof DecisionPurp
  * consent will find some. With them, consent is a statement about one named artifact and
  * cannot be borrowed by another.
  */
+/**
+ * How the owner is expected to answer.
+ *
+ * OPTION decisions are a choice between things Serva has already worked out. VALUE
+ * decisions are questions where the answer is a fact only the owner has — how long a
+ * reservation is held, what the cancellation fee is, whether an inventory system exists.
+ *
+ * Before this distinction existed, a department asking "what is the collection window?"
+ * could only offer "Answer it, and Serva records the answer as company truth" — and the
+ * stored answer was that sentence. On resume the department was told the owner had
+ * answered "Answer it", which is not a collection window. The owner's only workable move
+ * was to DEFER something they actually wanted to specify.
+ */
+export const ResponseMode = {
+  /** Choose one of the offered options. The only mode that can carry APPROVE. */
+  OPTION: 'OPTION',
+  /** Supply a fact. Always INFORMATION, never authorisation. */
+  VALUE: 'VALUE',
+} as const;
+export type ResponseMode = (typeof ResponseMode)[keyof typeof ResponseMode];
+
+/** What kind of value a VALUE decision expects, so the answer can be checked. */
+export const ValueKind = {
+  TEXT: 'TEXT',
+  NUMBER: 'NUMBER',
+  BOOLEAN: 'BOOLEAN',
+  DATE: 'DATE',
+  DURATION: 'DURATION',
+  ENUM: 'ENUM',
+} as const;
+export type ValueKind = (typeof ValueKind)[keyof typeof ValueKind];
+
 export const OwnerDecisionRequestSchema = artifact({
   question: z.string().min(1),
+  /**
+   * OPTION by default, so every existing decision keeps its meaning.
+   *
+   * A VALUE decision may not be an approval purpose. That is enforced below rather than
+   * left to convention: free text containing the word "yes" must never become consent, and
+   * the surest way to guarantee that is for approval and free text to be different shapes.
+   */
+  responseMode: enumOf(ResponseMode).default(ResponseMode.OPTION),
+  valueKind: enumOf(ValueKind).optional(),
+  /** For ENUM, the permitted values. For NUMBER, an optional unit to state in the prompt. */
+  valueChoices: z.array(z.string().min(1)).default([]),
+  valueUnit: z.string().min(1).optional(),
   whyServaCannotDecide: z.string().min(1),
   /** What answering this decides. Routed on; never inferred from the question text. */
   purpose: enumOf(DecisionPurpose),
@@ -268,6 +335,12 @@ export const OwnerDecisionRequestSchema = artifact({
   targetRef: RefSchema.optional(),
   /** Further artifacts the answer bears on, for the audit trail. */
   supportingRefs: z.array(RefSchema).default([]),
+  /**
+   * The choices, for an OPTION decision. Empty for a VALUE decision, which has none.
+   *
+   * `optionsRefusal` enforces the two-option minimum where it applies — a schema-level
+   * `.min(2)` would make VALUE decisions unrepresentable.
+   */
   options: z
     .array(
       z
@@ -281,22 +354,126 @@ export const OwnerDecisionRequestSchema = artifact({
         })
         .strict(),
     )
-    .min(2),
+    .default([]),
   recommendation: z.string().min(1),
   recommendationRationale: z.string().min(1),
   blocksWork: z.boolean(),
   blockedRefs: z.array(RefSchema).default([]),
   state: z.enum(['OPEN', 'ANSWERED', 'WITHDRAWN']),
   chosenOption: z.string().min(1).optional(),
+  /**
+   * The owner's actual answer, for a VALUE decision.
+   *
+   * INFORMATION, always. `chosenDisposition` returns undefined for a VALUE decision and
+   * `approvalRefusal` refuses one outright, so no amount of agreeable prose here can
+   * authorise a change or a proposal.
+   */
+  answerValue: z.string().min(1).optional(),
   answeredBy: z.string().min(1).optional(),
   answeredAt: z.string().min(1).optional(),
 });
 export type OwnerDecisionRequest = z.output<typeof OwnerDecisionRequestSchema>;
 
-/** The disposition the owner actually chose, or undefined if unanswered. */
+/** The disposition the owner actually chose, or undefined if unanswered or a VALUE. */
 export function chosenDisposition(d: OwnerDecisionRequest): OptionDisposition | undefined {
-  if (d.state !== 'ANSWERED' || d.chosenOption === undefined) return undefined;
+  if (d.state !== 'ANSWERED') return undefined;
+  /* A VALUE answer has no disposition. Information is not consent. */
+  if (d.responseMode === ResponseMode.VALUE) return undefined;
+  if (d.chosenOption === undefined) return undefined;
   return d.options.find((o) => o.option === d.chosenOption)?.disposition;
+}
+
+/**
+ * Is this decision well formed for how it expects to be answered?
+ *
+ * Returns the reason it is not. Two rules carry the weight:
+ *
+ *   an OPTION decision needs at least two options, or it is not a choice;
+ *   a VALUE decision may not carry an approval purpose, because its answer is free text
+ *   and free text must never be routed on. Approval comes from a typed disposition or it
+ *   does not come at all.
+ */
+export function decisionShapeRefusal(d: OwnerDecisionRequest): string | undefined {
+  if (d.responseMode === ResponseMode.VALUE) {
+    if ((RESERVED_PURPOSES as readonly string[]).includes(d.purpose)) {
+      return (
+        'decision ' +
+        d.id +
+        ' asks for a VALUE but its purpose is ' +
+        d.purpose +
+        ': an approval is a typed disposition, never free text'
+      );
+    }
+    if (d.options.length > 0) {
+      return 'decision ' + d.id + ' asks for a VALUE and also offers options';
+    }
+    if (d.valueKind === undefined) {
+      return 'decision ' + d.id + ' asks for a VALUE without saying what kind';
+    }
+    if (d.valueKind === ValueKind.ENUM && d.valueChoices.length < 2) {
+      return 'decision ' + d.id + ' is an ENUM with fewer than two choices';
+    }
+    return undefined;
+  }
+  if (d.options.length < 2) {
+    return 'decision ' + d.id + ' offers ' + String(d.options.length) + ' option(s): not a choice';
+  }
+  return undefined;
+}
+
+/**
+ * Is this a well-formed answer to what was asked?
+ *
+ * For OPTION, the answer must be one of the options offered. For VALUE, it must satisfy
+ * the declared kind — a question that asked for a number is not answered by "soon".
+ */
+export function answerRefusal(
+  d: OwnerDecisionRequest,
+  answer: { readonly option?: string; readonly value?: string },
+): string | undefined {
+  if (d.responseMode === ResponseMode.VALUE) {
+    if (answer.value === undefined || answer.value.trim() === '') {
+      return 'decision ' + d.id + ' asks for a value, and none was given';
+    }
+    if (answer.option !== undefined) {
+      return 'decision ' + d.id + ' asks for a value, not a choice between options';
+    }
+    const v = answer.value.trim();
+    switch (d.valueKind) {
+      case ValueKind.NUMBER:
+        if (!/^-?\d+(\.\d+)?$/.test(v)) return '"' + v + '" is not a number';
+        break;
+      case ValueKind.BOOLEAN:
+        if (!/^(yes|no|true|false)$/i.test(v)) return '"' + v + '" is not yes or no';
+        break;
+      case ValueKind.DATE:
+        if (Number.isNaN(Date.parse(v))) return '"' + v + '" is not a date';
+        break;
+      case ValueKind.ENUM:
+        if (!d.valueChoices.includes(v)) {
+          return '"' + v + '" is not one of: ' + d.valueChoices.join(', ');
+        }
+        break;
+      default:
+        break;
+    }
+    return undefined;
+  }
+
+  if (answer.value !== undefined) {
+    return 'decision ' + d.id + ' is a choice between options, not a free-text question';
+  }
+  if (answer.option === undefined || !d.options.some((o) => o.option === answer.option)) {
+    return (
+      '"' +
+      String(answer.option) +
+      '" is not one of the options offered on ' +
+      d.id +
+      '. They are: ' +
+      d.options.map((o) => '"' + o.option + '"').join(', ')
+    );
+  }
+  return undefined;
 }
 
 /**
@@ -321,6 +498,19 @@ export function approvalRefusal(
 
   const impersonation = ownerDecisionRefusal(d);
   if (impersonation !== undefined) return impersonation;
+
+  if (d.responseMode === ResponseMode.VALUE) {
+    /*
+     * A VALUE answer is information. Its text may well contain "yes", "approved" or
+     * "go ahead" — and none of those is consent, because consent is a typed disposition on
+     * an option Serva offered. This is the clause that keeps free text out of authority.
+     */
+    return (
+      'owner decision ' +
+      d.id +
+      ' is a VALUE question: its answer is information, and information is not approval'
+    );
+  }
 
   if (d.purpose !== o.purpose) {
     return (
@@ -386,6 +576,19 @@ export function ownerDecisionRefusal(d: OwnerDecisionRequest): string | undefine
       d.answeredBy +
       ', which is an agent: owner authority cannot be synthesised by the company that needs it'
     );
+  }
+  /*
+   * An answer, of whichever kind the question asked for.
+   *
+   * A VALUE decision has no chosen option and never will — requiring one here would make
+   * every answered question look unanswered, and the orchestrator would refuse to resume
+   * from an owner answer it had just been given.
+   */
+  if (d.responseMode === ResponseMode.VALUE) {
+    if (d.answerValue === undefined || d.answerValue.trim() === '') {
+      return 'OwnerDecisionRequest ' + d.id + ' is ANSWERED but records no value';
+    }
+    return undefined;
   }
   if (d.chosenOption === undefined) {
     return 'OwnerDecisionRequest ' + d.id + ' is ANSWERED but records no chosen option';

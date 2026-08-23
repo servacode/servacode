@@ -8,8 +8,9 @@ import { ScopedCanonWriter, allowedTypesFor } from './authority.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import {
   DecisionPurpose,
-  OptionDisposition,
   OwnerDecisionRequestSchema,
+  ResponseMode,
+  ValueKind,
 } from '../artifacts/governance.js';
 import { DepartmentOutcome } from './types.js';
 import type {
@@ -84,27 +85,23 @@ function raiseEscalationDecisions(
           config.title +
           ' reached the edge of what it is allowed to decide. Answering this means choosing what the product does, which is yours to choose — and a plausible default here becomes a real behaviour nobody agreed to.',
         purpose: DecisionPurpose.SPECIFICATION_GAP,
-        options: [
-          {
-            option: 'Answer it, and Serva records the answer as company truth',
-            impact: 'the stage runs again with your answer and the work continues',
-            /*
-             * INFORM, not APPROVE. This unblocks a department; it authorises nothing.
-             * Making it an approval would mean every stalled stage minted consent that
-             * `approveChange` could later find and use.
-             */
-            disposition: OptionDisposition.INFORM,
-          },
-          {
-            option: 'Declare it out of scope for now',
-            impact:
-              'Serva records the absence rather than guessing, and the affected behaviour stays unspecified',
-            disposition: OptionDisposition.DEFER,
-          },
-        ],
-        recommendation: 'Answer it',
+        /*
+         * A VALUE QUESTION, NOT A MENU.
+         *
+         * This used to offer "Answer it, and Serva records the answer as company truth" —
+         * and then store that sentence as the answer. On resume the department was told
+         * the owner had answered "Answer it", which is not a collection window, a hold
+         * duration or a cancellation policy. The owner's only workable move was to DEFER
+         * something they actually wanted to specify, and the department escalated again.
+         *
+         * The question the agent asked is a question. It is now asked as one.
+         */
+        responseMode: ResponseMode.VALUE,
+        valueKind: ValueKind.TEXT,
+        options: [],
+        recommendation: 'Answer it in your own words',
         recommendationRationale:
-          'The work is stopped either way. Answering removes the blockage; deferring moves it downstream, where it costs more to resolve.',
+          'The work is stopped until somebody says what the product should do here. Your answer is recorded as company truth and the stage runs again with it.',
         blocksWork: true,
         blockedRefs: [],
         state: 'OPEN',
@@ -338,7 +335,7 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     .filter(
       (d) =>
         d.state === 'ANSWERED' &&
-        d.chosenOption !== undefined &&
+        (d.chosenOption !== undefined || d.answerValue !== undefined) &&
         d.meta.attribution.agentId === config.agentId &&
         d.meta.workItemId === ctx.workItemId,
     )
@@ -351,7 +348,8 @@ export async function runDepartment<S extends z.ZodTypeAny>(
         d.question +
         String.fromCharCode(10) +
         'The owner answered: ' +
-        String(d.chosenOption) +
+        /* The VALUE where there is one; the chosen option otherwise. Never the meta-option. */
+        String(d.answerValue ?? d.chosenOption) +
         String.fromCharCode(10) +
         'This is a decision, not a suggestion. Proceed on it, and do not re-open it.',
       relevance: 1,

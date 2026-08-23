@@ -1,5 +1,6 @@
 import { fail } from '../../core/errors.js';
 import { ARTIFACT_TYPES } from '../repository.js';
+import { RESERVED_PURPOSES } from '../artifacts/governance.js';
 import type { ArtifactType } from '../repository.js';
 import type { AgentContract } from '../../agents/schema.js';
 import type { ContractRegistry } from '../../agents/registry.js';
@@ -271,6 +272,40 @@ export class ScopedCanonWriter {
         specRef: '06',
       });
     }
+    /*
+     * RESERVED APPROVAL PURPOSES.
+     *
+     * An owner decision is universal — every department must be able to stop and ask — but
+     * the FORM of consent is not. A decision whose purpose is CHANGE_APPROVAL or
+     * PROPOSAL_APPROVAL is the artifact that `approveChange` and `accept` later read as
+     * authorisation, so a department able to construct one could write its own approval,
+     * wait for anybody at all to answer it, and hand the result to the function that
+     * authorises the thing it wanted.
+     *
+     * Checked here rather than in each department for the same reason as everything else
+     * on this boundary: the departments that would most benefit from minting one are
+     * exactly the ones whose authors would find the check most inconvenient.
+     */
+    if (type === ARTIFACT_TYPES.OWNER_DECISION_REQUEST) {
+      const purpose = (body as { purpose?: string } | undefined)?.purpose;
+      if (purpose !== undefined && (RESERVED_PURPOSES as readonly string[]).includes(purpose)) {
+        return fail({
+          code: 'E_GATE_AUTHORITY',
+          message:
+            this.departmentId +
+            ' (running as ' +
+            this.agentId +
+            ') attempted to raise a ' +
+            purpose +
+            ' decision',
+          remedy:
+            'A department may ask the owner anything within its scope, but it may not mint the FORM of consent that later authorises a change or a proposal. Those are raised by Serva\u2019s own authority functions.',
+          details: { departmentId: this.departmentId, agentId: this.agentId, purpose },
+          specRef: '§32',
+        });
+      }
+    }
+
     this.attempted.add(type);
     return this.tx.putCanon<T>(type, id, body, opts);
   }

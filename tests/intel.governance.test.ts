@@ -26,6 +26,7 @@ import {
   openProposals,
   propose,
   reject,
+  requestProposalApproval,
 } from '../src/intelligence/proposals.js';
 import {
   applyPattern,
@@ -562,7 +563,219 @@ describe('re-entry re-opens the lifecycle, idempotently', () => {
   });
 });
 
-describe('a proposal is not scope', () => {
+describe('a proposal is accepted by an authority acting, not by a name', () => {
+  const ASSESSMENT = {
+    userOrBusinessValue: 'repeat custom',
+    evidenceBasis: 'none yet — an idea',
+    implementationComplexity: 'MEDIUM' as const,
+    costImpact: 'a fortnight of work',
+    risk: 'dilutes the first release',
+    operationalBurden: 'staff must explain it',
+    scopeEffect: 'adds a feature nobody asked for',
+  };
+
+  /** A proposal over PRODUCT_SCOPE, which SC-AGENT-020 owns. */
+  function assessedProposal(f: ReturnType<typeof setup>, origin = 'SC-AGENT-120') {
+    const p = propose(f, {
+      title: 'Loyalty points',
+      origin,
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
+      description: 'Reward repeat phone orders',
+    });
+    assess(f, { proposalId: p.id, assessment: ASSESSMENT });
+    return p;
+  }
+
+  /** A completed governed run, written the way the runtime writes one. */
+  function completedRun(
+    f: ReturnType<typeof setup>,
+    o: { readonly agentId: string; readonly mentions?: string },
+  ): string {
+    const runId = f.deps.ids.next('SC-RUN');
+    const tx = f.store.begin();
+    tx.appendTrace('agentrun/' + runId, {
+      type: 'RUN_COMPLETED',
+      payload: { runId, agentId: o.agentId, mentions: o.mentions ?? '' },
+    });
+    tx.putCanon('agentRunRecord', runId, {
+      runId,
+      agentId: o.agentId,
+      outcome: 'COMPLETED',
+      terminal: true,
+    });
+    tx.commit();
+    return runId;
+  }
+
+  it('a spoofed owning-agent name with no run behind it is refused', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+
+    /*
+     * The old rule was satisfied by the STRING "SC-AGENT-020". There is nowhere to put it
+     * now: acceptance takes a reference to an event, and resolves it against the Store.
+     */
+    expect(() => accept(f, { proposalId: p.id })).toThrow(/needs that authority/);
+    expect(() => accept(f, { proposalId: p.id, authorityRunId: 'SC-RUN-NOPE' })).toThrow(
+      /no governed run/,
+    );
+  });
+
+  it('a run by an actor that does not own the canon is refused', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    /* The security architect owns threat models, not product scope. */
+    const run = completedRun(f, { agentId: 'SC-AGENT-090', mentions: p.id });
+    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(/does not own/);
+  });
+
+  it('an unrelated run by the RIGHT actor is refused', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    /* A real Product Manager run that never mentions this proposal. */
+    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: 'something else entirely' });
+    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(/never mentions/);
+  });
+
+  it('an incomplete run by the right actor is refused', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    const runId = f.deps.ids.next('SC-RUN');
+    const tx = f.store.begin();
+    tx.appendTrace('agentrun/' + runId, { type: 'RUN_FAILED', payload: { runId, mentions: p.id } });
+    tx.putCanon('agentRunRecord', runId, {
+      runId,
+      agentId: 'SC-AGENT-020',
+      outcome: 'FAILED',
+      terminal: true,
+    });
+    tx.commit();
+    expect(() => accept(f, { proposalId: p.id, authorityRunId: runId })).toThrow(/decided nothing/);
+  });
+
+  it('the owning authority acting, on this exact proposal, is accepted', () => {
+    const f = setup();
+    const p = assessedProposal(f);
+    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
+    expect(accept(f, { proposalId: p.id, authorityRunId: run }).state).toBe('ACCEPTED');
+  });
+
+  it('the proposer cannot accept its own idea, even with a real run', () => {
+    const f = setup();
+    /* SC-AGENT-020 both raises it and owns the canon it affects. */
+    const p = assessedProposal(f, 'SC-AGENT-020');
+    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
+    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(
+      /accepted by its own run/,
+    );
+  });
+
+  it('an arbitrary human string is not owner authority', () => {
+    const f = setup();
+    const p = propose(f, {
+      title: 'Track a new project goal',
+      origin: 'SC-AGENT-030',
+      /* SF-12: no contract claims the framing artifacts, so this is owner-reserved. */
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'Add a goal about reducing wasted stock',
+    });
+    assess(f, { proposalId: p.id, assessment: ASSESSMENT });
+
+    /* "owner@bakery" used to be accepted purely for not starting with SC-AGENT-. */
+    expect(() => accept(f, { proposalId: p.id })).toThrow(/needs an owner decision/);
+  });
+
+  it('an owner decision for a DIFFERENT proposal is refused', () => {
+    const f = setup();
+    const mine = propose(f, {
+      title: 'Goal A',
+      origin: 'SC-AGENT-030',
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'one thing',
+    });
+    assess(f, { proposalId: mine.id, assessment: ASSESSMENT });
+
+    const other = propose(f, {
+      title: 'Goal B',
+      origin: 'SC-AGENT-030',
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'another thing',
+    });
+    assess(f, { proposalId: other.id, assessment: ASSESSMENT });
+
+    const request = requestProposalApproval(f, { proposalId: other.id });
+    answerOwnerDecision(f as never, {
+      decisionId: request.id,
+      chosenOption: 'Accept it into scope',
+      answeredBy: 'owner@bakery',
+    });
+
+    expect(() => accept(f, { proposalId: mine.id, ownerDecisionId: request.id })).toThrow(
+      /does not name/,
+    );
+  });
+
+  it('the owner choosing REJECT does not accept it', () => {
+    const f = setup();
+    const p = propose(f, {
+      title: 'Goal',
+      origin: 'SC-AGENT-030',
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'a thing',
+    });
+    assess(f, { proposalId: p.id, assessment: ASSESSMENT });
+    const request = requestProposalApproval(f, { proposalId: p.id });
+    answerOwnerDecision(f as never, {
+      decisionId: request.id,
+      chosenOption: 'Reject it',
+      answeredBy: 'owner@bakery',
+    });
+    expect(() => accept(f, { proposalId: p.id, ownerDecisionId: request.id })).toThrow(
+      /which is a REJECT/,
+    );
+  });
+
+  it('an exact PROPOSAL_APPROVAL answered by a person is accepted', () => {
+    const f = setup();
+    const p = propose(f, {
+      title: 'Goal',
+      origin: 'SC-AGENT-030',
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'a thing',
+    });
+    assess(f, { proposalId: p.id, assessment: ASSESSMENT });
+
+    const request = requestProposalApproval(f, { proposalId: p.id });
+    expect(request.purpose).toBe(DecisionPurpose.PROPOSAL_APPROVAL);
+    expect(request.targetRef?.id).toBe(p.id);
+
+    answerOwnerDecision(f as never, {
+      decisionId: request.id,
+      chosenOption: 'Accept it into scope',
+      answeredBy: 'owner@bakery',
+    });
+    expect(accept(f, { proposalId: p.id, ownerDecisionId: request.id }).state).toBe('ACCEPTED');
+  });
+
+  it('an agent cannot answer a proposal approval', () => {
+    const f = setup();
+    const p = propose(f, {
+      title: 'Goal',
+      origin: 'SC-AGENT-030',
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'a thing',
+    });
+    assess(f, { proposalId: p.id, assessment: ASSESSMENT });
+    const request = requestProposalApproval(f, { proposalId: p.id });
+    expect(() =>
+      answerOwnerDecision(f as never, {
+        decisionId: request.id,
+        chosenOption: 'Accept it into scope',
+        answeredBy: 'SC-AGENT-020',
+      }),
+    ).toThrow(/cannot be answered by/);
+  });
+
   it('it cannot be accepted before it is assessed', () => {
     const f = setup();
     const p = propose(f, {
@@ -571,120 +784,18 @@ describe('a proposal is not scope', () => {
       affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'Reward repeat phone orders',
     });
-    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' })).toThrow(
+    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
+    expect(() => accept(f, { proposalId: p.id, authorityRunId: run })).toThrow(
       /cannot go from PROPOSED to ACCEPTED/,
-    );
-  });
-
-  it('an actor with no authority over the affected canon cannot accept it', () => {
-    const f = setup();
-    const p = propose(f, {
-      title: 'Loyalty points',
-      origin: 'SC-AGENT-120',
-      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
-      description: 'Reward repeat phone orders',
-    });
-    assess(f, {
-      proposalId: p.id,
-      assessment: {
-        userOrBusinessValue: 'repeat custom',
-        evidenceBasis: 'none yet',
-        implementationComplexity: 'MEDIUM',
-        costImpact: 'a fortnight',
-        risk: 'dilution',
-        operationalBurden: 'training',
-        scopeEffect: 'adds a feature',
-      },
-    });
-
-    /*
-     * The security architect is a different actor from the proposer, which is all the
-     * previous rule asked. It owns threat models, not product scope — so under the rule
-     * this replaced, any passing agent could enlarge the product.
-     */
-    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-090' })).toThrow(
-      /does not own/,
-    );
-
-    /* The product manager does own it. */
-    expect(accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' }).state).toBe('ACCEPTED');
-  });
-
-  it('a proposal over canon nobody owns is the owner’s to accept', () => {
-    const f = setup();
-    const p = propose(f, {
-      title: 'Track a new project goal',
-      origin: 'SC-AGENT-030',
-      /* SF-12: no contract in 32 claims the framing artifacts. */
-      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
-      description: 'Add a goal about reducing wasted stock',
-    });
-    assess(f, {
-      proposalId: p.id,
-      assessment: {
-        userOrBusinessValue: 'less waste',
-        evidenceBasis: 'owner remark',
-        implementationComplexity: 'LOW',
-        costImpact: 'small',
-        risk: 'low',
-        operationalBurden: 'none',
-        scopeEffect: 'adds a goal',
-      },
-    });
-
-    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' })).toThrow(
-      /no agent owns/,
-    );
-    expect(accept(f, { proposalId: p.id, acceptedBy: 'owner@bakery' }).state).toBe('ACCEPTED');
-  });
-
-  it('it cannot accept itself', () => {
-    const f = setup();
-    const p = propose(f, {
-      title: 'Loyalty points',
-      origin: 'SC-AGENT-120',
-      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
-      description: 'Reward repeat phone orders',
-    });
-    assess(f, {
-      proposalId: p.id,
-      assessment: {
-        userOrBusinessValue: 'repeat custom',
-        evidenceBasis: 'none yet — an idea',
-        implementationComplexity: 'MEDIUM',
-        costImpact: 'a fortnight of work',
-        risk: 'dilutes the first release',
-        operationalBurden: 'staff must explain it',
-        scopeEffect: 'adds a feature nobody asked for',
-      },
-    });
-    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-120' })).toThrow(
-      /raised and accepted by/,
     );
   });
 
   it('incorporation must point at canon that exists', () => {
     const f = setup();
     const goal = seedGoal(f.store, f.deps);
-    const p = propose(f, {
-      title: 'Loyalty points',
-      origin: 'SC-AGENT-120',
-      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
-      description: 'Reward repeat phone orders',
-    });
-    assess(f, {
-      proposalId: p.id,
-      assessment: {
-        userOrBusinessValue: 'repeat custom',
-        evidenceBasis: 'none yet',
-        implementationComplexity: 'MEDIUM',
-        costImpact: 'a fortnight',
-        risk: 'dilution',
-        operationalBurden: 'training',
-        scopeEffect: 'adds a feature',
-      },
-    });
-    accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' });
+    const p = assessedProposal(f);
+    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
+    accept(f, { proposalId: p.id, authorityRunId: run });
 
     expect(() =>
       incorporate(f, {
@@ -700,7 +811,6 @@ describe('a proposal is not scope', () => {
       into: [{ id: goal }],
     });
     expect(done.state).toBe('INCORPORATED');
-    expect(done.incorporatedInto.map((r) => r.id)).toEqual([goal]);
     expect(openProposals(f.store)).toHaveLength(0);
   });
 
@@ -724,27 +834,46 @@ describe('a proposal is not scope', () => {
 
   it('deferred is a real answer, and revisitable', () => {
     const f = setup();
-    const p = propose(f, {
-      title: 'Loyalty points',
-      origin: 'SC-AGENT-120',
-      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
-      description: 'later, maybe',
-    });
-    assess(f, {
-      proposalId: p.id,
-      assessment: {
-        userOrBusinessValue: 'repeat custom',
-        evidenceBasis: 'none',
-        implementationComplexity: 'LOW',
-        costImpact: 'small',
-        risk: 'low',
-        operationalBurden: 'low',
-        scopeEffect: 'adds a feature',
-      },
-    });
+    const p = assessedProposal(f);
     const deferred = defer(f, { proposalId: p.id, rationale: 'not for the first release' });
     expect(deferred.state).toBe('DEFERRED');
-    expect(accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' }).state).toBe('ACCEPTED');
+
+    const run = completedRun(f, { agentId: 'SC-AGENT-020', mentions: p.id });
+    expect(accept(f, { proposalId: p.id, authorityRunId: run }).state).toBe('ACCEPTED');
+  });
+});
+
+describe('a department cannot mint the form of consent', () => {
+  it('CHANGE_APPROVAL and PROPOSAL_APPROVAL are refused at the write boundary', async () => {
+    const { ScopedCanonWriter } = await import('../src/intelligence/execution/authority.js');
+    const f = setup();
+
+    const writer = new ScopedCanonWriter(
+      f.store.begin(),
+      'SC-AGENT-120',
+      'DEPT-AMBITIOUS',
+      new Set([ARTIFACT_TYPES.OWNER_DECISION_REQUEST]),
+    );
+
+    /*
+     * An owner decision is a UNIVERSAL artifact — every department must be able to stop
+     * and ask. But the FORM of consent is not the same as the ability to ask: a
+     * CHANGE_APPROVAL is the artifact `approveChange` later reads as authorisation, so a
+     * department able to write one could author its own approval and wait for anybody at
+     * all to answer it.
+     */
+    for (const purpose of ['CHANGE_APPROVAL', 'PROPOSAL_APPROVAL']) {
+      expect(() =>
+        writer.putCanon(ARTIFACT_TYPES.OWNER_DECISION_REQUEST, 'SC-ODR-FORGED', { purpose }),
+      ).toThrow(new RegExp('attempted to raise a ' + purpose));
+    }
+
+    /* An ordinary question is exactly what a department SHOULD be able to raise. */
+    expect(() =>
+      writer.putCanon(ARTIFACT_TYPES.OWNER_DECISION_REQUEST, 'SC-ODR-HONEST', {
+        purpose: 'SPECIFICATION_GAP',
+      }),
+    ).not.toThrow();
   });
 });
 

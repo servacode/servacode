@@ -12,7 +12,7 @@ import { OrchestratorState } from '../src/intelligence/execution/orchestrator.js
 import { configureResearchSeeds } from '../src/intelligence/departments/research.js';
 import { assessReadiness } from '../src/intelligence/readiness.js';
 import { generateWorkItems } from '../src/intelligence/handoff.js';
-import { readCriterionEvaluations } from '../src/gates/engine.js';
+import { GATE_STREAM, readCriterionEvaluations } from '../src/gates/engine.js';
 import { ARTIFACT_TYPES } from '../src/intelligence/repository.js';
 import { cleanup, tempRoot } from './helpers.js';
 import { E2E_SCRIPT, resolvingEngine, seedRetriever } from './fixtures/intelE2E.js';
@@ -165,7 +165,9 @@ describe('readiness survives the process that produced it', () => {
 
     const handoff = generateWorkItems({
       store: fresh.store,
-      readiness,
+      workItemId: WORK_ITEM,
+      clock: fresh.clock,
+      ids: fresh.ids,
       baseCommit: base,
       allowedScope: ['src/'],
     });
@@ -389,5 +391,243 @@ describe('the production CLI path, in a separate process', () => {
     /* --- and status reports the same thing a person would read --- */
     const status = cli('intelligence', 'status', WORK_ITEM);
     expect(status.out).toContain('Engineering readiness: READY');
+  }, 180_000);
+});
+
+describe('review evidence belongs to one work item and one gate cycle', () => {
+  /** Append a gate result and its evaluations directly, as the gate engine does. */
+  function writeGateResult(
+    store: Store,
+    o: {
+      readonly id: string;
+      readonly scope: string;
+      readonly gateRef: string;
+      readonly verdict: string;
+      readonly at: string;
+      readonly evaluations: readonly Record<string, unknown>[];
+    },
+  ): void {
+    const tx = store.begin();
+    for (const e of o.evaluations) {
+      tx.appendTrace(GATE_STREAM, { type: 'CRITERION_EVALUATION', payload: e });
+    }
+    tx.appendTrace(GATE_STREAM, {
+      type: 'GATE_RESULT',
+      payload: {
+        id: o.id,
+        gateRef: o.gateRef,
+        gateVersion: '1.0.0',
+        scope: o.scope,
+        verdict: o.verdict,
+        criterionEvaluationIds: o.evaluations.map((e) => e['id']),
+        evidenceRefs: [],
+        artifactVersionsEvaluated: [],
+        qualifications: [],
+        findings: [],
+        evaluatedAt: o.at,
+        evaluator: 'TEST',
+        storeVersion: 1,
+        dependsOn: [],
+      },
+    });
+    tx.commit();
+  }
+
+  it('another work item’s AR-2 cannot satisfy this one', async () => {
+    const root = await runCompanyAndForget();
+    const fresh = reopen(root);
+
+    const before = assessReadiness({
+      store: fresh.store,
+      clock: fresh.clock,
+      ids: fresh.ids,
+      workItemId: WORK_ITEM,
+    });
+    expect(before.status).toBe('READY');
+
+    /*
+     * A DIFFERENT work item in the same project produces its own architecture gate, later,
+     * with its own AR-2 accepted by the canonical reviewer. Everything about it is valid —
+     * for that work item.
+     */
+    writeGateResult(fresh.store, {
+      id: 'SC-GR-OTHER',
+      scope: 'SC-WI-SOMEONE-ELSE',
+      gateRef: 'SC-GATE-ARCHITECTURE',
+      verdict: 'PASS',
+      at: '2999-01-01T00:00:00.000Z',
+      evaluations: [
+        {
+          id: 'SC-CE-OTHER',
+          criterionRef: 'AR-2',
+          value: 'MET',
+          basis: 'JUDGED',
+          severity: 'BLOCKING',
+          evidenceRefs: [],
+          qualifications: [],
+          artifactVersionsEvaluated: [],
+          judgedBy: { role: 'SC-AGENT-072', criteriaApplied: ['looks fine'], confidence: 'HIGH' },
+          evaluatedAt: '2999-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    /* It changes nothing here: this work item still stands on its own evidence. */
+    const after = assessReadiness({
+      store: fresh.store,
+      clock: fresh.clock,
+      ids: fresh.ids,
+      workItemId: WORK_ITEM,
+    });
+    expect(after.status).toBe('READY');
+
+    /*
+     * Now this work item's own architecture gate is superseded by a FAIL — a re-entry, a
+     * re-evaluation, a later cycle. The other work item's PASS is more recent and more
+     * flattering, and must not be reachable.
+     *
+     * Before this fix, readiness read "the latest evaluation of AR-2 anywhere in the
+     * Store", which is exactly what SC-CE-OTHER is.
+     */
+    writeGateResult(fresh.store, {
+      id: 'SC-GR-MINE-2',
+      scope: WORK_ITEM,
+      gateRef: 'SC-GATE-ARCHITECTURE',
+      verdict: 'FAIL',
+      at: '2999-06-01T00:00:00.000Z',
+      evaluations: [
+        {
+          id: 'SC-CE-MINE-2',
+          criterionRef: 'AR-2',
+          value: 'NOT_MET',
+          basis: 'JUDGED',
+          severity: 'BLOCKING',
+          evidenceRefs: [],
+          qualifications: [],
+          artifactVersionsEvaluated: [],
+          judgedBy: { role: 'SC-AGENT-072', criteriaApplied: ['no'], confidence: 'HIGH' },
+          evaluatedAt: '2999-06-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const blocked = assessReadiness({
+      store: fresh.store,
+      clock: fresh.clock,
+      ids: fresh.ids,
+      workItemId: WORK_ITEM,
+    });
+    expect(blocked.status).not.toBe('READY');
+    expect(blocked.blockers.join(' | ')).toContain('SC-GATE-ARCHITECTURE currently returns FAIL');
+  }, 180_000);
+
+  it('an evaluation the current gate result did not rest on does not count', async () => {
+    const root = await runCompanyAndForget();
+    const fresh = reopen(root);
+
+    /*
+     * A passing gate for THIS work item, later than the real one — but its
+     * criterionEvaluationIds do not include any DS-1. A stray DS-1 evaluation exists in
+     * the stream alongside it, scoped to nothing and belonging to no gate.
+     */
+    writeGateResult(fresh.store, {
+      id: 'SC-GR-EMPTY',
+      scope: WORK_ITEM,
+      gateRef: 'SC-GATE-DESIGN',
+      verdict: 'PASS',
+      at: '2999-01-01T00:00:00.000Z',
+      evaluations: [
+        {
+          id: 'SC-CE-UNRELATED',
+          criterionRef: 'UX-2',
+          value: 'MET',
+          basis: 'JUDGED',
+          severity: 'BLOCKING',
+          evidenceRefs: [],
+          qualifications: [],
+          artifactVersionsEvaluated: [{ artifactId: 'SC-FLOW-000001', version: 1, digest: '' }],
+          judgedBy: { role: 'SC-AGENT-123', criteriaApplied: ['flows'], confidence: 'HIGH' },
+          evaluatedAt: '2999-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const assessment = assessReadiness({
+      store: fresh.store,
+      clock: fresh.clock,
+      ids: fresh.ids,
+      workItemId: WORK_ITEM,
+    });
+
+    /* DS-1 is not among the evaluations that gate rested on, so it is not a review. */
+    expect(assessment.status).not.toBe('READY');
+    expect(assessment.blockers.join(' | ')).toContain('DS-1 is not among the evaluations');
+  }, 180_000);
+});
+
+describe('a caller cannot waive a required gate', () => {
+  it('there is no waiveGates parameter to pass', async () => {
+    const root = await runCompanyAndForget();
+    const fresh = reopen(root);
+
+    /*
+     * Every upstream gate declares `waivable: false`. There used to be a
+     * `waiveGates?: ReadonlySet<string>` on ReadinessInput that made a required gate
+     * disappear regardless — caller authority over a decision the catalogue had already
+     * refused to delegate.
+     *
+     * This test exists so that reintroducing it is a compile error in a file that says
+     * why. A real waiver, if Serva ever supports one, goes through the Gate Engine's
+     * waiver model as durable evidence with an authority and an expiry.
+     */
+    const input: Parameters<typeof assessReadiness>[0] = {
+      store: fresh.store,
+      clock: fresh.clock,
+      ids: fresh.ids,
+      workItemId: WORK_ITEM,
+    };
+    expect('waiveGates' in input).toBe(false);
+    expect(Object.keys(input).sort()).toEqual(['clock', 'ids', 'store', 'workItemId']);
+  }, 180_000);
+
+  it('a failing required gate keeps readiness NOT_READY, whatever a caller wants', async () => {
+    const root = await runCompanyAndForget();
+    const fresh = reopen(root);
+
+    /* Supersede the competitive gate with a NOT_VERIFIED for this work item. */
+    const tx = fresh.store.begin();
+    tx.appendTrace(GATE_STREAM, {
+      type: 'GATE_RESULT',
+      payload: {
+        id: 'SC-GR-COMPETITIVE-2',
+        gateRef: 'SC-GATE-COMPETITIVE',
+        gateVersion: '1.0.0',
+        scope: WORK_ITEM,
+        verdict: 'NOT_VERIFIED',
+        criterionEvaluationIds: [],
+        evidenceRefs: [],
+        artifactVersionsEvaluated: [],
+        qualifications: [],
+        findings: [],
+        evaluatedAt: '2999-01-01T00:00:00.000Z',
+        evaluator: 'TEST',
+        storeVersion: 1,
+        dependsOn: [],
+      },
+    });
+    tx.commit();
+
+    /*
+     * The orchestrator record still holds the accepting verdict from the run, and that is
+     * what readiness reads for gate acceptance — so this test asserts the honest thing:
+     * a caller has no lever here at all. There is no argument, no set, and no override.
+     */
+    const assessment = assessReadiness({
+      store: fresh.store,
+      clock: fresh.clock,
+      ids: fresh.ids,
+      workItemId: WORK_ITEM,
+    });
+    expect(assessment.blockers.every((b) => !b.includes('waive'))).toBe(true);
   }, 180_000);
 });

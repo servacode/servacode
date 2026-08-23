@@ -1,10 +1,19 @@
 import { fail } from '../core/errors.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { ARTIFACT_TYPES, canonExists, repository } from './repository.js';
-import { ProposalSchema, ProposalState } from './artifacts/governance.js';
+import {
+  DecisionPurpose,
+  OptionDisposition,
+  OwnerDecisionRequestSchema,
+  ProposalSchema,
+  ProposalState,
+  approvalRefusal,
+} from './artifacts/governance.js';
+import { readTerminalSnapshot, runStream } from '../events/agentRun.js';
+import { RunOutcome } from '../vocab/index.js';
 import { ContractRegistry } from '../agents/registry.js';
 import { contractOutputTypes } from './execution/authority.js';
-import type { Proposal } from './artifacts/governance.js';
+import type { OwnerDecisionRequest, Proposal } from './artifacts/governance.js';
 import type { Store } from '../store/store.js';
 import type { Clock } from '../core/clock.js';
 import type { IdSource } from '../core/ids.js';
@@ -133,61 +142,213 @@ export function owningAuthorities(canonType: string): ReadonlySet<string> {
 }
 
 /**
- * Why this actor may not accept this proposal, or undefined if they may.
+ * Raise the approval question for a proposal. The ONLY way to mint proposal consent.
  *
- * Three rules, in the order they matter:
- *
- *   the proposer may not accept their own idea — that is scope creep with a signature;
- *   an actor with no authority over the affected canon may not accept it — the previous
- *   rule was merely "different from the proposer", which any passing agent satisfies;
- *   a family nobody owns is the owner's to rule on, not an agent's.
+ * `PROPOSAL_APPROVAL` is a reserved purpose: the scoped writer refuses it to every
+ * department, so this function and `requestChangeApproval` are the only places the FORM of
+ * consent exists. Serva writes the options and their dispositions, because a department
+ * able to author an APPROVE option could author its own approval.
  */
-export function acceptanceRefusal(p: Proposal, acceptedBy: string): string | undefined {
-  if (p.origin === acceptedBy) {
-    return (
-      'proposal ' +
-      p.id +
-      ' was raised and accepted by ' +
-      acceptedBy +
-      ': an actor accepting its own idea is how scope grows without anybody agreeing to it'
-    );
+export function requestProposalApproval(
+  deps: ProposalDeps,
+  o: { readonly proposalId: string; readonly workItemId?: string },
+): OwnerDecisionRequest {
+  const p = load(deps.store, o.proposalId);
+  if (p.state !== ProposalState.ASSESSED && p.state !== ProposalState.DEFERRED) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Proposal ' + p.id + ' is ' + p.state + ', not ASSESSED',
+      remedy:
+        'Assess a proposal before asking anybody to accept it. Accepting an idea nobody costed is not a decision.',
+      specRef: '""" + SEC + """33',
+    });
   }
 
+  const at = deps.clock.now();
+  const request = OwnerDecisionRequestSchema.parse({
+    id: deps.ids.next('SC-ODR'),
+    createdAt: at,
+    question: 'Should this become scope? "' + p.title + '" — ' + p.description,
+    whyServaCannotDecide:
+      'It would change ' +
+      p.affectsCanon +
+      ', and no agent owns that family. Adding it is a decision about what the product IS.',
+    purpose: DecisionPurpose.PROPOSAL_APPROVAL,
+    targetRef: { id: p.id, version: p.version },
+    supportingRefs: [],
+    options: [
+      {
+        option: 'Accept it into scope',
+        impact: 'the proposal may be incorporated into ' + p.affectsCanon,
+        disposition: OptionDisposition.APPROVE,
+      },
+      {
+        option: 'Reject it',
+        impact: 'the proposal is closed, and the rationale is kept so it is not re-argued',
+        disposition: OptionDisposition.REJECT,
+      },
+      {
+        option: 'Defer it',
+        impact: 'the proposal stays on record and may be revisited',
+        disposition: OptionDisposition.DEFER,
+      },
+    ],
+    recommendation: 'Defer it',
+    recommendationRationale:
+      'Most proposals are good ideas at the wrong time. Deferring keeps it on record without enlarging what has already been agreed.',
+    blocksWork: false,
+    blockedRefs: [{ id: p.id }],
+    state: 'OPEN',
+    meta: {
+      provenance: { marking: 'SYSTEM', component: 'proposal-approval' },
+      attribution: { at },
+      ...(o.workItemId === undefined ? {} : { workItemId: o.workItemId }),
+    },
+  });
+
+  const tx = deps.store.begin();
+  try {
+    repository(deps.store, ARTIFACT_TYPES.OWNER_DECISION_REQUEST, OwnerDecisionRequestSchema).put(
+      tx,
+      request,
+    );
+    audit(tx, {
+      action: AuditAction.ARTIFACT_RECORDED,
+      subject: request.id,
+      outcome: 'OK',
+      detail: { purpose: DecisionPurpose.PROPOSAL_APPROVAL, proposal: p.id },
+    });
+    tx.commit();
+  } catch (e) {
+    tx.rollback();
+    throw e;
+  }
+  return request;
+}
+
+/**
+ * Why this acceptance is not authorised, or undefined if it is.
+ *
+ * THE EVENT, NOT THE LABEL.
+ *
+ * The previous rule read a caller-supplied `acceptedBy` string and asked whether it NAMED
+ * an owning agent — which proves the name of an authority, not that the authority acted.
+ * A caller could pass `"SC-AGENT-020"` with no Product Manager run anywhere in the Store,
+ * or pass any string without `SC-AGENT-` and be treated as the owner.
+ *
+ * Acceptance now requires a durable event:
+ *
+ *   agent-owned canon — a completed, governed AgentRun by an owning authority, whose
+ *   result names this exact proposal. The run is looked up in the Store; the caller
+ *   supplies its id, not its conclusion.
+ *
+ *   owner-reserved canon — an answered OwnerDecisionRequest with purpose
+ *   PROPOSAL_APPROVAL, targeting this proposal, on an option whose disposition is APPROVE.
+ *   `approvalRefusal` checks all of it, exactly as it does for a change.
+ */
+export function acceptanceRefusal(
+  store: Store,
+  p: Proposal,
+  o: { readonly authorityRunId?: string; readonly ownerDecisionId?: string },
+): string | undefined {
   const owners = owningAuthorities(p.affectsCanon);
+
+  /* ------------------------------------------------ owner-reserved: no agent owns it */
   if (owners.size === 0) {
-    /*
-     * Nothing in `32` claims this family. That makes it owner-reserved rather than
-     * unowned: somebody still has to decide, and the somebody is the person paying.
-     */
-    if (acceptedBy.startsWith('SC-AGENT-')) {
+    if (o.ownerDecisionId === undefined) {
       return (
         'no agent owns ' +
         p.affectsCanon +
         ', so proposal ' +
         p.id +
-        ' is the owner' +
-        String.fromCharCode(0x2019) +
-        's to accept, not ' +
-        acceptedBy +
-        String.fromCharCode(0x2019) +
-        's'
+        ' needs an owner decision. Raise one with requestProposalApproval.'
       );
     }
-    return undefined;
+    const decision = repository(
+      store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    ).get(o.ownerDecisionId);
+    return approvalRefusal(decision, {
+      purpose: DecisionPurpose.PROPOSAL_APPROVAL,
+      targetId: p.id,
+    });
   }
 
-  if (!owners.has(acceptedBy)) {
-    /* A person may always accept: the owner outranks the canon's owning agent. */
-    if (!acceptedBy.startsWith('SC-AGENT-')) return undefined;
+  /* ------------------------------------------- agent-owned: a governed run must exist */
+  if (o.ownerDecisionId !== undefined) {
+    /* The owner outranks the owning agent, so an owner approval is accepted here too. */
+    const decision = repository(
+      store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    ).get(o.ownerDecisionId);
+    return approvalRefusal(decision, {
+      purpose: DecisionPurpose.PROPOSAL_APPROVAL,
+      targetId: p.id,
+    });
+  }
+
+  if (o.authorityRunId === undefined) {
     return (
-      acceptedBy +
-      ' does not own ' +
-      p.affectsCanon +
-      ', so it cannot accept proposal ' +
+      'proposal ' +
       p.id +
-      '. That belongs to ' +
+      ' affects ' +
+      p.affectsCanon +
+      ', which belongs to ' +
       [...owners].sort().join(' or ') +
-      ', or to the owner.'
+      '. Acceptance needs that authority\u2019s governed run, or an owner decision — not a name.'
+    );
+  }
+
+  const snapshot = readTerminalSnapshot(store, o.authorityRunId) as
+    { readonly agentId?: string; readonly outcome?: string } | undefined;
+  if (snapshot === undefined) {
+    return 'no governed run ' + o.authorityRunId + ' exists in this project';
+  }
+  if (snapshot.outcome !== RunOutcome.COMPLETED) {
+    return (
+      'run ' + o.authorityRunId + ' ended ' + String(snapshot.outcome) + ', so it decided nothing'
+    );
+  }
+  if (snapshot.agentId === undefined || !owners.has(snapshot.agentId)) {
+    return (
+      'run ' +
+      o.authorityRunId +
+      ' was made by ' +
+      String(snapshot.agentId) +
+      ', which does not own ' +
+      p.affectsCanon
+    );
+  }
+  if (snapshot.agentId === p.origin) {
+    return (
+      'proposal ' +
+      p.id +
+      ' was raised by ' +
+      p.origin +
+      ' and accepted by its own run: an actor accepting its own idea is how scope grows without anybody agreeing to it'
+    );
+  }
+
+  /*
+   * The run must be ABOUT this proposal.
+   *
+   * Checked against the run's own immutable event log rather than a summary, because the
+   * terminal record does not carry the payload and a summary is the thing a caller would
+   * be tempted to shape. A completed Product Manager run that happened to exist is not a
+   * decision to accept something it never mentioned.
+   */
+  const mentioned = store
+    .readTrace(runStream(o.authorityRunId))
+    .some((e) => JSON.stringify(e.payload).includes(p.id));
+  if (!mentioned) {
+    return (
+      'run ' +
+      o.authorityRunId +
+      ' never mentions proposal ' +
+      p.id +
+      ': an unrelated run by the right actor is not a decision about this one'
     );
   }
   return undefined;
@@ -249,15 +410,20 @@ export function assess(
 }
 
 /**
- * Accept a proposal. Requires the assessment, and accepting is still not building.
+ * Accept a proposal.
  *
- * `acceptedBy` is recorded because §33 makes acceptance the act of a named authority. A
- * proposal that accepted itself would be the scope creep this file exists to prevent,
- * wearing a state machine as a disguise.
+ * Takes a reference to an authority EVENT — a governed run, or an answered owner decision
+ * — and resolves it against the Store. It does not take a name.
  */
 export function accept(
   deps: ProposalDeps,
-  o: { readonly proposalId: string; readonly acceptedBy: string },
+  o: {
+    readonly proposalId: string;
+    /** A completed governed run by the authority that owns the affected canon. */
+    readonly authorityRunId?: string;
+    /** An answered PROPOSAL_APPROVAL decision targeting this proposal. */
+    readonly ownerDecisionId?: string;
+  },
 ): Proposal {
   const p = load(deps.store, o.proposalId);
   assertTransition(p.state, ProposalState.ACCEPTED);
@@ -267,25 +433,34 @@ export function accept(
       message: 'Proposal ' + p.id + ' has no assessment',
       remedy:
         'Accepting an idea nobody costed is not a decision. Record the value, complexity, cost, risk and scope effect first.',
-      specRef: '§33',
+      specRef: '""" + SEC + """33',
     });
   }
-  const refusal = acceptanceRefusal(p, o.acceptedBy);
+
+  const refusal = acceptanceRefusal(deps.store, p, o);
   if (refusal !== undefined) {
     return fail({
       code: 'E_GATE_AUTHORITY',
       message: 'Refusing to accept ' + p.id + ': ' + refusal,
       remedy:
-        'A proposal is accepted by the authority that owns the canon it would change, or by the owner. Anyone else accepting it is a decision made by whoever happened to be passing.',
+        'A proposal is accepted by the authority that owns the canon it would change, acting — or by the owner answering a PROPOSAL_APPROVAL decision. A name is not an act.',
       details: {
         proposalId: p.id,
         affectsCanon: p.affectsCanon,
         owners: [...owningAuthorities(p.affectsCanon)].sort(),
       },
-      specRef: '§33',
+      specRef: '""" + SEC + """33',
     });
   }
-  return save(deps, { ...p, state: ProposalState.ACCEPTED }, { acceptedBy: o.acceptedBy });
+
+  return save(
+    deps,
+    { ...p, state: ProposalState.ACCEPTED },
+    {
+      authorityRunId: o.authorityRunId ?? null,
+      ownerDecisionId: o.ownerDecisionId ?? null,
+    },
+  );
 }
 
 /** Reject, with the rationale kept forever so the same idea is not re-argued blind. */

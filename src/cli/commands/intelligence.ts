@@ -12,6 +12,8 @@ import { assessReadiness } from '../../intelligence/readiness.js';
 import { generateWorkItems } from '../../intelligence/handoff.js';
 import { outstandingChanges, planReentry } from '../../intelligence/change.js';
 import { openProposals } from '../../intelligence/proposals.js';
+import { ARTIFACT_TYPES, repository } from '../../intelligence/repository.js';
+import { OwnerDecisionRequestSchema } from '../../intelligence/artifacts/governance.js';
 import { resolveApplicability } from '../../intelligence/applicability.js';
 import type { IntelligenceDeps } from '../../intelligence/app.js';
 import type { ServaRuntime } from '../../app/runtime.js';
@@ -191,24 +193,85 @@ async function resume(args: ParsedArgs, rt: ServaRuntime): Promise<number> {
 
 /** `serva intelligence decisions` — the questions only the owner can answer. */
 function decisions(args: ParsedArgs, rt: ServaRuntime): number {
-  const open = openOwnerDecisions(rt.store);
+  /*
+   * The full decision, not just its question.
+   *
+   * Listing an id and a sentence tells an owner they are blocking something and not what
+   * to do about it — they would have to open `.serva` to discover the valid answers, which
+   * is not an interface, it is a filesystem.
+   */
+  const open = repository(
+    rt.store,
+    ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+    OwnerDecisionRequestSchema,
+  )
+    .list()
+    .filter((d) => d.state === 'OPEN');
+
   if (wantsJson(args)) {
-    emitJson({ openOwnerDecisions: open });
+    emitJson({
+      openOwnerDecisions: open.map((d) => ({
+        id: d.id,
+        question: d.question,
+        whyServaCannotDecide: d.whyServaCannotDecide,
+        responseMode: d.responseMode,
+        valueKind: d.valueKind,
+        valueChoices: d.valueChoices,
+        recommendation: d.recommendation,
+        options: d.options.map((o) => ({
+          option: o.option,
+          impact: o.impact,
+          disposition: o.disposition,
+        })),
+        blocksWork: d.blocksWork,
+      })),
+    });
     return 0;
   }
+
   if (open.length === 0) {
     console.log('Nothing is waiting on you.');
     return 0;
   }
+
   for (const d of open) {
-    console.log(d.id);
+    console.log('');
+    console.log(d.id + (d.blocksWork ? '   (blocking)' : ''));
     console.log('  ' + d.question);
+    console.log('');
+    console.log('  Why you: ' + d.whyServaCannotDecide);
+
+    if (d.responseMode === 'VALUE') {
+      const kind = d.valueKind ?? 'TEXT';
+      console.log('');
+      console.log(
+        '  Answer with a value (' +
+          kind +
+          (d.valueUnit === undefined ? '' : ', ' + d.valueUnit) +
+          ')',
+      );
+      if (d.valueChoices.length > 0) console.log('    one of: ' + d.valueChoices.join(', '));
+      console.log('    serva intelligence answer ' + d.id + ' --value "..." --by "<you>"');
+    } else {
+      console.log('');
+      console.log('  Options:');
+      for (const o of d.options) {
+        console.log('    "' + o.option + '"   [' + o.disposition + ']');
+        console.log('        ' + o.impact);
+        if (o.costImplication !== undefined) console.log('        cost: ' + o.costImplication);
+        if (o.riskImplication !== undefined) console.log('        risk: ' + o.riskImplication);
+      }
+      console.log('');
+      console.log('  Serva recommends: ' + d.recommendation);
+      console.log('    ' + d.recommendationRationale);
+      console.log('    serva intelligence answer ' + d.id + ' --option "..." --by "<you>"');
+    }
   }
   return 0;
 }
 
 /**
- * `serva intelligence answer <id> --option "..." --by "..."`
+ * `serva intelligence answer <id> --option "..." | --value "..." --by "..."`
  *
  * `--by` is required and is not a formality. It is the field that makes the answer
  * attributable to a person, and the runtime refuses an answer attributed to an agent.
@@ -216,19 +279,32 @@ function decisions(args: ParsedArgs, rt: ServaRuntime): number {
 function answer(args: ParsedArgs, rt: ServaRuntime): number {
   const decisionId = args.positionals[1];
   const option = args.flags['option'];
+  const value = args.flags['value'];
   const by = args.flags['by'];
-  if (
-    decisionId === undefined ||
-    typeof option !== 'string' ||
-    typeof by !== 'string' ||
-    option.trim() === '' ||
-    by.trim() === ''
-  ) {
-    console.error('Usage: serva intelligence answer <SC-ODR-...> --option "<choice>" --by "<you>"');
+
+  if (decisionId === undefined || typeof by !== 'string' || by.trim() === '') {
+    console.error(
+      'Usage: serva intelligence answer <SC-ODR-...> (--option "<choice>" | --value "<answer>") --by "<you>"',
+    );
     return 2;
   }
-  answerOwnerDecision(deps(rt), { decisionId, chosenOption: option, answeredBy: by });
-  console.log(decisionId + ' answered: ' + option);
+  if (typeof option !== 'string' && typeof value !== 'string') {
+    console.error('Give either --option "<choice>" or --value "<answer>".');
+    console.error('  serva intelligence decisions   shows which this decision expects');
+    return 2;
+  }
+  if (typeof option === 'string' && typeof value === 'string') {
+    console.error('Give --option or --value, not both.');
+    return 2;
+  }
+
+  answerOwnerDecision(deps(rt), {
+    decisionId,
+    ...(typeof option === 'string' ? { chosenOption: option } : {}),
+    ...(typeof value === 'string' ? { value } : {}),
+    answeredBy: by,
+  });
+  console.log(decisionId + ' answered: ' + (option ?? value));
   console.log('  serva intelligence resume');
   return 0;
 }
@@ -277,13 +353,17 @@ function handoff(args: ParsedArgs, rt: ServaRuntime): number {
     console.error('Usage: serva intelligence handoff [<work-item>] --base <commit-sha>');
     return 2;
   }
-  const assessment = assessReadiness({
+  /*
+   * The work item, not an assessment. `generateWorkItems` reads the Store and decides for
+   * itself — the CLI has no answer to offer it, and no way to offer one.
+   */
+  const generated = generateWorkItems({
     store: rt.store,
+    workItemId,
     clock: rt.clock,
     ids: rt.ids,
-    workItemId,
+    baseCommit,
   });
-  const generated = generateWorkItems({ store: rt.store, readiness: assessment, baseCommit });
   if (wantsJson(args)) {
     emitJson(generated);
     return 0;
@@ -370,7 +450,7 @@ const SUBCOMMANDS = [
   '  intelligence start "<idea>"            Record the idea and run the upstream lifecycle',
   '  intelligence resume [<work-item>]      Continue after answering a decision',
   '  intelligence decisions                 Questions only you can answer',
-  '  intelligence answer <id> --option --by Answer one, as yourself',
+  '  intelligence answer <id> --option|--value  Answer one, as yourself',
   '  intelligence readiness [<work-item>]   Derived readiness and every blocker',
   '  intelligence handoff --base <sha>      What engineering would be given',
   '  intelligence proposals                 Ideas raised, not yet scope',

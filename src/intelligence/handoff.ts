@@ -13,9 +13,11 @@ import { ScreenCompositionSchema } from './artifacts/design.js';
 import { TestCaseSchema } from './artifacts/testing.js';
 import { ThreatModelSchema } from './artifacts/security.js';
 import { fail } from '../core/errors.js';
-import { isReady } from './readiness.js';
+import { assessReadiness, isReady } from './readiness.js';
 import type { ReadinessAssessment } from './readiness.js';
 import type { Store } from '../store/store.js';
+import type { Clock } from '../core/clock.js';
+import type { IdSource } from '../core/ids.js';
 
 /**
  * PHASE 5 → PHASE 4.
@@ -57,7 +59,20 @@ export interface GeneratedWorkItem {
 
 export interface HandoffInput {
   readonly store: Store;
-  readonly readiness: ReadinessAssessment;
+  /**
+   * The work item whose readiness authorises this handoff.
+   *
+   * NOT a ReadinessAssessment. The previous signature took one and authorised on
+   * `isReady(input.readiness)` — so a caller could construct `{status: 'READY', blockers:
+   * []}` and reach work-item generation while the Store's own gates, owner decisions,
+   * freshness, reviews and traceability all said otherwise. That is exactly the authority
+   * Fix 2 removed from readiness itself, surviving one call frame higher up.
+   *
+   * Readiness is assessed HERE, from persisted truth, at the moment of the handoff.
+   */
+  readonly workItemId: string;
+  readonly clock: Clock;
+  readonly ids: IdSource;
   readonly baseCommit: string;
   readonly producerAgentId?: string;
   readonly reviewerAgentId?: string;
@@ -68,6 +83,8 @@ export interface HandoffInput {
 
 export interface Handoff {
   readonly items: readonly GeneratedWorkItem[];
+  /** The readiness Serva derived to authorise this. Not supplied by the caller. */
+  readonly readiness: ReadinessAssessment;
   /** Why an item could not be generated for a feature. Reported, never skipped quietly. */
   readonly skipped: readonly { readonly feature: string; readonly reason: string }[];
 }
@@ -80,18 +97,38 @@ export interface Handoff {
  * hand an engineer a specification the company already knows is incomplete.
  */
 export function generateWorkItems(input: HandoffInput): Handoff {
-  if (!isReady(input.readiness)) {
+  /*
+   * READINESS IS ASSESSED HERE, NOT ACCEPTED HERE.
+   *
+   * The caller supplies the work item; Serva reads the Store and decides. A caller cannot
+   * bring its own answer to this gate any more than it can bring its own review evidence
+   * to readiness, and for the same reason: whoever is asking is the last party who should
+   * be trusted to say yes.
+   *
+   * The returned assessment is exposed on the Handoff so the caller can report it, but
+   * nothing it contains was supplied by the caller.
+   */
+  const readiness = assessReadiness({
+    store: input.store,
+    clock: input.clock,
+    ids: input.ids,
+    workItemId: input.workItemId,
+  });
+
+  if (!isReady(readiness)) {
     return fail({
       code: 'E_CAPABILITY_NOT_ENABLED',
       message:
-        'Engineering work cannot be generated: readiness is ' +
-        input.readiness.status +
+        'Engineering work cannot be generated for ' +
+        input.workItemId +
+        ': readiness is ' +
+        readiness.status +
         ' with ' +
-        String(input.readiness.blockers.length) +
+        String(readiness.blockers.length) +
         ' blocker(s)',
       remedy:
         'READY is derived from accepted canon. Resolve the blockers — they are listed on the readiness package — rather than proceeding on an incomplete specification.',
-      details: { blockers: input.readiness.blockers.slice(0, 10) },
+      details: { workItemId: input.workItemId, blockers: readiness.blockers.slice(0, 10) },
       specRef: 'Phase 5 §35',
     });
   }
@@ -209,7 +246,7 @@ export function generateWorkItems(input: HandoffInput): Handoff {
     });
   });
 
-  return { items, skipped };
+  return { items, skipped, readiness };
 }
 
 /**

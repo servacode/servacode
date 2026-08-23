@@ -2,7 +2,7 @@ import { AgentRuntime } from '../agents/runtime.js';
 import { ContractRegistry } from '../agents/registry.js';
 import { ARTIFACT_TYPES, repository } from './repository.js';
 import { IdeaSchema } from './artifacts/framing.js';
-import { OwnerDecisionRequestSchema } from './artifacts/governance.js';
+import { OwnerDecisionRequestSchema, answerRefusal } from './artifacts/governance.js';
 import { IntelligenceOrchestrator } from './execution/orchestrator.js';
 import { upstreamGateEvaluator } from './gates/evaluator.js';
 import { intakeDepartment } from './departments/intake.js';
@@ -177,7 +177,14 @@ export function intelligenceOrchestrator(
  */
 export function answerOwnerDecision(
   deps: IntelligenceDeps,
-  o: { readonly decisionId: string; readonly chosenOption: string; readonly answeredBy: string },
+  o: {
+    readonly decisionId: string;
+    /** For an OPTION decision: one of the options offered. */
+    readonly chosenOption?: string;
+    /** For a VALUE decision: the owner's actual answer. */
+    readonly value?: string;
+    readonly answeredBy: string;
+  },
 ): void {
   const repo = repository(
     deps.store,
@@ -190,32 +197,42 @@ export function answerOwnerDecision(
   }
 
   /*
-   * THE ANSWER MUST BE ONE OF THE OPTIONS THAT WERE OFFERED.
+   * THE ANSWER MUST FIT THE QUESTION.
    *
-   * Without this, `chosenOption` is free text, and free text cannot be routed on. An
-   * answer nobody offered has no disposition, no impact statement and no cost implication
-   * - it is a string that looks like consent, and anything reading it downstream has to
-   * guess what the owner meant.
+   * An OPTION decision is answered with one of the options offered; free text there is a
+   * string that looks like consent and can be routed on by nothing. A VALUE decision is
+   * answered with an actual value of the declared kind; choosing a meta-option there is
+   * how "what is the collection window?" came to be answered "Answer it".
    *
-   * Checked where a person types it, so a malformed answer is refused while they are
-   * still in front of it rather than at some later point that blames the wrong thing.
+   * Checked where a person types it, so a malformed answer is refused while they are still
+   * in front of it rather than at some later point that blames the wrong thing.
    */
-  if (!existing.options.some((opt) => opt.option === o.chosenOption)) {
+  const refusal = answerRefusal(existing, {
+    ...(o.chosenOption === undefined ? {} : { option: o.chosenOption }),
+    ...(o.value === undefined ? {} : { value: o.value }),
+  });
+  if (refusal !== undefined) {
     return fail({
       code: 'E_VALIDATION',
-      message: '"' + o.chosenOption + '" is not one of the options offered on ' + o.decisionId,
+      message: refusal,
       remedy:
-        'Answer with one of the options as written. They are: ' +
-        existing.options.map((opt) => '"' + opt.option + '"').join(', '),
-      details: { decisionId: o.decisionId, offered: existing.options.map((opt) => opt.option) },
-      specRef: '§32',
+        existing.responseMode === 'VALUE'
+          ? 'Answer with the value itself — for example `--value "48 hours"`.'
+          : 'Answer with one of the options as written.',
+      details: {
+        decisionId: o.decisionId,
+        responseMode: existing.responseMode,
+        offered: existing.options.map((opt) => opt.option),
+      },
+      specRef: '""" + SEC + """32',
     });
   }
 
   /*
    * The impersonation rule, applied at the point of writing as well as at every point of
    * reading. `ownerDecisionRefusal` catches a stored agent answer; this stops one being
-   * stored at all.
+   * stored at all — and it applies to a VALUE just as much as to a choice, because a fact
+   * supplied by an agent is not a fact supplied by the owner.
    */
   if (o.answeredBy.startsWith('SC-AGENT-') || o.answeredBy.startsWith('SC-RUN-')) {
     return fail({
@@ -223,7 +240,7 @@ export function answerOwnerDecision(
       message: 'Owner decision ' + o.decisionId + ' cannot be answered by ' + o.answeredBy,
       remedy:
         'An owner decision is answered by a person. An agent answering it is the system asking itself for permission.',
-      specRef: '§32',
+      specRef: '""" + SEC + """32',
     });
   }
 
@@ -232,7 +249,8 @@ export function answerOwnerDecision(
     repo.put(tx, {
       ...existing,
       state: 'ANSWERED',
-      chosenOption: o.chosenOption,
+      ...(o.chosenOption === undefined ? {} : { chosenOption: o.chosenOption }),
+      ...(o.value === undefined ? {} : { answerValue: o.value }),
       answeredBy: o.answeredBy,
       answeredAt: deps.clock.now(),
     });
@@ -240,7 +258,12 @@ export function answerOwnerDecision(
       action: AuditAction.OWNER_DECISION_ANSWERED,
       subject: o.decisionId,
       outcome: 'OK',
-      detail: { answeredBy: o.answeredBy, chosenOption: o.chosenOption },
+      detail: {
+        answeredBy: o.answeredBy,
+        responseMode: existing.responseMode,
+        ...(o.chosenOption === undefined ? {} : { chosenOption: o.chosenOption }),
+        ...(o.value === undefined ? {} : { value: o.value }),
+      },
     });
     tx.commit();
   } catch (e) {

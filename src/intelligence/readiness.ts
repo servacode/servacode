@@ -43,14 +43,14 @@ import { checkDesign } from './checks/design.js';
 import { assessFreshness, staleSubjects } from './research/freshness.js';
 import { marketFreshnessSubjects } from './research/subjects.js';
 import { readOrchestratorRecord } from './execution/orchestrator.js';
-import { readCriterionEvaluations } from '../gates/engine.js';
+import { readCriterionEvaluations, readGateResults } from '../gates/engine.js';
 import { outstandingChanges } from './change.js';
 import { resolveApplicability, upstreamGatesFor } from './applicability.js';
 import { UPSTREAM_GATES } from './gates/definitions.js';
 import type { EngineeringReadinessPackage } from './artifacts/governance.js';
 import type { TraceFinding } from './checks/traceability.js';
 import type { Store } from '../store/store.js';
-import type { CriterionEvaluation } from '../gates/types.js';
+import type { CriterionEvaluation, GateResult } from '../gates/types.js';
 import type { Clock } from '../core/clock.js';
 import type { IdSource } from '../core/ids.js';
 
@@ -175,17 +175,65 @@ function reviewRefusal(
     readonly gate: string;
   },
   ctx: {
+    readonly workItemId: string;
+    readonly gateResults: readonly GateResult[];
     readonly evaluations: readonly CriterionEvaluation[];
-    readonly acceptedGates: ReadonlySet<string>;
     readonly store: Store;
   },
 ): string | undefined {
-  /* The most recent evaluation of this criterion. Earlier ones were superseded. */
-  const forCriterion = ctx.evaluations.filter((e) => e.criterionRef === o.criterion);
-  const evaluation = forCriterion[forCriterion.length - 1];
+  /*
+   * START FROM THE GATE RESULT, NOT FROM THE CRITERION.
+   *
+   * The first version of this read `readCriterionEvaluations(store)`, filtered by
+   * criterion id, and took the most recent one anywhere in the Store. A
+   * CriterionEvaluation carries no scope of its own, so that quietly accepted an AR-2 from
+   * a DIFFERENT work item in the same project — and after a re-entry it would accept the
+   * superseded evaluation from the cycle the re-entry had just invalidated.
+   *
+   * A GateResult does carry scope, and it carries `criterionEvaluationIds`. So the
+   * question is asked the right way round: which gate result is authoritative for THIS
+   * work item, and which evaluation did IT rest on.
+   */
+  const forGate = ctx.gateResults
+    .filter((g) => g.scope === ctx.workItemId && g.gateRef === o.gate)
+    .sort((a, b) => a.evaluatedAt.localeCompare(b.evaluatedAt));
+  const gateResult = forGate[forGate.length - 1];
+
+  if (gateResult === undefined) {
+    return (
+      'no independent review of ' +
+      o.what +
+      ' is recorded for this work item (' +
+      o.criterion +
+      ' under ' +
+      o.gate +
+      ')'
+    );
+  }
+  if (!ACCEPTING.includes(gateResult.verdict)) {
+    return (
+      o.gate +
+      ' currently returns ' +
+      gateResult.verdict +
+      ', so the ' +
+      o.what +
+      ' review recorded under it does not stand'
+    );
+  }
+
+  /* The evaluation this gate result actually rested on, and no other. */
+  const owned = new Set(gateResult.criterionEvaluationIds);
+  const evaluation = ctx.evaluations.find((e) => owned.has(e.id) && e.criterionRef === o.criterion);
 
   if (evaluation === undefined) {
-    return 'no independent review of ' + o.what + ' is recorded (' + o.criterion + ')';
+    return (
+      o.criterion +
+      ' is not among the evaluations ' +
+      gateResult.id +
+      ' rested on, so nothing independent judged ' +
+      o.what +
+      ' in this cycle'
+    );
   }
   if (evaluation.basis !== CriterionBasis.JUDGED) {
     return (
@@ -213,14 +261,6 @@ function reviewRefusal(
       ' (' +
       o.criterion +
       ')'
-    );
-  }
-  if (!ctx.acceptedGates.has(o.gate)) {
-    return (
-      o.criterion +
-      ' was accepted, but ' +
-      o.gate +
-      ' does not currently hold an accepting verdict, so the review no longer stands'
     );
   }
   if (evaluation.artifactVersionsEvaluated.length === 0) {
@@ -265,8 +305,18 @@ export interface ReadinessInput {
   readonly clock: Clock;
   readonly ids: IdSource;
   readonly workItemId: string;
-  /** Gates whose evidence Phase 5 does not yet produce may be excused, explicitly. */
-  readonly waiveGates?: ReadonlySet<string>;
+  /*
+   * NO `waiveGates`.
+   *
+   * There was a `ReadonlySet<string>` here that made a required gate disappear. Every
+   * upstream gate declares `waivable: false`, so a caller-supplied set was authority over
+   * a decision the catalogue had already refused to delegate — the same class Fix 2
+   * removed from reviews, left behind one field lower down.
+   *
+   * If Serva ever supports a real waiver it will go through the Gate Engine's own waiver
+   * model, where a waiver is durable evidence with an authority and an expiry that the
+   * gate resolves and validates. Never a string in a Set.
+   */
 }
 
 export interface ReadinessAssessment {
@@ -370,7 +420,6 @@ export function assessReadiness(input: ReadinessInput): ReadinessAssessment {
    */
   if (record === undefined) blockers.push('no intelligence run exists for ' + input.workItemId);
   for (const gateId of record === undefined ? [] : requiredGates(record.profileId)) {
-    if (input.waiveGates?.has(gateId) === true) continue;
     const result = gateResults.find((g) => g.gateId === gateId);
     if (result === undefined) {
       blockers.push(gateId + ' has not been evaluated');
@@ -452,12 +501,15 @@ export function assessReadiness(input: ReadinessInput): ReadinessAssessment {
 
   /* ---------------------------------------------------- 5. independent reviews */
 
-  const acceptedGates = new Set(
-    gateResults.filter((g) => ACCEPTING.includes(g.verdict)).map((g) => g.gateId),
-  );
+  const persistedGates = readGateResults(store);
   const evaluations = readCriterionEvaluations(store);
   for (const r of REQUIRED_REVIEWS) {
-    const refusal = reviewRefusal(r, { evaluations, acceptedGates, store });
+    const refusal = reviewRefusal(r, {
+      workItemId: input.workItemId,
+      gateResults: persistedGates,
+      evaluations,
+      store,
+    });
     if (refusal !== undefined) blockers.push(refusal);
   }
 

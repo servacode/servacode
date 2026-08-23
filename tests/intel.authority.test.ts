@@ -330,17 +330,51 @@ describe('READY is derived from the profile, and cannot be reached by omission',
     expect(assessment.blockers.filter((b) => b.includes('has not been evaluated'))).toHaveLength(0);
   });
 
-  it('engineering work cannot be generated from an unready assessment', () => {
+  it('engineering work cannot be generated while the Store says NOT_READY', () => {
     const f = setup();
-    const assessment = assessReadiness({
-      store: f.store,
-      clock: f.deps.clock,
-      ids: f.deps.ids,
-      workItemId: 'SC-WI-000001',
-    });
     expect(() =>
-      generateWorkItems({ store: f.store, readiness: assessment, baseCommit: 'a'.repeat(40) }),
-    ).toThrow();
+      generateWorkItems({
+        store: f.store,
+        workItemId: 'SC-WI-000001',
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        baseCommit: 'a'.repeat(40),
+      }),
+    ).toThrow(/readiness is/);
+  });
+
+  it('a caller cannot bring its own READY to the handoff', () => {
+    const f = setup();
+
+    /*
+     * The adversarial case. The Store is empty — no run, no gates, no reviews — and the
+     * caller asserts the opposite as loudly as the type system allows.
+     *
+     * The previous signature took a ReadinessAssessment and authorised on `isReady()` of
+     * whatever it was handed, so this exact object reached work-item generation. There is
+     * now nowhere to put it: readiness is derived inside the handoff, from the Store.
+     */
+    const fabricated = {
+      status: 'READY',
+      blockers: [],
+      findings: [],
+      package: { id: 'SC-ERP-FAKE' },
+    };
+
+    expect(() =>
+      generateWorkItems({
+        store: f.store,
+        workItemId: 'SC-WI-000001',
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        baseCommit: 'a'.repeat(40),
+        /* Not a parameter. Passing it changes nothing, which is the point. */
+        ...(fabricated as unknown as Record<string, never>),
+      }),
+    ).toThrow(/readiness is/);
+
+    /* And the handoff reports the readiness IT derived, not the one it was handed. */
+    expect(Object.keys(fabricated)).toContain('status');
   });
 });
 

@@ -310,7 +310,13 @@ describe('the whole company runs', () => {
 
     /* ...and no engineering work can be generated from it. */
     expect(() =>
-      generateWorkItems({ store: f.store, readiness: assessment, baseCommit: 'a'.repeat(40) }),
+      generateWorkItems({
+        store: f.store,
+        workItemId: WORK_ITEM,
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        baseCommit: 'a'.repeat(40),
+      }),
     ).toThrow(/readiness is BLOCKED/);
   }, 180_000);
 });
@@ -345,7 +351,9 @@ describe('Phase 5 satisfies the Phase 4 contract', () => {
 
     const handoff = generateWorkItems({
       store: f.store,
-      readiness,
+      workItemId: WORK_ITEM,
+      clock: f.deps.clock,
+      ids: f.deps.ids,
       baseCommit: base,
       allowedScope: ['src/'],
     });
