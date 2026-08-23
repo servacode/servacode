@@ -6,76 +6,95 @@
  RUN  v2.1.9 D:/SEVACODE
 
 stdout | tests/live/intelligence.live.test.ts > a real company run over a real problem > reached at least the competitive stage, or reported honestly why not
-ran: SC-AGENT-020:COMPLETED, SC-AGENT-030:COMPLETED, SC-AGENT-020:COMPLETED, SC-AGENT-040:ESCALATED_TO_OWNER, SC-AGENT-040:COMPLETED, SC-AGENT-050:COMPLETED, SC-AGENT-051:FAILED
-  SC-AGENT-040 — Business Analysis cannot proceed without the owner. The run escalated: AMBIGUITY (How the business wants an unconfirmable reservation request (book cannot be held) handled: is it auto-cancelled, does staff notify the customer, or is there a distinct 'rejected' outcome separate from CANCELLED? The REQUESTED→CANCELLED transition guard is currently PROPOSED and must not be implemented until confirmed by the owner.); AMBIGUITY (What holding period or criteria determines when a CONFIRMED-but-uncollected reservation should be cancelled, and whether that cancellation is automatic or requires staff judgement. The CONFIRMED→CANCELLED (non-collection) guard is currently PROPOSED.); INSUFFICIENT_CONTEXT (Whether a customer can themselves request cancellation of a reservation, or whether cancellation is exclusively a staff action, is not addressed by the supplied features/goals.) Unresolved: Business rule for handling a reservation request that staff cannot confirm (no available physical copy) — rejection/notification behaviour is undefined in source material.; Holding-period policy for CONFIRMED reservations that are not collected — duration and whether cancellation is automatic or staff-driven is undefined.; Whether customers, not just staff, can initiate cancellation of their own reservation.
-    · BLOCKING escalation: AMBIGUITY — How the business wants an unconfirmable reservation request (book cannot be held) handled: is it auto-cancelled, does staff notify the customer, or is there a distinct 'rejected' outcome separate from CANCELLED? The REQUESTED→CANCELLED transition guard is currently PROPOSED and must not be implemented until confirmed by the owner.
-    · BLOCKING escalation: AMBIGUITY — What holding period or criteria determines when a CONFIRMED-but-uncollected reservation should be cancelled, and whether that cancellation is automatic or requires staff judgement. The CONFIRMED→CANCELLED (non-collection) guard is currently PROPOSED.
-    · escalation: INSUFFICIENT_CONTEXT — Whether a customer can themselves request cancellation of a reservation, or whether cancellation is exclusively a staff action, is not addressed by the supplied features/goals.
-  SC-AGENT-051 — NFR Specification run ended FAILED. NO OUTPUT = NOTHING RECORDED.
-    · terminated: TIMEOUT
-BLOCKED — SC-GATE-REQUIREMENTS returned NOT_VERIFIED: NFR Specification run ended FAILED. NO OUTPUT = NOTHING RECORDED. — RQ-2 INDETERMINATE (EVIDENCE_ABSENT): Every NFR states a measurable target and how it will be measured; RQ-4 INDETERMINATE (EVIDENCE_ABSENT): An INDEPENDENT verifier judged the requirements acceptable
+ran: SC-AGENT-020:ESCALATED_TO_OWNER, SC-AGENT-020:COMPLETED, SC-AGENT-030:ESCALATED_TO_OWNER, SC-AGENT-030:FAILED
+  SC-AGENT-020 — Intake cannot proceed without the owner. The run escalated: AMBIGUITY unresolvable within contract: commercial payment policy for reservations is undefined (Whether customers pay or leave a deposit online at reservation time, or pay entirely in store at collection, is a commercial policy decision reserved to the owner. This materially changes the scope and success definition of the project and cannot be assumed by Serva.); INSUFFICIENT_CONTEXT: number of shop locations not confirmed (The idea implies a single shop but does not explicitly confirm this. Whether the reservation capability needs to serve one location or multiple is an owner fact about their business that defines audience and scope.) Unresolved: Payment or deposit policy for reservations at time of booking versus at collection.; Whether the shop has a single location or multiple locations requiring reservation and collection support.; Reservation hold duration before a book is released back to stock.; Target timeline and or budget for the project.; Whether customer contact or marketing data should be collected as part of the reservation flow.
+    · BLOCKING escalation: AMBIGUITY unresolvable within contract: commercial payment policy for reservations is undefined — Whether customers pay or leave a deposit online at reservation time, or pay entirely in store at collection, is a commercial policy decision reserved to the owner. This materially changes the scope and success definition of the project and cannot be assumed by Serva.
+    · BLOCKING escalation: INSUFFICIENT_CONTEXT: number of shop locations not confirmed — The idea implies a single shop but does not explicitly confirm this. Whether the reservation capability needs to serve one location or multiple is an owner fact about their business that defines audience and scope.
+  SC-AGENT-030 — Discovery cannot proceed without the owner. The run escalated: INSUFFICIENT_CONTEXT (Two load-bearing assumptions (current staff tracking method for holds; customer behaviour when assuming unavailability) are not confirmed by any research or owner statement beyond what can be inferred from the intake. Recommend a short confirmation conversation with the owner before treating discovery as sufficient for solution judgement.) Unresolved: Whether the bookshop currently uses any informal or digital method (e.g. spreadsheet, notebook) to track hold requests - not stated in the provided context.; Actual customer behaviour when assuming a book is unavailable (buy elsewhere vs. abandon entirely) - not stated in the provided context and not researched.; Volume/frequency of current hold requests or lost-sale incidents - not provided, relevant to assessing discovery sufficiency and future severity judgements.
+    · contradicted evidence claims: Reviewed trusted context artifacts SC-CIN-000001 (intake) and SC-GOAL-000001 through SC-GOAL-000004 (goals) as the sole basis for segments, jobs, pains, and current alternatives. (the claim asserts FILE_READ but the runtime observed no completed tool call in this run)
+    · escalation: INSUFFICIENT_CONTEXT — Two load-bearing assumptions (current staff tracking method for holds; customer behaviour when assuming unavailability) are not confirmed by any research or owner statement beyond what can be inferred from the intake. Recommend a short confirmation conversation with the owner before treating discovery as sufficient for solution judgement.
+  SC-AGENT-030 — Discovery run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. Unresolved: Actual current method bookshop staff use to track/hold books for customers is unconfirmed; owner declared this out of scope for now rather than answering it.; Actual customer behaviour when they believe a book is unavailable (silent abandonment vs. sometimes calling/visiting) is unconfirmed beyond the intake's own framing; owner declared this out of scope for now.
+    · contradicted evidence claims: Reviewed the client intake (SC-CIN-000001), owner decision record (intel.ownerDecisionRequest v2), and goal statements (SC-GOAL-000001 through SC-GOAL-000004) supplied in TRUSTED CONTEXT as the sole basis for this discovery output. (the claim asserts FILE_READ but the runtime observed no completed tool call in this run)
+BLOCKED — SC-GATE-DISCOVERY returned BLOCKED: Discovery run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. Unresolved: Actual current method bookshop staff use to track/hold books for customers is unconfirmed; owner declared this out of scope for now rather than answering it.; Actual customer behaviour when they believe a book is unavailable (silent abandonment vs. sometimes calling/visiting) is unconfirmed beyond the intake's own framing; owner declared this out of scope for now. — DI-1 NOT_MET: At least one user segment is identified; DI-2 INDETERMINATE (PRECONDITION_ABSENT): EVERY segment has at least one current alternative recorded; DI-3 INDETERMINATE (EVIDENCE_ABSENT): No user research is claimed that was not performed; DI-4 INDETERMINATE (EVIDENCE_ABSENT): Load-bearing inferences are recorded as Assumptions
 owner round 1:
-    ? AMBIGUITY: How the business wants an unconfirmable reservation request (book cannot be held) handled: is it auto-cancell
-    ? AMBIGUITY: What holding period or criteria determines when a CONFIRMED-but-uncollected reservation should be cancelled, 
-    ? INSUFFICIENT_CONTEXT: Whether a customer can themselves request cancellation of a reservation, or whether cancellation i
+    ? AMBIGUITY unresolvable within contract: commercial payment policy for reservations is undefined: Whether customers pay o
+    ? INSUFFICIENT_CONTEXT: number of shop locations not confirmed: The idea implies a single shop but does not explicitly con
+owner round 2:
+    ? INSUFFICIENT_CONTEXT: Two load-bearing assumptions (current staff tracking method for holds; customer behaviour when ass
 
 stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > 2/3. Serva fetched a real page and captured it, hashed and untrusted
-research ran: SC-AGENT-061:FAILED
+research ran: SC-AGENT-060:COMPLETED, SC-AGENT-063:PREREQUISITE_MISSING
 research state: BLOCKED
-  SC-GATE-COMPETITIVE returned NOT_VERIFIED: Competitive Analysis run ended EVIDENCE_VIOLATION. NO OUTPUT = NOTHING RECORDED. Unresolved: FeatureComparison, TableStakes[], and MarketGap[] for SC-WI-000951 cannot be produced because the only VERIFIED finding (SC-RF-000001) is a non-substantive Wikipedia disambiguation page with no competitive/market content. Additional verified findings covering the actual 'click and collect' competitive landscape are required before this analysis can proceed.; The owner has already declared this out of scope for now and instructed the escalation not be re-opened; this deliverable remains pending until the owner reopens the work item with new evidence. — CO-4 INDETERMINATE (EVIDENCE_ABSENT): A competitive position states why anyone would switch, and why not
+  SC-GATE-COMPETITIVE returned NOT_VERIFIED: Source Verification cannot run: no intel.researchFinding exists yet. The stage that produces it has not completed. — CO-1 INDETERMINATE (EVIDENCE_ABSENT): Research findings cite captured sources; CO-3 INDETERMINATE (EVIDENCE_ABSENT): No competitive conclusion rests on expired research; CO-2 INDETERMINATE (EVIDENCE_ABSENT): Material claims were verified by an actor that did not make them; CO-4 INDETERMINATE (EVIDENCE_ABSENT): A competitive position states why anyone would switch, and why not
 
-stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web
+stdout | tests/live/intelligence.live.test.ts > the research chain, against the real web > every obligation was classified, and at least one was proved
 
 ========================================================================
 LIVE PROOF OBLIGATIONS
 ========================================================================
-  PROVEN   LC-1    discovery and product produce schema-valid canon
-                   5 goal(s) from one owner sentence
   BLOCKED  LC-2/3  a real source is retrieved by Serva and captured
                    the lifecycle did not reach market research
   NOT_RUN  LC-4    the Source Verifier judges captures and fetches nothing
                    no capture exists, so there was nothing to verify
   BLOCKED  LC-5    competitive output derives from captured evidence
                    no finding exists; the competitive gate correctly reads NOT_VERIFIED
-  PROVEN   LC-6    a downstream decision consumes PERSISTED canon
-                   16 requirement(s) trace to a feature id their run never saw, across 7 separate sessions
-  PROVEN   LC-2/3  a real source is retrieved by Serva and captured
-                   2 page(s) from en.wikipedia.org, hashed and UNTRUSTED
-  PROVEN   RS-4    an INDEPENDENT verifier judges the captures and fetches nothing
-                   1 verification(s); no capture is attributed to SC-AGENT-063
-  PROVEN   RS-5    every finding cites a capture that exists
-                   1 finding(s), each RESEARCHED with a stored capture
-  BLOCKED  RS-6    the competitive chain completes end to end on real sources
-                   the retrieved pages carry no competitor data, so no table stakes or differentiators exist
+  NOT_RUN  LC-6    a downstream decision consumes PERSISTED canon
+                   the lifecycle did not reach requirements
+  PROVEN   RS-2/3  the research gateway fetches and captures a real page
+                   2 page(s), each hashed and attributed to SC-AGENT-060
+  BLOCKED  RS-4    an INDEPENDENT verifier judges the captures and fetches nothing
+                   the chain stopped before verification: state=BLOCKED
+  NOT_RUN  RS-5    every finding cites a capture that exists
+                   no finding was produced
+  NOT_RUN  RS-6    the competitive chain completes end to end on real sources
+                   no finding was produced, so there was nothing for the chain to build on
 
-  PROVEN: 5   BLOCKED: 3   NOT_RUN: 1
+  PROVEN: 1   BLOCKED: 3   NOT_RUN: 4
 ========================================================================
 
- ❯ tests/live/intelligence.live.test.ts (9 tests) 1261088ms
+ ❯ tests/live/intelligence.live.test.ts (10 tests | 2 failed) 685077ms
+   × a real company run over a real problem > 1. discovery and product produced schema-valid canon from one owner sentence 5ms
+     → expected 0 to be greater than 0
+   × the research chain, against the real web > every obligation was classified, and at least one was proved 3ms
+     → obligations nobody classified: LC-1: expected [ 'LC-1' ] to deeply equal []
 
-⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
 
- FAIL  tests/live/intelligence.live.test.ts > the research chain, against the real web
-AssertionError: RS-2/3 was never classified: expected false to be true // Object.is equality
+ FAIL  tests/live/intelligence.live.test.ts > a real company run over a real problem > 1. discovery and product produced schema-valid canon from one owner sentence
+AssertionError: expected 0 to be greater than 0
+ ❯ tests/live/intelligence.live.test.ts:252:75
+    250|     expect(goals.length).toBeGreaterThan(0);
+    251|     /* The Current Alternative is the discovery field that is never op…
+    252|     expect(store.listCanonIds(ARTIFACT_TYPES.CURRENT_ALTERNATIVE).leng…
+       |                                                                           ^
+    253|     proof.proven(
+    254|       'LC-1',
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/live/intelligence.live.test.ts > the research chain, against the real web > every obligation was classified, and at least one was proved
+AssertionError: obligations nobody classified: LC-1: expected [ 'LC-1' ] to deeply equal []
 
 - Expected
 + Received
 
-- true
-+ false
+- Array []
++ Array [
++   "LC-1",
++ ]
 
- ❯ tests/live/intelligence.live.test.ts:623:69
-    621|     if (skip !== undefined) return;
-    622|     for (const required of ['LC-1', 'LC-2/3', 'LC-4', 'LC-6', 'RS-2/3'…
-    623|       expect(ids.has(required), required + ' was never classified').to…
-       |                                                                     ^
-    624|     }
-    625|     /* And at least one obligation must have been genuinely proved, or…
+ ❯ tests/live/intelligence.live.test.ts:646:87
+    644|     const required = ['LC-1', 'LC-2/3', 'LC-4', 'LC-5', 'LC-6', 'RS-2/…
+    645|     const unclassified = required.filter((r) => !ids.has(r));
+    646|     expect(unclassified, 'obligations nobody classified: ' + unclassif…
+       |                                                                                       ^
+    647| 
+    648|     /* Each id is recorded exactly once: a duplicate means two obligat…
 
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
 
  Test Files  1 failed (1)
-      Tests  9 passed (9)
-   Start at  04:03:40
-   Duration  1262.56s (transform 715ms, setup 0ms, collect 1.21s, tests 1261.09s, environment 0ms, prepare 82ms)
+      Tests  2 failed | 8 passed (10)
+   Start at  04:46:03
+   Duration  687.00s (transform 921ms, setup 0ms, collect 1.53s, tests 685.08s, environment 0ms, prepare 146ms)
 

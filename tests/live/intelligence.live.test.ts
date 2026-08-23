@@ -233,154 +233,130 @@ describe('a real company run over a real problem', () => {
 
   it('1. discovery and product produced schema-valid canon from one owner sentence', () => {
     if (guard()) return;
-    const goals = store.listCanonIds(ARTIFACT_TYPES.PROJECT_GOAL);
-    if (goals.length === 0) {
-      /*
-       * The run is still at the owner. Not a failure — but nothing downstream is provable
-       * either, so say which it is rather than passing quietly.
-       */
-      proof.blocked(
-        'LC-1',
-        'discovery and product produce schema-valid canon',
-        'still with the owner after ' + String(ownerRounds.length) + ' round(s)',
+    proof.attempt('LC-1', 'discovery and product produce schema-valid canon', () => {
+      const goals = store.listCanonIds(ARTIFACT_TYPES.PROJECT_GOAL);
+      const alternatives = store.listCanonIds(ARTIFACT_TYPES.CURRENT_ALTERNATIVE);
+
+      if (goals.length === 0) {
+        return { blocked: 'no goal exists: the run is still with the owner' };
+      }
+      if (alternatives.length === 0) {
+        /*
+         * Intake produced goals and discovery did not complete. A real run reached exactly
+         * this state — the owner declared two unknowns out of scope and discovery refused
+         * to proceed on an unvalidated assumption about customer behaviour. Correct, and
+         * not a proof of the chain.
+         */
+        return { blocked: 'goals exist but discovery produced no CurrentAlternative' };
+      }
+      return (
+        String(goals.length) +
+        ' goal(s) and ' +
+        String(alternatives.length) +
+        ' current alternative(s) from one owner sentence'
       );
-      expect(store.listCanonIds(ARTIFACT_TYPES.OWNER_DECISION_REQUEST).length).toBeGreaterThan(0);
-      return;
-    }
-    expect(goals.length).toBeGreaterThan(0);
-    /* The Current Alternative is the discovery field that is never optional. */
-    expect(store.listCanonIds(ARTIFACT_TYPES.CURRENT_ALTERNATIVE).length).toBeGreaterThan(0);
-    proof.proven(
-      'LC-1',
-      'discovery and product produce schema-valid canon',
-      String(goals.length) + ' goal(s) from one owner sentence',
-    );
+    });
   });
 
   it('2/3. a real source was retrieved by Serva and captured with a digest', () => {
     if (guard()) return;
-    const captures = repository(store, ARTIFACT_TYPES.SOURCE_CAPTURE, SourceCaptureSchema).list();
-    if (captures.length === 0) {
-      /*
-       * BLOCKED, and recorded as such. The lifecycle stopped before market research, so
-       * this obligation was never exercised — and the one thing that must still hold is
-       * that nothing was invented in its place.
-       */
-      proof.blocked(
-        'LC-2/3',
-        'a real source is retrieved by Serva and captured',
-        'the lifecycle did not reach market research',
-      );
-      expect(store.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING)).toHaveLength(0);
-      return;
-    }
-    for (const c of captures) {
-      expect(c.url.startsWith('https://en.wikipedia.org/')).toBe(true);
-      expect(c.contentDigest).toMatch(/^[0-9a-f]{64}$/);
-      expect(c.trust).toBe('UNTRUSTED');
-      expect(c.excerpt.length).toBeGreaterThan(0);
-      /* Retrieval is attributed to the ONE agent whose contract declares network. */
-      expect(c.retrievedByAgentId).toBe('SC-AGENT-060');
-    }
+    proof.attempt('LC-2/3', 'a real source is retrieved by Serva and captured', () => {
+      const captures = repository(store, ARTIFACT_TYPES.SOURCE_CAPTURE, SourceCaptureSchema).list();
+      if (captures.length === 0) {
+        /* Nothing invented in its place is the thing that must still hold. */
+        expect(store.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING)).toHaveLength(0);
+        return { blocked: 'the lifecycle did not reach market research' };
+      }
+      for (const c of captures) {
+        expect(c.url.startsWith('https://en.wikipedia.org/')).toBe(true);
+        expect(c.contentDigest).toMatch(/^[0-9a-f]{64}$/);
+        expect(c.trust).toBe('UNTRUSTED');
+        expect(c.excerpt.length).toBeGreaterThan(0);
+        /* Retrieval is attributed to the ONE agent whose contract declares network. */
+        expect(c.retrievedByAgentId).toBe('SC-AGENT-060');
+      }
+      return String(captures.length) + ' page(s), hashed and UNTRUSTED';
+    });
   });
 
   it('4. the Source Verifier judged the findings without fetching anything', () => {
     if (guard()) return;
-    const captures = store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE);
-    if (captures.length === 0) {
-      proof.notRun(
-        'LC-4',
-        'the Source Verifier judges captures and fetches nothing',
-        'no capture exists, so there was nothing to verify',
-      );
-      return;
-    }
+    proof.attempt('LC-4', 'the Source Verifier judges captures and fetches nothing', () => {
+      const captures = store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE);
+      if (captures.length === 0) return { notRun: 'no capture exists, so nothing to verify' };
 
-    const verifierRun = allRuns.find((r) => r.agentId === 'SC-AGENT-063');
-    expect(verifierRun, 'the source verifier did not run').toBeDefined();
-
-    /*
-     * The proof that it did not re-fetch: no capture is attributed to it, and the capture
-     * count did not change while it ran. It had nothing to fetch WITH — its contract
-     * declares no network — and this is the observable consequence.
-     */
-    const verifications = store.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION);
-    expect(verifications.length).toBeGreaterThan(0);
-    for (const id of captures) {
-      const env = store.getCanon<{ retrievedByAgentId?: string }>(
-        ARTIFACT_TYPES.SOURCE_CAPTURE,
-        id,
-      );
-      expect(env?.body?.retrievedByAgentId).not.toBe('SC-AGENT-063');
-    }
+      const verifications = store.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION);
+      if (verifications.length === 0) {
+        return { blocked: 'the lifecycle stopped before verification' };
+      }
+      for (const id of captures) {
+        const env = store.getCanon<{ retrievedByAgentId?: string }>(
+          ARTIFACT_TYPES.SOURCE_CAPTURE,
+          id,
+        );
+        expect(env?.body?.retrievedByAgentId).not.toBe('SC-AGENT-063');
+      }
+      return String(verifications.length) + ' verification(s), none of them a re-fetch';
+    });
   });
 
   it('5. competitive and innovation output was derived from the captured evidence', () => {
     if (guard()) return;
-    const findings = repository(
-      store,
-      ARTIFACT_TYPES.RESEARCH_FINDING,
-      ResearchFindingSchema,
-    ).list();
-    if (findings.length === 0) {
-      const competitive = readGateResults(store).find((g) => g.gateRef === 'SC-GATE-COMPETITIVE');
-      /* No evidence must produce NOT_VERIFIED, never a plausible landscape. */
-      expect(competitive?.verdict ?? 'NOT_VERIFIED').toBe('NOT_VERIFIED');
-      proof.blocked(
-        'LC-5',
-        'competitive output derives from captured evidence',
-        'no finding exists; the competitive gate correctly reads NOT_VERIFIED',
-      );
-      return;
-    }
-    for (const f of findings) {
-      expect(f.meta.provenance.marking).toBe('RESEARCHED');
-      if (f.meta.provenance.marking === 'RESEARCHED') {
+    proof.attempt('LC-5', 'competitive output derives from captured evidence', () => {
+      const findings = repository(
+        store,
+        ARTIFACT_TYPES.RESEARCH_FINDING,
+        ResearchFindingSchema,
+      ).list();
+      if (findings.length === 0) {
+        const competitive = readGateResults(store).find((g) => g.gateRef === 'SC-GATE-COMPETITIVE');
+        /* No evidence must produce NOT_VERIFIED, never a plausible landscape. */
+        expect(competitive?.verdict ?? 'NOT_VERIFIED').toBe('NOT_VERIFIED');
+        return { blocked: 'no finding exists; the competitive gate reads NOT_VERIFIED' };
+      }
+      const captureIds = new Set(store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE));
+      for (const f of findings) {
+        expect(f.meta.provenance.marking).toBe('RESEARCHED');
+        if (f.meta.provenance.marking !== 'RESEARCHED') continue;
         expect(f.meta.provenance.sources.length).toBeGreaterThan(0);
-        for (const s of f.meta.provenance.sources) {
-          expect(store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toContain(s.captureId);
+        for (const src of f.meta.provenance.sources) {
+          expect(captureIds.has(src.captureId)).toBe(true);
         }
       }
-    }
+      return String(findings.length) + ' finding(s), each citing a stored capture';
+    });
   });
 
   it('6. a downstream requirement consumed PERSISTED canon, not chat history', () => {
     if (guard()) return;
-    const requirements = repository(store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).list();
-    if (requirements.length === 0) {
-      proof.notRun(
-        'LC-6',
-        'a downstream decision consumes PERSISTED canon',
-        'the lifecycle did not reach requirements',
+    proof.attempt('LC-6', 'a downstream decision consumes PERSISTED canon', () => {
+      const requirements = repository(store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).list();
+      if (requirements.length === 0) {
+        return { notRun: 'the lifecycle did not reach requirements' };
+      }
+
+      /*
+       * Each department is its own AgentRun with its own session. The requirements author
+       * never saw the discovery run's conversation — so if its output traces to a Feature
+       * id the product stage persisted, the only route to that id is the Store.
+       */
+      const featureIds = new Set(store.listCanonIds(ARTIFACT_TYPES.FEATURE));
+      const tracing = requirements.filter((r) => r.tracesTo.some((t) => featureIds.has(t.id)));
+      expect(tracing.length, 'no requirement traced to a persisted feature').toBeGreaterThan(0);
+
+      const runIds = new Set(
+        allRuns.map((r) => r.runId).filter((id): id is string => id !== undefined),
       );
-      return;
-    }
+      expect(runIds.size).toBeGreaterThan(3);
+      for (const runId of runIds) expect(runStream(runId)).toBeTruthy();
 
-    /*
-     * Each department is its own AgentRun with its own session. The requirements author
-     * never saw the discovery run's conversation — so if its output traces to a Feature
-     * id that the product stage persisted, the only route by which it could know that id
-     * is the Store.
-     */
-    const featureIds = new Set(store.listCanonIds(ARTIFACT_TYPES.FEATURE));
-    const tracing = requirements.filter((r) => r.tracesTo.some((t) => featureIds.has(t.id)));
-    expect(tracing.length, 'no requirement traced to a persisted feature').toBeGreaterThan(0);
-
-    /* And the runs really were separate sessions. */
-    const runIds = new Set(
-      allRuns.map((r) => r.runId).filter((id): id is string => id !== undefined),
-    );
-    expect(runIds.size).toBeGreaterThan(3);
-    for (const runId of runIds) expect(runStream(runId)).toBeTruthy();
-
-    proof.proven(
-      'LC-6',
-      'a downstream decision consumes PERSISTED canon',
-      String(tracing.length) +
+      return (
+        String(tracing.length) +
         ' requirement(s) trace to a feature id their run never saw, across ' +
         String(runIds.size) +
-        ' separate sessions',
-    );
+        ' sessions'
+      );
+    });
   });
 });
 
@@ -485,129 +461,98 @@ describe('the research chain, against the real web', () => {
         (researchResult?.ran ?? []).map((r) => r.agentId + ':' + r.outcome).join(', '),
     );
     console.log('research state: ' + String(researchResult?.state));
-    if (researchResult?.reason !== undefined) console.log('  ' + researchResult.reason);
 
-    const captures = repository(
-      researchStore,
-      ARTIFACT_TYPES.SOURCE_CAPTURE,
-      SourceCaptureSchema,
-    ).list();
-
-    if (captures.length === 0) {
-      /*
-       * BLOCKED, honestly. The network was unavailable, and the correct consequence is a
-       * recorded absence — never an invented landscape.
-       */
-      proof.blocked(
-        'RS-2/3',
-        'the research gateway fetches and captures a real page',
-        'no source was retrieved; research is UNAVAILABLE',
-      );
-      expect(researchStore.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING)).toHaveLength(0);
-      expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITOR_PROFILE)).toHaveLength(0);
-      return;
-    }
-
-    for (const c of captures) {
-      expect(c.url.startsWith('https://en.wikipedia.org/')).toBe(true);
-      expect(c.contentDigest).toMatch(/^[0-9a-f]{64}$/);
-      expect(c.trust).toBe('UNTRUSTED');
-      expect(c.excerpt.length).toBeGreaterThan(200);
-      /* Attributed to the ONE agent whose canonical contract declares network scope. */
-      expect(c.retrievedByAgentId).toBe('SC-AGENT-060');
-    }
-    proof.proven(
-      'RS-2/3',
-      'the research gateway fetches and captures a real page',
-      String(captures.length) + ' page(s), each hashed and attributed to SC-AGENT-060',
-    );
+    proof.attempt('RS-2/3', 'the research gateway fetches and captures a real page', () => {
+      const captures = repository(
+        researchStore,
+        ARTIFACT_TYPES.SOURCE_CAPTURE,
+        SourceCaptureSchema,
+      ).list();
+      if (captures.length === 0) {
+        /* Honest degradation: an absence recorded, never an invented landscape. */
+        expect(researchStore.listCanonIds(ARTIFACT_TYPES.RESEARCH_FINDING)).toHaveLength(0);
+        expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITOR_PROFILE)).toHaveLength(0);
+        return { blocked: 'no source was retrieved; research is UNAVAILABLE' };
+      }
+      for (const c of captures) {
+        expect(c.url.startsWith('https://en.wikipedia.org/')).toBe(true);
+        expect(c.contentDigest).toMatch(/^[0-9a-f]{64}$/);
+        expect(c.trust).toBe('UNTRUSTED');
+        expect(c.excerpt.length).toBeGreaterThan(200);
+        expect(c.retrievedByAgentId).toBe('SC-AGENT-060');
+      }
+      return String(captures.length) + ' page(s), hashed and attributed to SC-AGENT-060';
+    });
   });
 
   it('4. the verifier judged the captures and fetched nothing of its own', () => {
     if (guard()) return;
-    const captures = repository(
-      researchStore,
-      ARTIFACT_TYPES.SOURCE_CAPTURE,
-      SourceCaptureSchema,
-    ).list();
-    if (captures.length === 0) return;
+    proof.attempt('RS-4', 'an INDEPENDENT verifier judges the captures and fetches nothing', () => {
+      const captures = repository(
+        researchStore,
+        ARTIFACT_TYPES.SOURCE_CAPTURE,
+        SourceCaptureSchema,
+      ).list();
+      if (captures.length === 0) return { notRun: 'no capture exists, so nothing to verify' };
 
-    /*
-     * A verification exists, or the chain stopped before reaching the verifier — which is
-     * a real outcome and is reported rather than asserted away.
-     */
-    const verifications = researchStore.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION);
-    if (verifications.length === 0) {
-      console.log('the chain stopped before verification: state=' + String(researchResult?.state));
-      /* What must NOT happen is competitive truth built on unverified claims. */
-      expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITIVE_POSITION)).toHaveLength(0);
-      return;
-    }
+      const verifications = researchStore.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION);
+      if (verifications.length === 0) {
+        /* What must NOT happen is competitive truth built on unverified claims. */
+        expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITIVE_POSITION)).toHaveLength(0);
+        return {
+          blocked: 'the chain stopped before verification: state=' + String(researchResult?.state),
+        };
+      }
 
-    /* Nothing it could have fetched with, and nothing attributed to it. */
-    for (const c of captures) expect(c.retrievedByAgentId).not.toBe('SC-AGENT-063');
-    expect(researchStore.listCanonIds(ARTIFACT_TYPES.CLAIM_VERIFICATION).length).toBeGreaterThan(0);
-
-    /* And every capture is still exactly the capture that was verified. */
-    for (const c of captures) {
-      expect(researchStore.listCanonVersions(ARTIFACT_TYPES.SOURCE_CAPTURE, c.id)).toEqual([1]);
-    }
-    proof.proven(
-      'RS-4',
-      'an INDEPENDENT verifier judges the captures and fetches nothing',
-      String(verifications.length) + ' verification(s); no capture is attributed to SC-AGENT-063',
-    );
+      for (const c of captures) expect(c.retrievedByAgentId).not.toBe('SC-AGENT-063');
+      /* And every capture is still exactly the capture that was verified. */
+      for (const c of captures) {
+        expect(researchStore.listCanonVersions(ARTIFACT_TYPES.SOURCE_CAPTURE, c.id)).toEqual([1]);
+      }
+      return (
+        String(verifications.length) + ' verification(s); no capture attributed to SC-AGENT-063'
+      );
+    });
   });
 
   it('5. every finding cites a capture that is actually in the store', () => {
     if (guard()) return;
-    const findings = repository(
-      researchStore,
-      ARTIFACT_TYPES.RESEARCH_FINDING,
-      ResearchFindingSchema,
-    ).list();
-    if (findings.length === 0) {
-      proof.notRun('RS-5', 'every finding cites a capture that exists', 'no finding was produced');
-      return;
-    }
 
-    const captureIds = new Set(researchStore.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE));
-    for (const f of findings) {
-      expect(f.meta.provenance.marking).toBe('RESEARCHED');
-      if (f.meta.provenance.marking !== 'RESEARCHED') continue;
-      expect(f.meta.provenance.sources.length).toBeGreaterThan(0);
-      for (const src of f.meta.provenance.sources) {
-        expect(captureIds.has(src.captureId), 'cites a capture that does not exist').toBe(true);
+    proof.attempt('RS-5', 'every finding cites a capture that exists', () => {
+      const findings = repository(
+        researchStore,
+        ARTIFACT_TYPES.RESEARCH_FINDING,
+        ResearchFindingSchema,
+      ).list();
+      if (findings.length === 0) return { notRun: 'no finding was produced' };
+
+      const captureIds = new Set(researchStore.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE));
+      for (const f of findings) {
+        expect(f.meta.provenance.marking).toBe('RESEARCHED');
+        if (f.meta.provenance.marking !== 'RESEARCHED') continue;
+        expect(f.meta.provenance.sources.length).toBeGreaterThan(0);
+        for (const src of f.meta.provenance.sources) {
+          expect(captureIds.has(src.captureId), 'cites a capture that does not exist').toBe(true);
+        }
       }
-    }
-    proof.proven(
-      'RS-5',
-      'every finding cites a capture that exists',
-      String(findings.length) + ' finding(s), each RESEARCHED with a stored capture',
-    );
+      return String(findings.length) + ' finding(s), each RESEARCHED with a stored capture';
+    });
 
     /*
-     * The competitive chain is a SEPARATE obligation, and it is the one that has never
-     * completed live. The chosen public pages carry no competitor data, so the analyst
-     * produces nothing to build on and innovation is refused for want of a prerequisite —
-     * which is the correct behaviour and is not a proof of the chain.
+     * The competitive chain is a SEPARATE obligation, and the one that has never completed
+     * live: the chosen public pages carry no competitor data, so the analyst produces
+     * nothing to build on and innovation is refused for want of a prerequisite. Correct
+     * behaviour, and not a proof of the chain.
      */
-    const differentiators = researchStore.listCanonIds(ARTIFACT_TYPES.DIFFERENTIATOR);
-    if (differentiators.length === 0) {
-      proof.blocked(
-        'RS-6',
-        'the competitive chain completes end to end on real sources',
-        'the retrieved pages carry no competitor data, so no table stakes or differentiators exist',
-      );
-      /* Nothing invented to fill the gap. */
-      expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITIVE_POSITION)).toHaveLength(0);
-    } else {
-      proof.proven(
-        'RS-6',
-        'the competitive chain completes end to end on real sources',
-        String(differentiators.length) + ' differentiator(s)',
-      );
-    }
+    proof.attempt('RS-6', 'the competitive chain completes end to end on real sources', () => {
+      const differentiators = researchStore.listCanonIds(ARTIFACT_TYPES.DIFFERENTIATOR);
+      if (differentiators.length === 0) {
+        /* Nothing invented to fill the gap. */
+        expect(researchStore.listCanonIds(ARTIFACT_TYPES.COMPETITIVE_POSITION)).toHaveLength(0);
+        return { blocked: 'the retrieved pages carry no competitor data' };
+      }
+      return String(differentiators.length) + ' differentiator(s) from real sources';
+    });
   });
 
   /**
@@ -623,7 +568,7 @@ describe('the research chain, against the real web', () => {
     if (guard()) return;
 
     const ids = new Set(proof.all().map((r) => r.id));
-    const required = ['LC-1', 'LC-2/3', 'LC-4', 'LC-6', 'RS-2/3', 'RS-4', 'RS-5', 'RS-6'];
+    const required = ['LC-1', 'LC-2/3', 'LC-4', 'LC-5', 'LC-6', 'RS-2/3', 'RS-4', 'RS-5', 'RS-6'];
     const unclassified = required.filter((r) => !ids.has(r));
     expect(unclassified, 'obligations nobody classified: ' + unclassified.join(', ')).toEqual([]);
 

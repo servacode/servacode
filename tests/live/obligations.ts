@@ -61,6 +61,39 @@ export class ProofLedger {
   }
 
   /**
+   * Run an obligation so that it CANNOT go unclassified.
+   *
+   * Three live runs, three different unclassified paths — a duplicate id, two early
+   * returns, and then a branch nobody anticipated where the goals existed but discovery
+   * had failed. Each was fixed by adding one more `proof.*` call to one more branch, which
+   * is discipline, and discipline is what fails on the branch you did not think of.
+   *
+   * So the body reports what happened and this records it. The body returning a string is
+   * PROVEN; returning a `blocked`/`notRun` reason records that; and a thrown assertion is
+   * recorded as BLOCKED and rethrown, so the suite goes red AND the ledger stays complete.
+   * A path that classifies nothing no longer exists.
+   */
+  attempt(
+    id: string,
+    claim: string,
+    body: () => string | { readonly blocked: string } | { readonly notRun: string },
+  ): void {
+    try {
+      const outcome = body();
+      if (typeof outcome === 'string') this.proven(id, claim, outcome);
+      else if ('blocked' in outcome) this.blocked(id, claim, outcome.blocked);
+      else this.notRun(id, claim, outcome.notRun);
+    } catch (e) {
+      this.blocked(
+        id,
+        claim,
+        'the check itself failed: ' + String(e instanceof Error ? e.message : e),
+      );
+      throw e;
+    }
+  }
+
+  /**
    * The summary a reader actually needs: which obligations were met, and which were not
    * even attempted. Printed rather than asserted, because the suite's job is to report
    * honestly rather than to be green.
