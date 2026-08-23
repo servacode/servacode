@@ -276,4 +276,77 @@ Both in `docs/SPEC_IMPLEMENTATION_FINDINGS.md`. Neither was resolved by editing 
 
 ## Appendix — live result
 
-Filled in below from the run made after these fixes.
+`npm run test:intelligence-live`, against real Claude and the real public web, after every
+closure fix. **10 tests, all passing. 5 PROVEN, 3 BLOCKED, 1 NOT_RUN.** Full transcript in
+`evidence/LIVE_INTELLIGENCE.txt`.
+
+### The lifecycle run
+
+```
+SC-AGENT-020  ESCALATED_TO_OWNER → COMPLETED   intake
+SC-AGENT-030  COMPLETED                        discovery
+SC-AGENT-020  COMPLETED                        product validation
+SC-AGENT-040  ESCALATED_TO_OWNER → COMPLETED   business analysis
+SC-AGENT-050  COMPLETED                        requirements
+SC-AGENT-051  ESCALATED_TO_OWNER → COMPLETED   NFRs
+SC-AGENT-052  COMPLETED                        independent verification
+→ BLOCKED at SC-GATE-REQUIREMENTS (FAIL)
+```
+
+Eleven owner questions across the run, each answered with an option the decision actually
+offered — ten DEFER, and one a real answer about how staff currently hold books. Three
+departments stopped and asked rather than inventing, and all three continued once answered.
+
+The gate then **FAILED**, on `RQ-4`: *an INDEPENDENT verifier judged the requirements
+acceptable* — NOT_MET. `SC-AGENT-052` read the requirements `SC-AGENT-050` wrote and
+rejected them. That is the independence rule producing a disagreement between two real
+model runs, which is the thing it exists for and the thing no fixture can demonstrate.
+
+### The research slice
+
+```
+SC-AGENT-060  COMPLETED   market research   — real pages retrieved and captured
+SC-AGENT-063  COMPLETED   INDEPENDENT source verification
+SC-AGENT-061  FAILED      competitive analysis
+→ BLOCKED at SC-GATE-COMPETITIVE
+```
+
+### The proof ledger
+
+| | Obligation | Outcome |
+|---|---|---|
+| LC-1 | discovery and product produce schema-valid canon | **PROVEN** |
+| LC-2/3 | a real source is retrieved by Serva and captured | BLOCKED — the lifecycle did not reach market research |
+| LC-4 | the Source Verifier judges captures and fetches nothing | NOT_RUN — no capture to verify |
+| LC-5 | competitive output derives from captured evidence | BLOCKED — no finding; the gate reads NOT_VERIFIED |
+| LC-6 | a downstream decision consumes PERSISTED canon | **PROVEN** |
+| RS-2/3 | the research gateway fetches and captures a real page | **PROVEN** |
+| RS-4 | an INDEPENDENT verifier judges the captures and fetches nothing | **PROVEN** |
+| RS-5 | every finding cites a capture that exists | **PROVEN** |
+| RS-6 | the competitive chain completes end to end on real sources | BLOCKED — the pages carry no competitor data |
+
+`RS-4` is new here and is the strongest of them: retrieval, capture, and **independent
+verification that never re-fetched**, all against the live web.
+
+`RS-6` remains the one thing the live suite has never proved, and it reports so rather than
+passing quietly. Nothing was invented to fill the gap — the competitive position count is
+asserted to be zero.
+
+### What the ledger cost to build
+
+The mechanism found three defects in itself across four runs: a duplicate obligation id, two
+early returns that classified nothing, and a branch nobody had anticipated where goals
+existed but discovery had failed. Each was fixed by adding another `proof.*` call to another
+branch — which is discipline, and discipline is what fails on the branch you did not think
+of. Every obligation now runs through `ProofLedger.attempt()`, where the body *returns* its
+outcome and a thrown assertion is recorded and rethrown. An unclassified path no longer
+exists.
+
+The owner loop was the fourth. It answered every decision with `"Declare it out of scope for
+now"` — an option only the escalation path offers — and closure fix 1 refused it on a
+business-rule decision after 622 seconds of real model time. The refusal was correct; the
+caller was mine.
+
+Four defects in closure-era code, each found by a mechanism built for a different
+requirement. That is the argument for building them as prevention rather than as
+documentation.
