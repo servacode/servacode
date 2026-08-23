@@ -428,6 +428,14 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       if (norm.endsWith('src/app/ai.ts')) continue;
       if (norm.endsWith('src/cli/commands/ai.ts')) continue;
       if (norm.endsWith('src/cli/commands/route.ts')) continue;
+      /*
+       * cli/commands/portability.ts is ai.ts's reason: `serva migrate` tells the owner to
+       * sign in on the new machine, and naming the thing they must sign into is the whole
+       * value of that line. Owner-facing guidance is where a provider is allowed to be
+       * named; the rule is that nothing else KNOWS about the adapter, which the test below
+       * proves for this file too.
+       */
+      if (norm.endsWith('src/cli/commands/portability.ts')) continue;
       if (norm.endsWith('src/index.ts')) continue;
       /*
        * Phase 4 exceptions, each for a different reason, and each named rather than
@@ -523,6 +531,7 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       'src/portability/doctor.ts',
       'src/portability/machine.ts',
       'src/portability/probes.ts',
+      'src/cli/commands/portability.ts',
     ]) {
       expect(readFileSync(file, 'utf8')).not.toContain('engine/claude');
     }

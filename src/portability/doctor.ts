@@ -229,7 +229,7 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
         }
       : claude.installed
         ? {}
-        : { remedy: 'Install the engine inside the guest distribution.' }),
+        : { remedy: 'Install Claude Code inside the guest distribution.' }),
     blocksEngineering: true,
   });
   checks.push({
@@ -250,7 +250,7 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
         ? {}
         : {
             remedy:
-              'Run the engine in the guest and sign in. Serva uses your subscription; it never creates an API key and never copies credentials from another machine.',
+              'Run `claude` in the guest and sign in. Serva uses your Claude subscription; it never creates an API key and never copies credentials from another machine.',
           }),
     blocksEngineering: true,
   });
