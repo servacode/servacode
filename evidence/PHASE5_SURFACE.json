@@ -8,6 +8,13 @@
     "UPSTREAM_DEPARTMENT",
     "OWNER_DECISION"
   ],
+  "claimVerdicts": [
+    "SUPPORTED",
+    "PARTIALLY_SUPPORTED",
+    "NOT_SUPPORTED",
+    "SOURCE_MISSING",
+    "AMBIGUOUS"
+  ],
   "proposalRulingAuthorities": [
     {
       "id": "SC-AGENT-020",

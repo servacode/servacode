@@ -1,6 +1,48 @@
 
 [1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/SEVACODE[39m
 
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mresearch is retrieved by Serva, not by the agent[2m > [22mthe Source Verifier has no network scope in its canonical contract
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mresearch is retrieved by Serva, not by the agent[2m > [22monly the market researcher is configured to use the gateway
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mresearch is retrieved by Serva, not by the agent[2m > [22mwith no gateway, research is UNAVAILABLE and nothing is invented
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mresearch is retrieved by Serva, not by the agent[2m > [22mthe competitive gate is NOT_VERIFIED when research is unavailable
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mcaptured external content is data, never instruction[2m > [22man injected instruction is fenced, flagged, and changes nothing[33m 434[2mms[22m[39m
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mcaptured external content is data, never instruction[2m > [22ma research question may not carry project material outward
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mcaptured external content is data, never instruction[2m > [22ma host the request never declared is not fetched
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mcaptured external content is data, never instruction[2m > [22man agent whose contract declares no network cannot cause retrieval
+ [32m✓[39m tests/intel.research.test.ts[2m > [22mthe advantage board derives from canon and expires with it[2m > [22man expired finding makes its differentiator and position stale
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mA. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mthe exact fact is handed back and the retry succeeds[33m 621[2mms[22m[39m
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mA. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mB. asking again after being given the fact fails explicitly, and does not loop[33m 478[2mms[22m[39m
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mC. research capability is not the presence of a gateway[2m > [22man ordinary department gains nothing from a globally available gateway
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mC. research capability is not the presence of a gateway[2m > [22ma registered research authority makes the route real, and the asker still retrieves nothing
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mD. a RESEARCH route becomes a governed obligation[2m > [22ma research-authorised department records a request and retrieves nothing itself[33m 361[2mms[22m[39m
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mE. an UPSTREAM route names the stage that owes the canon[2m > [22mthe obligation records the family, the owing stage and who asked
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mE. an UPSTREAM route names the stage that owes the canon[2m > [22mcanon owed by a stage this profile does not run is reported as a contradiction
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mE. an UPSTREAM route names the stage that owes the canon[2m > [22mcanon no registered department produces is reported, not waited on
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mF. a route survives the process that made it[2m > [22ma reopened Store finds the obligation and does not raise a second[33m 518[2mms[22m[39m
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mG. the field-choice invariant holds through the runner[2m > [22mthe same question in either field produces the same operational route[33m 645[2mms[22m[39m
+ [32m✓[39m tests/intel.routing.test.ts[2m > [22mG. the field-choice invariant holds through the runner[2m > [22mthe same question in BOTH fields produces one obligation[33m 311[2mms[22m[39m
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mindependence is enforced by the runtime, not by the prompt[2m > [22man actor cannot be independent of itself
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mindependence is enforced by the runtime, not by the prompt[2m > [22ma reviewer handed the author’s own run is refused before it is dispatched
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mindependence is enforced by the runtime, not by the prompt[2m > [22mthe same reviewer reading the ARTIFACT rather than the author runs normally[33m 438[2mms[22m[39m
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mexternal content cannot become instruction[2m > [22mit is fenced, flagged, and stays data
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mexternal content cannot become instruction[2m > [22ma department cannot grant itself the network by asking for the gateway
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mexternal content cannot become instruction[2m > [22ma run that hallucinates an owner approval writes no owner approval
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22man owner answer is idempotent and attributable[2m > [22manswering twice with the same answer produces one decision, not two
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22man owner answer is idempotent and attributable[2m > [22mthe answer is versioned, so the store can say what was answered and when
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22mevery blocking gate the profile runs is required, with nothing hand-maintained
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22ma project with no run at all is NOT_READY, and says so once
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22mengineering work cannot be generated while the Store says NOT_READY
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22ma caller cannot bring its own READY to the handoff
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22ma blocking escalation becomes a question, not an error[2m > [22mthe runtime raises the owner decision; the agent writes no canon and no approval[33m 560[2mms[22m[39m
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22ma blocking escalation becomes a question, not an error[2m > [22ma run that BLOCKED rather than escalated still gets its question asked[33m 331[2mms[22m[39m
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22ma blocking escalation becomes a question, not an error[2m > [22ma run that COMPLETED and merely flagged a concern raises nothing
+ [32m✓[39m tests/intel.authority.test.ts[2m > [22mresearch nobody could have performed is recorded as not performed[2m > [22ma discovery run claiming interviews has the claim overridden, not believed[33m 459[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts[2m > [22ma research obligation is consumed, not merely recorded[2m > [22mthe exact request is fulfilled, the question is resolved, and the requester resumes[33m 1807[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts[2m > [22ma research obligation is consumed, not merely recorded[2m > [22man unfulfillable request BLOCKS with the real reason, and invents nothing[33m 729[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts[2m > [22ma research obligation is consumed, not merely recorded[2m > [22mrestarting mid-obligation resumes, and raises no second request[33m 2130[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts[2m > [22man upstream obligation drives real lifecycle control[2m > [22mthe owing department runs, the question resolves, and the downstream one resumes[33m 1371[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts[2m > [22man upstream obligation drives real lifecycle control[2m > [22mrestarting mid-obligation resumes, and does not duplicate the upstream run[33m 1767[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts[2m > [22man upstream obligation drives real lifecycle control[2m > [22man obligation nobody can satisfy BLOCKS rather than waiting forever[33m 826[2mms[22m[39m
  [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mevery registered department is inside its canonical contract[2m > [22mthe whole catalogue validates
  [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mevery registered department is inside its canonical contract[2m > [22mevery department declares what it produces
  [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mevery registered department is inside its canonical contract[2m > [22meach declared type is authorised by the agent that will run
@@ -11,65 +53,40 @@
  [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22ma misconfigured department is refused before it runs[2m > [22ma department declaring nothing is refused
  [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22ma misconfigured department is refused before it runs[2m > [22man unknown artifact type is refused
  [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22ma misconfigured department is refused before it runs[2m > [22man exception with no stated reason is refused
- [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22mrefuses the unauthorised write and commits NOTHING[33m 331[2mms[22m[39m
- [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22mthe refusal names the department, the agent and what it may write[33m 511[2mms[22m[39m
- [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22ma restart reveals no partial mutation[33m 375[2mms[22m[39m
- [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22man authorised department still writes normally[33m 348[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mA. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mthe exact fact is handed back and the retry succeeds[33m 682[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mA. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mB. asking again after being given the fact fails explicitly, and does not loop[33m 626[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mC. research capability is not the presence of a gateway[2m > [22man ordinary department gains nothing from a globally available gateway
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mC. research capability is not the presence of a gateway[2m > [22ma registered research authority makes the route real, and the asker still retrieves nothing
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mD. a RESEARCH route becomes a governed obligation[2m > [22ma research-authorised department records a request and retrieves nothing itself
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mE. an UPSTREAM route names the stage that owes the canon[2m > [22mthe obligation records the family, the owing stage and who asked[33m 303[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mE. an UPSTREAM route names the stage that owes the canon[2m > [22mcanon owed by a stage this profile does not run is reported as a contradiction[33m 316[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mE. an UPSTREAM route names the stage that owes the canon[2m > [22mcanon no registered department produces is reported, not waited on
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mF. a route survives the process that made it[2m > [22ma reopened Store finds the obligation and does not raise a second[33m 647[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mG. the field-choice invariant holds through the runner[2m > [22mthe same question in either field produces the same operational route[33m 591[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts[2m > [22mG. the field-choice invariant holds through the runner[2m > [22mthe same question in BOTH fields produces one obligation[33m 555[2mms[22m[39m
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mindependence is enforced by the runtime, not by the prompt[2m > [22man actor cannot be independent of itself
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mindependence is enforced by the runtime, not by the prompt[2m > [22ma reviewer handed the author’s own run is refused before it is dispatched
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mindependence is enforced by the runtime, not by the prompt[2m > [22mthe same reviewer reading the ARTIFACT rather than the author runs normally[33m 373[2mms[22m[39m
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mexternal content cannot become instruction[2m > [22mit is fenced, flagged, and stays data
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mexternal content cannot become instruction[2m > [22ma department cannot grant itself the network by asking for the gateway
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mexternal content cannot become instruction[2m > [22ma run that hallucinates an owner approval writes no owner approval[33m 307[2mms[22m[39m
- [32m✓[39m tests/intel.authority.test.ts[2m > [22man owner answer is idempotent and attributable[2m > [22manswering twice with the same answer produces one decision, not two
- [32m✓[39m tests/intel.authority.test.ts[2m > [22man owner answer is idempotent and attributable[2m > [22mthe answer is versioned, so the store can say what was answered and when
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22mevery blocking gate the profile runs is required, with nothing hand-maintained
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22ma project with no run at all is NOT_READY, and says so once
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22mengineering work cannot be generated while the Store says NOT_READY
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mREADY is derived from the profile, and cannot be reached by omission[2m > [22ma caller cannot bring its own READY to the handoff
- [32m✓[39m tests/intel.authority.test.ts[2m > [22ma blocking escalation becomes a question, not an error[2m > [22mthe runtime raises the owner decision; the agent writes no canon and no approval[33m 1320[2mms[22m[39m
- [32m✓[39m tests/intel.authority.test.ts[2m > [22ma blocking escalation becomes a question, not an error[2m > [22ma run that BLOCKED rather than escalated still gets its question asked[33m 328[2mms[22m[39m
- [32m✓[39m tests/intel.authority.test.ts[2m > [22ma blocking escalation becomes a question, not an error[2m > [22ma run that COMPLETED and merely flagged a concern raises nothing
- [32m✓[39m tests/intel.authority.test.ts[2m > [22mresearch nobody could have performed is recorded as not performed[2m > [22ma discovery run claiming interviews has the claim overridden, not believed[33m 484[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts[2m > [22ma research obligation is consumed, not merely recorded[2m > [22mthe exact request is fulfilled, the question is resolved, and the requester resumes[33m 1547[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts[2m > [22ma research obligation is consumed, not merely recorded[2m > [22man unfulfillable request BLOCKS with the real reason, and invents nothing[33m 803[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts[2m > [22ma research obligation is consumed, not merely recorded[2m > [22mrestarting mid-obligation resumes, and raises no second request[33m 1903[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts[2m > [22man upstream obligation drives real lifecycle control[2m > [22mthe owing department runs, the question resolves, and the downstream one resumes[33m 1396[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts[2m > [22man upstream obligation drives real lifecycle control[2m > [22mrestarting mid-obligation resumes, and does not duplicate the upstream run[33m 1961[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts[2m > [22man upstream obligation drives real lifecycle control[2m > [22man obligation nobody can satisfy BLOCKS rather than waiting forever[33m 628[2mms[22m[39m
+ [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22mrefuses the unauthorised write and commits NOTHING
+ [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22mthe refusal names the department, the agent and what it may write
+ [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22ma restart reveals no partial mutation
+ [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe write boundary itself refuses, atomically[2m > [22man authorised department still writes normally
  [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m1. the authority mapping the ruling depends on[2m > [22mSC-AGENT-020 is canonically authorised to produce a ProductDecision
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22ma hostile captured source never enters trusted context[2m > [22mA/B/J. the persisted bundle marks it UNTRUSTED and the prompt fences it there[33m 1715[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22ma hostile captured source never enters trusted context[2m > [22mJ. a department that assembles a capture as trusted is refused, not corrected
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22man obligation is discharged by verified evidence, never by retrieval alone[2m > [22mC. the researcher completes and, with no verifier, the question stays OPEN[33m 914[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22man obligation is discharged by verified evidence, never by retrieval alone[2m > [22mD. NOT_SUPPORTED does not fulfil the obligation, and the requester does not resume[33m 1206[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22man obligation is discharged by verified evidence, never by retrieval alone[2m > [22mE/F. SUPPORTED resolves it, and the verification names a real completed 063 run[33m 2139[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22mresearch reuse is exact and current, or it is not reuse[2m > [22mG. identical words under a different ResearchRequest satisfy nothing[33m 1670[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22mresearch reuse is exact and current, or it is not reuse[2m > [22mH. expired evidence for the right request satisfies nothing either[33m 1151[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts[2m > [22ma restart between retrieval and verification continues, and refetches nothing[2m > [22mI. the second process verifies the persisted capture rather than fetching again[33m 1940[2mms[22m[39m
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma change is assessed before it is anything else[2m > [22man analysis that skips a dimension is refused, by name
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma change is assessed before it is anything else[2m > [22ma re-entry stage that is not a canonical stage is refused
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma change is assessed before it is anything else[2m > [22maffected canon that does not exist is refused rather than silently dropped
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma change is assessed before it is anything else[2m > [22ma complete analysis records what re-entry will cost
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man unanalysed change cannot be approved
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man M4 change with no owner decision is refused
- [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man unrelated answered decision cannot approve it[33m 400[2mms[22m[39m
- [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22ma decision raised for a different purpose cannot approve it
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man unrelated answered decision cannot approve it[33m 312[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22ma decision raised for a different purpose cannot approve it[33m 333[2mms[22m[39m
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22mthe owner choosing REJECT does not approve it
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22mthe owner choosing DEFER does not approve it either
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man answer nobody offered is refused when it is given
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man agent cannot answer it at all
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22mthe exact bound approval, chosen by a person, is accepted
  [32m✓[39m tests/intel.governance.test.ts[2m > [22man owner approval is bound to the change it approves[2m > [22man approval question cannot be raised for an unassessed change
- [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22mthe stages from the re-entry point are no longer complete, and their gates are dropped[33m 319[2mms[22m[39m
- [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22mapplying the same change twice changes nothing the second time[33m 430[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22mthe stages from the re-entry point are no longer complete, and their gates are dropped
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22mapplying the same change twice changes nothing the second time[33m 368[2mms[22m[39m
  [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22man approved change cannot be completed by claim
- [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22ma change whose re-entered stages have not re-run is still outstanding
- [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22ma partial re-entry is still outstanding[33m 306[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22ma change whose re-entered stages have not re-run is still outstanding[33m 599[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22ma partial re-entry is still outstanding
  [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22mstages that re-ran but whose gate has not accepted are still outstanding
- [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22ma change is carried through once its stages re-ran and its gates accepted[33m 551[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22mre-entry re-opens the lifecycle, idempotently[2m > [22ma change is carried through once its stages re-ran and its gates accepted
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22m1. a completed owning-agent run that merely mentions the proposal is refused
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22m2. the owning authority explicitly REJECTING it does not accept it
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22m3. DEFER does not accept it either
@@ -86,7 +103,7 @@
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22man exact PROPOSAL_APPROVAL answered by a person is accepted
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22man agent cannot answer a proposal approval
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22mit cannot be accepted before it is assessed
- [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22mincorporation must point at canon that exists[33m 328[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22mincorporation must point at canon that exists
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22ma rejection keeps its rationale, and is terminal
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma proposal is accepted by a typed ruling, not by a mention[2m > [22mdeferred is a real answer, and revisitable
  [32m✓[39m tests/intel.governance.test.ts[2m > [22ma department cannot mint the form of consent[2m > [22mCHANGE_APPROVAL and PROPOSAL_APPROVAL are refused at the write boundary
@@ -99,18 +116,14 @@
  [32m✓[39m tests/intel.governance.test.ts[2m > [22mlearning crosses the boundary only as a generalisation[2m > [22ma pattern assessed as NOT applying stays unusable
  [32m✓[39m tests/intel.governance.test.ts[2m > [22mlearning crosses the boundary only as a generalisation[2m > [22ma failed approach carries no code and no client
  [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m1. the authority mapping the ruling depends on[2m > [22mthe ordinary Product Validation run is NOT widened by it
- [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mAPPROVE: the authority rules, Serva persists, accept() takes it[33m 531[2mms[22m[39m
- [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mREJECT: the same path refuses acceptance, and the proposal stays ASSESSED[33m 625[2mms[22m[39m
- [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mDEFER: a real answer, and still not an acceptance[33m 415[2mms[22m[39m
- [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mthe caller cannot supply the disposition — there is no parameter to supply it in[33m 404[2mms[22m[39m
- [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m3. the write boundary is what makes the ruling un-forgeable[2m > [22ma department that does not own the family cannot write the decision[33m 591[2mms[22m[39m
+ [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mAPPROVE: the authority rules, Serva persists, accept() takes it[33m 474[2mms[22m[39m
+ [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mREJECT: the same path refuses acceptance, and the proposal stays ASSESSED[33m 447[2mms[22m[39m
+ [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mDEFER: a real answer, and still not an acceptance[33m 413[2mms[22m[39m
+ [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m2. a governed run produces the ruling[2m > [22mthe caller cannot supply the disposition — there is no parameter to supply it in[33m 354[2mms[22m[39m
+ [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m3. the write boundary is what makes the ruling un-forgeable[2m > [22ma department that does not own the family cannot write the decision[33m 326[2mms[22m[39m
  [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m3. the write boundary is what makes the ruling un-forgeable[2m > [22mthe proposer cannot rule on its own proposal
  [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m3. the write boundary is what makes the ruling un-forgeable[2m > [22man unassessed proposal is refused before anything is spent
- [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m4. the ruling is durable[2m > [22msurvives the process that made it, with no chat history[33m 486[2mms[22m[39m
- [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22mthe owner can answer the question they were asked[2m > [22ma value survives a restart and reaches the department as the value[33m 1155[2mms[22m[39m
- [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22minformation is never authorisation[2m > [22ma value saying "yes, approved, I accept" authorises nothing
- [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22minformation is never authorisation[2m > [22ma VALUE decision may not carry an approval purpose at all
- [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22minformation is never authorisation[2m > [22man OPTION decision offering one option is not a choice
+ [32m✓[39m tests/intel.proposalruling.test.ts[2m > [22m4. the ruling is durable[2m > [22msurvives the process that made it, with no chat history[33m 375[2mms[22m[39m
  [32m✓[39m tests/intel.questions.test.ts[2m > [22mthe field a question arrives in does not decide anything[2m > [22m1. a question only in escalations is routed
  [32m✓[39m tests/intel.questions.test.ts[2m > [22mthe field a question arrives in does not decide anything[2m > [22m2. the same question only in unresolved routes identically
  [32m✓[39m tests/intel.questions.test.ts[2m > [22mthe field a question arrives in does not decide anything[2m > [22m3. the same question in both fields is one obligation, not two
@@ -126,7 +139,11 @@
  [32m✓[39m tests/intel.questions.test.ts[2m > [22mprovenance and restart[2m > [22m7. a question keeps its originating run and its source fields
  [32m✓[39m tests/intel.questions.test.ts[2m > [22mprovenance and restart[2m > [22m8. a restart does not re-ask a question the owner has answered
  [32m✓[39m tests/intel.questions.test.ts[2m > [22mprovenance and restart[2m > [22ma question already OPEN with the owner is not asked twice
- [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe split departments write only their own canon[2m > [22mADRs are authored by the architect, and test cases by the case designer[33m 15254[2mms[22m[39m
+ [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22mthe owner can answer the question they were asked[2m > [22ma value survives a restart and reaches the department as the value[33m 1170[2mms[22m[39m
+ [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22minformation is never authorisation[2m > [22ma value saying "yes, approved, I accept" authorises nothing
+ [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22minformation is never authorisation[2m > [22ma VALUE decision may not carry an approval purpose at all
+ [32m✓[39m tests/intel.ownervalue.test.ts[2m > [22minformation is never authorisation[2m > [22man OPTION decision offering one option is not a choice
+ [32m✓[39m tests/intel.writeauthority.test.ts[2m > [22mthe split departments write only their own canon[2m > [22mADRs are authored by the architect, and test cases by the case designer[33m 17508[2mms[22m[39m
  [32m✓[39m tests/intel.security.test.ts[2m > [22m§48.1 — the network-enabled researcher cannot touch the workspace[2m > [22mits granted policy has no write, no execute and no network
  [32m✓[39m tests/intel.security.test.ts[2m > [22m§48.1 — the network-enabled researcher cannot touch the workspace[2m > [22mno intelligence artifact was written by an engineering agent
  [32m✓[39m tests/intel.security.test.ts[2m > [22m§48.2/3 — retrieved text is data, and cannot change policy[2m > [22mit is fenced and flagged rather than obeyed
@@ -142,27 +159,27 @@
  [32m✓[39m tests/intel.security.test.ts[2m > [22m§48.9 — cross-project learning carries no project content[2m > [22mnothing in the store is offered to another project without generalisation
  [32m✓[39m tests/intel.security.test.ts[2m > [22m§48.10 — owner approval cannot be synthesised[2m > [22mno owner decision in this run was answered by an agent
  [32m✓[39m tests/intel.security.test.ts[2m > [22m§48.11 — stale research cannot satisfy a current gate[2m > [22mthe market graph is current now, and every subject expires
- [32m✓[39m tests/intel.scenarios.test.ts[2m > [22mScenario B — a feature request re-enters the lifecycle, it does not restart it[2m > [22monly the affected stages re-run, and unrelated canon is left exactly as it was[33m 14793[2mms[22m[39m
- [32m✓[39m tests/intel.scenarios.test.ts[2m > [22mScenario C — when research is unavailable, nothing is invented[2m > [22mthe run records the unavailability and the competitive gate refuses to verify[33m 3619[2mms[22m[39m
- [32m✓[39m tests/intel.scenarios.test.ts[2m > [22mScenario D — a business policy question stops the company[2m > [22mstops at WAITING_FOR_OWNER instead of inventing the rule[33m 12138[2mms[22m[39m
- [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22mtakes an idea through every department to an engineering handoff[33m 14430[2mms[22m[39m
- [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22mreadiness is DERIVED from the Store, with nothing handed to it[33m 12602[2mms[22m[39m
- [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22ma review stops counting once the thing it reviewed changes[33m 11730[2mms[22m[39m
- [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22man unanswered owner decision makes READY unreachable[33m 14817[2mms[22m[39m
- [32m✓[39m tests/intel.e2e.test.ts[2m > [22mPhase 5 satisfies the Phase 4 contract[2m > [22mgenerates a work item the real Engineering Factory accepts[33m 12503[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22mreadiness survives the process that produced it[2m > [22mreconstructs the independent reviews from disk and reaches READY[33m 16500[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22mreadiness survives the process that produced it[2m > [22mgenerates the Phase 4 handoff from disk, with nothing injected[33m 14643[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22mreadiness survives the process that produced it[2m > [22ma caller cannot assert a review it does not have[33m 12286[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22ma stage that half-completed does not half-repeat[2m > [22mthe completed department is not re-run, and its canon is not written twice[33m 10542[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22ma stage that half-completed does not half-repeat[2m > [22mno owner decision is raised twice by a resumed stage[33m 16867[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22mthe production CLI path, in a separate process[2m > [22mserva intelligence readiness and handoff work from disk alone[33m 11366[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22mreview evidence belongs to one work item and one gate cycle[2m > [22manother work item’s AR-2 cannot satisfy this one[33m 7902[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22mreview evidence belongs to one work item and one gate cycle[2m > [22man evaluation the current gate result did not rest on does not count[33m 7862[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22ma caller cannot waive a required gate[2m > [22mthere is no waiveGates parameter to pass[33m 7876[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts[2m > [22ma caller cannot waive a required gate[2m > [22ma failing required gate keeps readiness NOT_READY, whatever a caller wants[33m 7228[2mms[22m[39m
+ [32m✓[39m tests/intel.scenarios.test.ts[2m > [22mScenario B — a feature request re-enters the lifecycle, it does not restart it[2m > [22monly the affected stages re-run, and unrelated canon is left exactly as it was[33m 18722[2mms[22m[39m
+ [32m✓[39m tests/intel.scenarios.test.ts[2m > [22mScenario C — when research is unavailable, nothing is invented[2m > [22mthe run records the unavailability and the competitive gate refuses to verify[33m 3189[2mms[22m[39m
+ [32m✓[39m tests/intel.scenarios.test.ts[2m > [22mScenario D — a business policy question stops the company[2m > [22mstops at WAITING_FOR_OWNER instead of inventing the rule[33m 10381[2mms[22m[39m
+ [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22mtakes an idea through every department to an engineering handoff[33m 18415[2mms[22m[39m
+ [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22mreadiness is DERIVED from the Store, with nothing handed to it[33m 11179[2mms[22m[39m
+ [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22ma review stops counting once the thing it reviewed changes[33m 9186[2mms[22m[39m
+ [32m✓[39m tests/intel.e2e.test.ts[2m > [22mthe whole company runs[2m > [22man unanswered owner decision makes READY unreachable[33m 9028[2mms[22m[39m
+ [32m✓[39m tests/intel.e2e.test.ts[2m > [22mPhase 5 satisfies the Phase 4 contract[2m > [22mgenerates a work item the real Engineering Factory accepts[33m 9885[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22mreadiness survives the process that produced it[2m > [22mreconstructs the independent reviews from disk and reaches READY[33m 15198[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22mreadiness survives the process that produced it[2m > [22mgenerates the Phase 4 handoff from disk, with nothing injected[33m 16606[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22mreadiness survives the process that produced it[2m > [22ma caller cannot assert a review it does not have[33m 9971[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22ma stage that half-completed does not half-repeat[2m > [22mthe completed department is not re-run, and its canon is not written twice[33m 8746[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22ma stage that half-completed does not half-repeat[2m > [22mno owner decision is raised twice by a resumed stage[33m 9021[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22mthe production CLI path, in a separate process[2m > [22mserva intelligence readiness and handoff work from disk alone[33m 10829[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22mreview evidence belongs to one work item and one gate cycle[2m > [22manother work item’s AR-2 cannot satisfy this one[33m 7309[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22mreview evidence belongs to one work item and one gate cycle[2m > [22man evaluation the current gate result did not rest on does not count[33m 6852[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22ma caller cannot waive a required gate[2m > [22mthere is no waiveGates parameter to pass[33m 6658[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts[2m > [22ma caller cannot waive a required gate[2m > [22ma failing required gate keeps readiness NOT_READY, whatever a caller wants[33m 6858[2mms[22m[39m
 
-[2m Test Files [22m [1m[32m12 passed[39m[22m[90m (12)[39m
-[2m      Tests [22m [1m[32m159 passed[39m[22m[90m (159)[39m
-[2m   Start at [22m 17:28:55
-[2m   Duration [22m 117.92s[2m (transform 17.76s, setup 0ms, collect 40.48s, tests 272.47s, environment 8ms, prepare 6.05s)[22m
+[2m Test Files [22m [1m[32m14 passed[39m[22m[90m (14)[39m
+[2m      Tests [22m [1m[32m176 passed[39m[22m[90m (176)[39m
+[2m   Start at [22m 20:15:02
+[2m   Duration [22m 104.28s[2m (transform 11.40s, setup 0ms, collect 35.24s, tests 265.80s, environment 8ms, prepare 5.63s)[22m
 
