@@ -8,7 +8,7 @@ MISSING rather than staying green. "Covered by tests" is not a status.
 |---|---|
 | Lifecycle coverage | 26/26 |
 | Gate coverage | 19/19 |
-| Offline tests | 1012 passed |
+| Offline tests | 1146 passed |
 | Rows covered | 33/33 |
 
 ## Verification types

@@ -1,0 +1,119 @@
+SERVA CODE 1.0 — LIVE ACCEPTANCE ATTEMPT
+========================================================================
+
+RESULT: BLOCKED — externally, on two named prerequisites this machine does not
+        have. No Producer model call was spent discovering that.
+
+The word ACCEPTED does not appear as a claim anywhere in this file, and
+`serva acceptance` therefore reports Live Acceptance as NOT_VERIFIED and refuses
+READY FOR OWNER USE. That is the correct outcome, not a workaround.
+
+------------------------------------------------------------------------
+WHAT RAN
+------------------------------------------------------------------------
+
+`npm run test:engineering-live` against this machine, on 2026-08-24.
+Full transcript: evidence/LIVE_ENGINEERING_PHASE6.txt
+
+  4 of 6 live assertions passed.
+
+  PASSED  the RECIPE boundary was qualified from what this machine proved
+  PASSED  the PRODUCER boundary was probed, and the engine was found and
+          version-identified in the guest
+  PASSED  the two boundaries are distinct, and neither authorizes the other
+  PASSED  no escape hatch was enabled, and nothing stood in for a Producer
+
+  BLOCKED the owner-facing status did not match the recipe qualification
+  BLOCKED the work item could not be implemented: the workspace refused to open
+
+------------------------------------------------------------------------
+WHY IT BLOCKED
+------------------------------------------------------------------------
+
+  ServaError: Cannot open an engineering workspace: Execution substrate is NONE,
+  and engineering write/execute authority requires HARD.
+  PLATFORM_PREREQUISITE_REQUIRED:
+    GUEST_ENGINE_AUTH   (An authenticated Claude Code in the execution environment)
+    SANDBOX_LAUNCHER    (A working sandbox launcher (claude-sandbox-runtime))
+
+Measured, on this machine:
+
+  boundary       SC-BOUNDARY-PRODUCER [wsl:Ubuntu → Ubuntu]
+  engine         /usr/bin/claude 2.1.231
+  authenticated  false
+  sandbox        claude-sandbox-runtime — NOT PRESENT
+  class          NONE
+  authority      REFUSED
+
+  Q-A … Q-K      NOT_RUN, all eleven
+
+The eleven adversarial qualification cases were not run. That is deliberate and it
+is the design: Serva does not dispatch a Producer into an unauthenticated engine
+to find out it is unauthenticated, and it does not measure a sandbox that is not
+installed.
+
+------------------------------------------------------------------------
+WHAT THIS DOES AND DOES NOT PROVE
+------------------------------------------------------------------------
+
+PROVED, live, on this machine:
+
+  - The two execution boundaries are real, distinct and separately measured.
+  - The Producer boundary is refused when its prerequisites are absent, with the
+    prerequisites named and each carrying a remedy.
+  - The refusal happens BEFORE a worktree is opened and before any model call.
+  - Nothing in the production path stands in for a Producer or for a review.
+
+NOT PROVED:
+
+  - A real HARD Producer writing code in WSL.
+  - A real independent Reviewer over that change.
+  - An accepted disposable commit.
+
+Those three require the two prerequisites above. Serva installs neither, copies no
+credentials into the guest, and never logs in on the owner's behalf — so this is
+the owner's step, not Serva's, and not mine.
+
+------------------------------------------------------------------------
+TO COMPLETE IT
+------------------------------------------------------------------------
+
+  Inside the WSL guest:
+
+    npm install -g @anthropic-ai/sandbox-runtime
+    claude                       # and sign in
+
+  Then, from the repository root:
+
+    npm run test:engineering-live
+
+The transcript will then either record an accepted commit or a refusal with its
+reason. Either is a real result; this file records the one that actually happened.
+
+------------------------------------------------------------------------
+A DEFECT THIS ATTEMPT FOUND
+------------------------------------------------------------------------
+
+Before this run, `serva machine doctor` reported:
+
+    Claude subscription..... READY
+    Sandbox................. READY
+
+on the same machine where the factory refused for exactly those two things. The
+doctor had invented a weaker second opinion: it read the presence of a credentials
+FILE as an authenticated SESSION, and it checked bubblewrap — which contains
+Serva's own recipes — while a Producer is contained by a different mechanism
+entirely.
+
+A green diagnostic line sitting above a refusal is the "UI green does not mean
+runtime green" failure this product exists to prevent, and it was in the newest
+code in it.
+
+Both are fixed. `CLAUDE_AUTH` now has no branch that returns READY from a file —
+the best it reaches is UNKNOWN, naming `serva engineering doctor` as the authority
+that asks the engine itself — and `SANDBOX_PRODUCER` is a separate check that says
+plainly that bubblewrap is not a substitute for it. The doctor now names the same
+two prerequisites the factory refused on.
+
+That agreement is the point of one company underneath, and the live run is what
+found it missing.

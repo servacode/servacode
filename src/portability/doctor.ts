@@ -84,8 +84,19 @@ export interface DoctorProbes {
     readonly installed: boolean;
     readonly location?: string;
     readonly version?: string;
-    /** Signed in on a subscription, which is the only supported route. */
-    readonly signedIn: boolean;
+    /**
+     * A credentials file is present in the guest.
+     *
+     * NOT the same as an authenticated session, and the difference is not academic: the
+     * live acceptance found this doctor reporting "Claude subscription READY" on a machine
+     * whose engine reported `authenticated: false`, and Phase 4 then refused the Producer.
+     * A green line above a refusal is the "UI green does not mean runtime green" failure
+     * this whole product refuses to make.
+     *
+     * The authoritative check is the engine's own health report, which Phase 4 performs.
+     * This one reports what a file tells it, and says so.
+     */
+    readonly credentialsFilePresent: boolean;
     /** False when the probe could not run. Absent means it did. */
     readonly measured?: boolean;
     readonly detail: string;
@@ -94,6 +105,16 @@ export interface DoctorProbes {
     readonly mechanism?: string;
     readonly version?: string;
     readonly available: boolean;
+    /**
+     * The launcher that contains a PRODUCER, which is a different mechanism from the one
+     * that contains a recipe.
+     *
+     * `bubblewrap` contains Serva's own build and test commands. A Producer runs inside
+     * the engine's own sandbox runtime, and having one is no evidence of the other —
+     * which is exactly what the live acceptance found when this doctor said READY and the
+     * factory refused for a missing `claude-sandbox-runtime`.
+     */
+    readonly producerLauncher?: string;
     /** False when the probe could not run. Absent means it did. */
     readonly measured?: boolean;
     readonly detail: string;
@@ -208,7 +229,7 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
 
   const claude = safe(() => input.probes.claude(), {
     installed: false,
-    signedIn: false,
+    credentialsFilePresent: false,
     detail: 'the probe did not run',
   });
   checks.push({
@@ -235,23 +256,36 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
   checks.push({
     id: 'CLAUDE_AUTH',
     label: 'Claude subscription',
+    /*
+     * NEVER READY FROM A FILE.
+     *
+     * A credentials file present is evidence that somebody signed in once, on some
+     * machine, at some point. It is not evidence of a session the engine will accept now —
+     * and reporting READY from it produced exactly the failure this product exists to
+     * prevent: a green diagnostic line sitting above a refusal from the factory.
+     *
+     * So the best this check reaches is UNKNOWN, and it names the command that actually
+     * knows. There is no branch here that returns READY.
+     */
     state:
-      claude.measured === false
-        ? CheckState.UNKNOWN
-        : claude.signedIn
-          ? CheckState.READY
-          : CheckState.ACTION_REQUIRED,
-    /* Never the account, the email or the organisation. Signed in is the whole fact. */
+      claude.measured === false || !claude.credentialsFilePresent
+        ? claude.measured === false
+          ? CheckState.UNKNOWN
+          : CheckState.ACTION_REQUIRED
+        : CheckState.UNKNOWN,
+    /* Never the account, the email or the organisation. */
     detail:
-      claude.measured === false ? 'not measured' : claude.signedIn ? 'signed in' : 'not signed in',
-    ...(claude.measured === false
-      ? { remedy: 'The guest did not answer, so the sign-in state could not be read.' }
-      : claude.signedIn
-        ? {}
-        : {
-            remedy:
-              'Run `claude` in the guest and sign in. Serva uses your Claude subscription; it never creates an API key and never copies credentials from another machine.',
-          }),
+      claude.measured === false
+        ? 'not measured'
+        : claude.credentialsFilePresent
+          ? 'a credentials file is present; an authenticated SESSION is not established here'
+          : 'no credentials file in the guest',
+    remedy:
+      claude.measured === false
+        ? 'The guest did not answer, so nothing about sign-in could be read.'
+        : claude.credentialsFilePresent
+          ? 'Run `serva engineering doctor` for the authoritative answer: it asks the engine itself. This check only sees a file.'
+          : 'Run `claude` in the guest and sign in. Serva uses your Claude subscription; it never creates an API key and never copies credentials from another machine.',
     blocksEngineering: true,
   });
 
@@ -261,7 +295,7 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
   });
   checks.push({
     id: 'SANDBOX',
-    label: 'Sandbox',
+    label: 'Sandbox (recipes)',
     state:
       sandbox.measured === false
         ? CheckState.UNKNOWN
@@ -282,6 +316,32 @@ export function machineDoctor(input: DoctorInput): DoctorReport {
             remedy:
               'Install the sandbox mechanism inside the guest (`bubblewrap`). Without it, engineering stays read-only rather than running unconfined.',
           }),
+    blocksEngineering: true,
+  });
+
+  /*
+   * The PRODUCER launcher, separately. Two boundaries, two mechanisms, and satisfying one
+   * is no evidence about the other — which is what the live acceptance demonstrated.
+   */
+  checks.push({
+    id: 'SANDBOX_PRODUCER',
+    label: 'Sandbox (producer)',
+    state:
+      sandbox.measured === false
+        ? CheckState.UNKNOWN
+        : sandbox.producerLauncher === undefined
+          ? CheckState.ACTION_REQUIRED
+          : CheckState.READY,
+    detail:
+      sandbox.measured === false
+        ? 'no WSL guest responded'
+        : (sandbox.producerLauncher ?? 'claude-sandbox-runtime was not found in the guest'),
+    ...(sandbox.measured === false || sandbox.producerLauncher === undefined
+      ? {
+          remedy:
+            'Install the engine sandbox runtime inside the guest: `npm install -g @anthropic-ai/sandbox-runtime`. It is what contains a Producer, and bubblewrap is not a substitute for it.',
+        }
+      : {}),
     blocksEngineering: true,
   });
 

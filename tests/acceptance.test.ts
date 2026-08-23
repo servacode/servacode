@@ -128,10 +128,33 @@ describe('the other lines are computed from files, not asserted', () => {
     expect(line?.detail).toContain('P6-DOCS');
   });
 
-  it('live acceptance needs captured evidence of an accepted chain', () => {
-    const claimed = pkg({ 'evidence/LIVE_SERVA_ACCEPTANCE.txt': 'it all went fine\n' });
-    /* A log that does not record an acceptance is not evidence of one. */
-    expect(lineFor(claimed, 'Live Acceptance')?.state).toBe(AcceptanceState.NOT_VERIFIED);
+  it('live acceptance needs a declared RESULT, not a word in the prose', () => {
+    /*
+     * The check was `includes('ACCEPTED')`, and the real evidence file — which records a
+     * BLOCKED run — contains the sentence "the word ACCEPTED does not appear as a claim
+     * anywhere in this file". It passed. A presence-of-string test is satisfied by a
+     * denial of the thing it looks for, which is the third time that shape has bitten in
+     * this module.
+     */
+    const prose = pkg({
+      'evidence/LIVE_SERVA_ACCEPTANCE.txt': [
+        'RESULT: BLOCKED',
+        '',
+        'The word ACCEPTED does not appear as a claim here.',
+        'No accepted commit exists.',
+        '',
+      ].join('\n'),
+    });
+    expect(lineFor(prose, 'Live Acceptance')?.state).toBe(AcceptanceState.NOT_VERIFIED);
+    expect(lineFor(prose, 'Live Acceptance')?.detail).toContain('RESULT: BLOCKED');
+
+    const undeclared = pkg({ 'evidence/LIVE_SERVA_ACCEPTANCE.txt': 'it all went fine\n' });
+    expect(lineFor(undeclared, 'Live Acceptance')?.detail).toContain('declares no RESULT');
+
+    const accepted = pkg({
+      'evidence/LIVE_SERVA_ACCEPTANCE.txt': 'RESULT: ACCEPTED\n\nA commit was accepted.\n',
+    });
+    expect(lineFor(accepted, 'Live Acceptance')?.state).toBe(AcceptanceState.PASS);
   });
 
   it('the HARD line describes the package, and never claims a machine is qualified', () => {

@@ -4,17 +4,17 @@
 
 
 > serva-code@0.2.0 format:check
-> prettier --check "{src,tests,scripts}/**/*.{ts,mjs}"
+> prettier --check "{src,tests,scripts}/**/*.{ts,mjs}" "extension/src/**/*.ts"
 
 Checking formatting...
 All matched files use Prettier code style!
 
 > serva-code@0.2.0 lint
-> eslint src tests scripts
+> eslint src tests scripts extension/src
 
 
 > serva-code@0.2.0 typecheck
-> tsc --noEmit
+> tsc --noEmit && tsc --noEmit -p extension/tsconfig.json
 
 
 > serva-code@0.2.0 test
@@ -23,186 +23,178 @@ All matched files use Prettier code style!
 
 [1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/SEVACODE[39m
 
- [32m✓[39m tests/eng.substrate.test.ts [2m([22m[2m63 tests[22m[2m)[22m[33m 1370[2mms[22m[39m
-   [33m[2m✓[22m[39m the simulated substrate is deterministic and claims no containment[2m > [22ma command past its deadline is killed and reported as timed out [33m345[2mms[22m[39m
- [32m✓[39m tests/intel.invariants.test.ts [2m([22m[2m54 tests[22m[2m)[22m[90m 165[2mms[22m[39m
- [32m✓[39m tests/ai.integrity.test.ts [2m([22m[2m50 tests[22m[2m)[22m[33m 8799[2mms[22m[39m
-   [33m[2m✓[22m[39m B1 — the grant Serva records is the grant the engine is given[2m > [22mtwo concurrent runs cannot read each other prompt files [33m691[2mms[22m[39m
-   [33m[2m✓[22m[39m B3A — every terminal run has an immutable AgentRunRecord[2m > [22memits a record for INVALID_OUTPUT and for EVIDENCE_VIOLATION [33m479[2mms[22m[39m
-   [33m[2m✓[22m[39m B3B — a tool call is not a tool result[2m > [22mrecords the full REQUESTED / DECIDED / RESULT sequence [33m325[2mms[22m[39m
-   [33m[2m✓[22m[39m B3B — a tool call is not a tool result[2m > [22mthe same fact observed twice is recorded once [33m358[2mms[22m[39m
-   [33m[2m✓[22m[39m B4 — Serva validates the role-specific result itself[2m > [22ma valid envelope with an invalid role result triggers one repair attempt [33m343[2mms[22m[39m
-   [33m[2m✓[22m[39m B4 — Serva validates the role-specific result itself[2m > [22ma second invalid role result is INVALID_OUTPUT [33m352[2mms[22m[39m
-   [33m[2m✓[22m[39m B4 — Serva validates the role-specific result itself[2m > [22ma structurally perfect envelope with the wrong payload type is rejected [33m426[2mms[22m[39m
-   [33m[2m✓[22m[39m B4 — Serva validates the role-specific result itself[2m > [22ma no-tool agent still validates its role result [33m343[2mms[22m[39m
- [32m✓[39m tests/ai.runtime.test.ts [2m([22m[2m56 tests[22m[2m)[22m[33m 4751[2mms[22m[39m
-   [33m[2m✓[22m[39m AgentRuntime[2m > [22mretries exactly once on invalid output, then gives up [33m405[2mms[22m[39m
-   [33m[2m✓[22m[39m AgentRuntime[2m > [22ma correct refusal is recorded as REFUSED, not as a failure [33m319[2mms[22m[39m
-   [33m[2m✓[22m[39m AgentRuntime[2m > [22man interrupted run leaves an incomplete trace and is re-dispatchable from the store [33m361[2mms[22m[39m
-   [33m[2m✓[22m[39m AgentRuntime[2m > [22mevery run gets its own session, never a shared one [33m400[2mms[22m[39m
- [32m✓[39m tests/intel.researchtrust.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 10163[2mms[22m[39m
-   [33m[2m✓[22m[39m a hostile captured source never enters trusted context[2m > [22mA/B/J. the persisted bundle marks it UNTRUSTED and the prompt fences it there [33m1627[2mms[22m[39m
-   [33m[2m✓[22m[39m an obligation is discharged by verified evidence, never by retrieval alone[2m > [22mC. the researcher completes and, with no verifier, the question stays OPEN [33m886[2mms[22m[39m
-   [33m[2m✓[22m[39m an obligation is discharged by verified evidence, never by retrieval alone[2m > [22mD. NOT_SUPPORTED does not fulfil the obligation, and the requester does not resume [33m1262[2mms[22m[39m
-   [33m[2m✓[22m[39m an obligation is discharged by verified evidence, never by retrieval alone[2m > [22mE/F. SUPPORTED resolves it, and the verification names a real completed 063 run [33m1717[2mms[22m[39m
-   [33m[2m✓[22m[39m research reuse is exact and current, or it is not reuse[2m > [22mG. identical words under a different ResearchRequest satisfy nothing [33m1436[2mms[22m[39m
-   [33m[2m✓[22m[39m research reuse is exact and current, or it is not reuse[2m > [22mH. expired evidence for the right request satisfies nothing either [33m1370[2mms[22m[39m
-   [33m[2m✓[22m[39m a restart between retrieval and verification continues, and refetches nothing[2m > [22mI. the second process verifies the persisted capture rather than fetching again [33m1785[2mms[22m[39m
- [32m✓[39m tests/intel.governance.test.ts [2m([22m[2m49 tests[22m[2m)[22m[33m 7791[2mms[22m[39m
-   [33m[2m✓[22m[39m re-entry re-opens the lifecycle, idempotently[2m > [22mstages that re-ran but whose gate has not accepted are still outstanding [33m462[2mms[22m[39m
-   [33m[2m✓[22m[39m re-entry re-opens the lifecycle, idempotently[2m > [22ma change is carried through once its stages re-ran and its gates accepted [33m384[2mms[22m[39m
- [32m✓[39m tests/blockers.test.ts [2m([22m[2m46 tests[22m[2m)[22m[33m 1070[2mms[22m[39m
- [32m✓[39m tests/intel.authority.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 2263[2mms[22m[39m
-   [33m[2m✓[22m[39m research nobody could have performed is recorded as not performed[2m > [22ma discovery run claiming interviews has the claim overridden, not believed [33m386[2mms[22m[39m
- [32m✓[39m tests/eng.sandboxvalidity.test.ts [2m([22m[2m42 tests[22m[2m)[22m[33m 17066[2mms[22m[39m
-   [33m[2m✓[22m[39m a rejected profile stops the Producer before any model call[2m > [22mrefuses, records no run, and spends nothing [33m2779[2mms[22m[39m
-   [33m[2m✓[22m[39m a rejected profile stops the Producer before any model call[2m > [22mthe same dispatch proceeds on an engine that accepts the profile [33m4005[2mms[22m[39m
-   [33m[2m✓[22m[39m a worktree git pointer works in the environment that will use it[2m > [22mis relative, and uses forward slashes [33m3190[2mms[22m[39m
-   [33m[2m✓[22m[39m the verified change set names the blob git will actually store[2m > [22mmatches git under core.autocrlf, and integrates [33m6977[2mms[22m[39m
- [32m✓[39m tests/intel.obligations.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 7475[2mms[22m[39m
-   [33m[2m✓[22m[39m a research obligation is consumed, not merely recorded[2m > [22mthe exact request is fulfilled, the question is resolved, and the requester resumes [33m1803[2mms[22m[39m
-   [33m[2m✓[22m[39m a research obligation is consumed, not merely recorded[2m > [22man unfulfillable request BLOCKS with the real reason, and invents nothing [33m816[2mms[22m[39m
-   [33m[2m✓[22m[39m a research obligation is consumed, not merely recorded[2m > [22mrestarting mid-obligation resumes, and raises no second request [33m1900[2mms[22m[39m
-   [33m[2m✓[22m[39m an upstream obligation drives real lifecycle control[2m > [22mthe owing department runs, the question resolves, and the downstream one resumes [33m1154[2mms[22m[39m
-   [33m[2m✓[22m[39m an upstream obligation drives real lifecycle control[2m > [22mrestarting mid-obligation resumes, and does not duplicate the upstream run [33m1217[2mms[22m[39m
-   [33m[2m✓[22m[39m an upstream obligation drives real lifecycle control[2m > [22man obligation nobody can satisfy BLOCKS rather than waiting forever [33m581[2mms[22m[39m
- [32m✓[39m tests/intel.slice.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 14565[2mms[22m[39m
-   [33m[2m✓[22m[39m the intelligence execution core runs the upstream company[2m > [22mruns each department as a separate governed run, and reaches the Requirements Gate [33m3195[2mms[22m[39m
-   [33m[2m✓[22m[39m the intelligence execution core runs the upstream company[2m > [22ma profile that excludes a stage records the exclusion, it does not omit it [33m439[2mms[22m[39m
-   [33m[2m✓[22m[39m the intelligence execution core runs the upstream company[2m > [22ma research-free discovery is honest about it rather than claiming interviews [33m2818[2mms[22m[39m
-   [33m[2m✓[22m[39m an owner decision is control flow, not advice[2m > [22mstops the lifecycle, persists the state, and refuses to resume without a real answer [33m2939[2mms[22m[39m
-   [33m[2m✓[22m[39m an owner decision is control flow, not advice[2m > [22mresumes from the STORE, with no orchestrator and no conversation carried over [33m2989[2mms[22m[39m
-   [33m[2m✓[22m[39m the substrate refuses before it dispatches[2m > [22man open owner decision is visible without running anything [33m1833[2mms[22m[39m
- [32m✓[39m tests/ai.engine.test.ts [2m([22m[2m46 tests[22m[2m)[22m[90m 127[2mms[22m[39m
- [32m✓[39m tests/gates.authority.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 2587[2mms[22m[39m
- [32m✓[39m tests/ai.failure.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 6710[2mms[22m[39m
-   [33m[2m✓[22m[39m every engine failure has a name and a route[2m > [22mmaps INTERRUPTED to FAILED without throwing [33m643[2mms[22m[39m
-   [33m[2m✓[22m[39m malformed and invalid output[2m > [22mmalformed JSON never reaches project state [33m342[2mms[22m[39m
-   [33m[2m✓[22m[39m malformed and invalid output[2m > [22ma missing required envelope field is rejected [33m740[2mms[22m[39m
-   [33m[2m✓[22m[39m malformed and invalid output[2m > [22man empty observations array is accepted, an absent one is not [33m427[2mms[22m[39m
-   [33m[2m✓[22m[39m malformed and invalid output[2m > [22mexactly one repair attempt is made, never a loop [33m535[2mms[22m[39m
-   [33m[2m✓[22m[39m malformed and invalid output[2m > [22mthe second attempt succeeding is recorded as a success [33m540[2mms[22m[39m
-   [33m[2m✓[22m[39m an interrupted run is detectable and re-dispatchable[2m > [22mrecovery re-dispatches from the store, not from engine memory [33m717[2mms[22m[39m
-   [33m[2m✓[22m[39m an interrupted run is detectable and re-dispatchable[2m > [22mthe first run remains permanently visible after re-dispatch [33m686[2mms[22m[39m
- [32m✓[39m tests/ai.closure.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 7984[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m2. terminal event committed with no record is detected and repaired [33m603[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m2b. a real process restart performs the repair before anything reads the store [33m481[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m3. recovery is a no-op when the record already exists [33m496[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m4. recovery run twice still yields exactly one record [33m512[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m5. a record that disagrees with the log is an integrity failure [33m535[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m6. a recovered record binds to the final trace head [33m496[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m7. a recovered record preserves every field the canonical record requires [33m433[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22ma second finalization attempt after a crash cannot append a second terminal event [33m447[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22mthe record is a pure function of the log, so it derives identically every time [33m427[2mms[22m[39m
-   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22mevery terminal outcome leaves a recoverable record [33m1056[2mms[22m[39m
-   [33m[2m✓[22m[39m F2 — a decision is never recorded before the provider makes one[2m > [22m1. a request with no result leaves REQUESTED and nothing else [33m488[2mms[22m[39m
-   [33m[2m✓[22m[39m F2 — a decision is never recorded before the provider makes one[2m > [22m2. a successful result yields REQUESTED, DECIDED(allowed), SUCCEEDED [33m495[2mms[22m[39m
-   [33m[2m✓[22m[39m F2 — a decision is never recorded before the provider makes one[2m > [22m5. a denied call never leaves allowed=true anywhere in the trace [33m585[2mms[22m[39m
- [32m✓[39m tests/ai.security.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 7210[2mms[22m[39m
-   [33m[2m✓[22m[39m untrusted text cannot become a command[2m > [22mevery attack string travels as one inert argv element [33m3609[2mms[22m[39m
-   [33m[2m✓[22m[39m untrusted text cannot become a command[2m > [22mthe request is passed as data on stdin, never in the command line [33m352[2mms[22m[39m
-   [33m[2m✓[22m[39m an agent cannot obtain capability it was not granted[2m > [22mno Phase 3 run receives a write, exec, MCP or browser tool [33m1660[2mms[22m[39m
-   [33m[2m✓[22m[39m credentials never enter the project[2m > [22mthe engine status view carries no identity and no secret [33m318[2mms[22m[39m
-   [33m[2m✓[22m[39m one project cannot see another[2m > [22meach runtime is pinned to its own project root [33m436[2mms[22m[39m
- [32m✓[39m tests/intel.research.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 1115[2mms[22m[39m
-   [33m[2m✓[22m[39m captured external content is data, never instruction[2m > [22man injected instruction is fenced, flagged, and changes nothing [33m474[2mms[22m[39m
-   [33m[2m✓[22m[39m the advantage board derives from canon and expires with it[2m > [22man expired finding makes its differentiator and position stale [33m309[2mms[22m[39m
- [32m✓[39m tests/intel.routing.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 4297[2mms[22m[39m
-   [33m[2m✓[22m[39m A. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mthe exact fact is handed back and the retry succeeds [33m785[2mms[22m[39m
-   [33m[2m✓[22m[39m A. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mB. asking again after being given the fact fails explicitly, and does not loop [33m527[2mms[22m[39m
-   [33m[2m✓[22m[39m C. research capability is not the presence of a gateway[2m > [22man ordinary department gains nothing from a globally available gateway [33m342[2mms[22m[39m
-   [33m[2m✓[22m[39m C. research capability is not the presence of a gateway[2m > [22ma registered research authority makes the route real, and the asker still retrieves nothing [33m338[2mms[22m[39m
-   [33m[2m✓[22m[39m D. a RESEARCH route becomes a governed obligation[2m > [22ma research-authorised department records a request and retrieves nothing itself [33m302[2mms[22m[39m
-   [33m[2m✓[22m[39m F. a route survives the process that made it[2m > [22ma reopened Store finds the obligation and does not raise a second [33m482[2mms[22m[39m
-   [33m[2m✓[22m[39m G. the field-choice invariant holds through the runner[2m > [22mthe same question in either field produces the same operational route [33m486[2mms[22m[39m
- [32m✓[39m tests/ai.orchestration.test.ts [2m([22m[2m34 tests[22m[2m)[22m[33m 5163[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mruns the full flow and queues the validated plan [33m541[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22meach dispatched step is a separate run with its own session [33m779[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mhalts when classification does not complete [33m319[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mrejects an invalid plan and does not repair it [33m505[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mthe classifier is given the owner text as UNTRUSTED data [33m435[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mthe planner is told only about enabled agents [33m559[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mno dispatched run is granted a write tool [33m454[2mms[22m[39m
-   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22man engine failure during planning leaves the classification intact [33m649[2mms[22m[39m
- [32m✓[39m tests/intel.writeauthority.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 12845[2mms[22m[39m
-   [33m[2m✓[22m[39m the write boundary itself refuses, atomically[2m > [22mrefuses the unauthorised write and commits NOTHING [33m403[2mms[22m[39m
-   [33m[2m✓[22m[39m the write boundary itself refuses, atomically[2m > [22mthe refusal names the department, the agent and what it may write [33m326[2mms[22m[39m
-   [33m[2m✓[22m[39m the split departments write only their own canon[2m > [22mADRs are authored by the architect, and test cases by the case designer [33m11546[2mms[22m[39m
- [32m✓[39m tests/intel.proposalruling.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 2876[2mms[22m[39m
-   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mAPPROVE: the authority rules, Serva persists, accept() takes it [33m601[2mms[22m[39m
-   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mREJECT: the same path refuses acceptance, and the proposal stays ASSESSED [33m404[2mms[22m[39m
-   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mDEFER: a real answer, and still not an acceptance [33m382[2mms[22m[39m
-   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mthe caller cannot supply the disposition — there is no parameter to supply it in [33m560[2mms[22m[39m
-   [33m[2m✓[22m[39m 3. the write boundary is what makes the ruling un-forgeable[2m > [22ma department that does not own the family cannot write the decision [33m313[2mms[22m[39m
-   [33m[2m✓[22m[39m 4. the ruling is durable[2m > [22msurvives the process that made it, with no chat history [33m409[2mms[22m[39m
- [32m✓[39m tests/eng.dispatch.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 69164[2mms[22m[39m
-   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mruns in its own worktree with a write grant the contract allows [33m3070[2mms[22m[39m
-   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mthe sandbox profile Serva generated is passed to the invocation [33m4117[2mms[22m[39m
-   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mthe capability grant is recorded on the run, with its basis [33m2730[2mms[22m[39m
-   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22man unqualified substrate refuses before any model call is made [33m1783[2mms[22m[39m
-   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mno reviewer means no dispatch, and no model call [33m2540[2mms[22m[39m
-   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22ma grant wider than the contract is refused by the runtime itself [33m1332[2mms[22m[39m
-   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22mis dispatched with no write tool, into its own run [33m5140[2mms[22m[39m
-   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22msees the evidence and the diff, and not the Producer reasoning [33m5400[2mms[22m[39m
-   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22ma verdict about a different ChangeSet is refused, not recorded [33m4515[2mms[22m[39m
-   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22ma rejection with no findings is not a usable verdict [33m3961[2mms[22m[39m
-   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22man agent reviewing its own work is refused [33m1827[2mms[22m[39m
-   [33m[2m✓[22m[39m a reviewer verdict must be traceable to a real run[2m > [22ma runRef naming no run is refused outright [33m1141[2mms[22m[39m
-   [33m[2m✓[22m[39m a reviewer verdict must be traceable to a real run[2m > [22ma run by the wrong agent is refused [33m3899[2mms[22m[39m
-   [33m[2m✓[22m[39m a reviewer verdict must be traceable to a real run[2m > [22ma run that had write tools is not a review [33m1981[2mms[22m[39m
-   [33m[2m✓[22m[39m a governed change goes all the way to an accepted commit[2m > [22mProducer edits, runtime measures, reviewer judges, Serva integrates [33m11280[2mms[22m[39m
-   [33m[2m✓[22m[39m a governed change goes all the way to an accepted commit[2m > [22ma Producer that says the tests pass does not make them pass [33m6480[2mms[22m[39m
-   [33m[2m✓[22m[39m a governed change goes all the way to an accepted commit[2m > [22ma reviewer rejection stops the change at the gate [33m7965[2mms[22m[39m
- [32m✓[39m tests/workflow.lifecycle.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 1453[2mms[22m[39m
- [32m✓[39m tests/eng.binding.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 62831[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mWSL qualification with a native Windows engine is refused [33m4450[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mdistribution A does not authorize distribution B [33m2698[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mengine version X does not authorize engine version Y [33m3361[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22ma changed sandbox profile invalidates the prior qualification [33m2896[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22ma recipe boundary does not authorize a Producer [33m2756[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22ma simulated boundary is refused unless a test explicitly opts in [33m4225[2mms[22m[39m
-   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mthe exact qualified boundary is eligible [33m2331[2mms[22m[39m
-   [33m[2m✓[22m[39m dispatch derives the boundary from the runtime it is about to use[2m > [22ma runtime whose engine sits elsewhere is refused, and nothing is spawned [33m2024[2mms[22m[39m
-   [33m[2m✓[22m[39m dispatch derives the boundary from the runtime it is about to use[2m > [22mCAPABILITY_BOUND records the boundary fingerprint [33m2383[2mms[22m[39m
-   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22mrefuses before any worktree, model call or command when the boundary is not HARD [33m1107[2mms[22m[39m
-   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22mdispatches a real Producer run, measures, reviews, and accepts an exact commit [33m9808[2mms[22m[39m
-   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22ma failed measurement drives rework and stops at the configured limit [33m13511[2mms[22m[39m
-   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22mthe reviewer verdict the gate consumes is a persisted one [33m10850[2mms[22m[39m
- [32m✓[39m tests/eng.workspace.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 68825[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva owns Git, and the verb set is closed[2m > [22mrefuses every publishing and history-rewriting verb [33m1593[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mcreates an isolated worktree on its own branch [33m3415[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mediting the worktree leaves the primary checkout byte-clean [33m3125[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mtwo attempts get separate worktrees that cannot see each other [33m3635[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22ma workspace id that could traverse is refused before it becomes a path [33m1213[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mthe same attempt cannot be opened twice [33m1790[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mthe protected paths include the checkout, the store and git metadata [33m1221[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mremoval is recorded and the directory is gone [33m2190[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22mobserves a modification without being told about it [33m2721[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22mobserves an untracked addition, which a diff against a commit would miss [33m3253[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma change outside the declared scope is a finding [33m3370[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma change inside the declared scope is conformant [33m3894[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma credential-shaped file is a finding whatever the scope allows [33m3775[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22man unauthorized lockfile change is a finding [33m3731[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22man unexpected binary is a finding, because nobody can review it [33m4919[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma symlink is a finding, because it can redirect a later write [33m2287[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22mediting the code produces a different ChangeSet identity [33m7263[2mms[22m[39m
-   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22ma clean project with no workspaces reports nothing [33m2101[2mms[22m[39m
-   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22ma dirty primary checkout is reported and is never self-repairable [33m2863[2mms[22m[39m
-   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22ma missing worktree directory is detected as its own condition [33m5621[2mms[22m[39m
-   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22man external edit to a verified workspace makes its verification stale [33m4756[2mms[22m[39m
- [32m✓[39m tests/intel.security.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 11906[2mms[22m[39m
- [32m✓[39m tests/store.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 894[2mms[22m[39m
- [32m✓[39m tests/intel.ownervalue.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 706[2mms[22m[39m
-   [33m[2m✓[22m[39m the owner can answer the question they were asked[2m > [22ma value survives a restart and reaches the department as the value [33m654[2mms[22m[39m
- [32m✓[39m tests/intel.questions.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 390[2mms[22m[39m
- [32m✓[39m tests/workflow.integrity.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 1048[2mms[22m[39m
- [32m✓[39m tests/gates.compose.test.ts [2m([22m[2m24 tests[22m[2m)[22m[90m 34[2mms[22m[39m
- [32m✓[39m tests/gates.mapVerifier.test.ts [2m([22m[2m17 tests[22m[2m)[22m[90m 29[2mms[22m[39m
- [32m✓[39m tests/validity.isolation.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 463[2mms[22m[39m
- [32m✓[39m tests/intel.scenarios.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 27868[2mms[22m[39m
-   [33m[2m✓[22m[39m Scenario B — a feature request re-enters the lifecycle, it does not restart it[2m > [22monly the affected stages re-run, and unrelated canon is left exactly as it was [33m12644[2mms[22m[39m
-   [33m[2m✓[22m[39m Scenario C — when research is unavailable, nothing is invented[2m > [22mthe run records the unavailability and the competitive gate refuses to verify [33m2946[2mms[22m[39m
-   [33m[2m✓[22m[39m Scenario D — a business policy question stops the company[2m > [22mstops at WAITING_FOR_OWNER instead of inventing the rule [33m12275[2mms[22m[39m
+ [32m✓[39m tests/eng.substrate.test.ts [2m([22m[2m63 tests[22m[2m)[22m[33m 1272[2mms[22m[39m
+   [33m[2m✓[22m[39m the simulated substrate is deterministic and claims no containment[2m > [22ma command past its deadline is killed and reported as timed out [33m352[2mms[22m[39m
+ [32m✓[39m tests/portability.test.ts [2m([22m[2m44 tests[22m[2m)[22m[33m 7225[2mms[22m[39m
+   [33m[2m✓[22m[39m a backup is a verified, bounded, credential-free bundle[2m > [22mcaptures project truth and git identity, and verifies itself [33m385[2mms[22m[39m
+   [33m[2m✓[22m[39m a backup is a verified, bounded, credential-free bundle[2m > [22mexcludes credentials, regenerable trees and machine-bound truth, and says so [33m328[2mms[22m[39m
+   [33m[2m✓[22m[39m a backup is a verified, bounded, credential-free bundle[2m > [22mrefuses to overwrite an existing bundle, and leaves nothing behind on failure [33m390[2mms[22m[39m
+   [33m[2m✓[22m[39m a corrupt or tampered backup is refused, not repaired[2m > [22ma truncated file fails its digest and the bundle is refused [33m561[2mms[22m[39m
+   [33m[2m✓[22m[39m a corrupt or tampered backup is refused, not repaired[2m > [22ma tampered manifest fails its own integrity digest [33m566[2mms[22m[39m
+   [33m[2m✓[22m[39m restore looks before it touches anything[2m > [22mrestores project truth, git history and owner decisions to a new location [33m478[2mms[22m[39m
+   [33m[2m✓[22m[39m restore looks before it touches anything[2m > [22mrestoring twice into fresh locations produces identical inventories [33m362[2mms[22m[39m
+   [33m[2m✓[22m[39m restore looks before it touches anything[2m > [22man unverified backup is never restored [33m431[2mms[22m[39m
+   [33m[2m✓[22m[39m the doctor inspects, and never reports READY for something it could not measure[2m > [22mreports a backup that does not verify [33m1138[2mms[22m[39m
+ [32m✓[39m tests/ai.integrity.test.ts [2m([22m[2m50 tests[22m[2m)[22m[33m 8592[2mms[22m[39m
+   [33m[2m✓[22m[39m B1 — the grant Serva records is the grant the engine is given[2m > [22mtwo concurrent runs cannot read each other prompt files [33m585[2mms[22m[39m
+   [33m[2m✓[22m[39m B3A — every terminal run has an immutable AgentRunRecord[2m > [22memits a record for INVALID_OUTPUT and for EVIDENCE_VIOLATION [33m512[2mms[22m[39m
+   [33m[2m✓[22m[39m B3B — a tool call is not a tool result[2m > [22mrecords the full REQUESTED / DECIDED / RESULT sequence [33m318[2mms[22m[39m
+   [33m[2m✓[22m[39m B3B — a tool call is not a tool result[2m > [22mrecords a denial with its error class [33m339[2mms[22m[39m
+   [33m[2m✓[22m[39m B3B — a tool call is not a tool result[2m > [22ma call that never returned leaves no RESULT event [33m743[2mms[22m[39m
+   [33m[2m✓[22m[39m B3B — a tool call is not a tool result[2m > [22mthe same fact observed twice is recorded once [33m405[2mms[22m[39m
+ [32m✓[39m tests/intel.invariants.test.ts [2m([22m[2m54 tests[22m[2m)[22m[90m 98[2mms[22m[39m
+ [32m✓[39m tests/intel.governance.test.ts [2m([22m[2m49 tests[22m[2m)[22m[33m 7939[2mms[22m[39m
+   [33m[2m✓[22m[39m an owner approval is bound to the change it approves[2m > [22man unrelated answered decision cannot approve it [33m305[2mms[22m[39m
+   [33m[2m✓[22m[39m re-entry re-opens the lifecycle, idempotently[2m > [22mthe stages from the re-entry point are no longer complete, and their gates are dropped [33m519[2mms[22m[39m
+   [33m[2m✓[22m[39m re-entry re-opens the lifecycle, idempotently[2m > [22mapplying the same change twice changes nothing the second time [33m818[2mms[22m[39m
+   [33m[2m✓[22m[39m re-entry re-opens the lifecycle, idempotently[2m > [22man approved change cannot be completed by claim [33m361[2mms[22m[39m
+ [32m✓[39m tests/intel.researchtrust.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 10746[2mms[22m[39m
+   [33m[2m✓[22m[39m a hostile captured source never enters trusted context[2m > [22mA/B/J. the persisted bundle marks it UNTRUSTED and the prompt fences it there [33m2011[2mms[22m[39m
+   [33m[2m✓[22m[39m an obligation is discharged by verified evidence, never by retrieval alone[2m > [22mC. the researcher completes and, with no verifier, the question stays OPEN [33m1042[2mms[22m[39m
+   [33m[2m✓[22m[39m an obligation is discharged by verified evidence, never by retrieval alone[2m > [22mD. NOT_SUPPORTED does not fulfil the obligation, and the requester does not resume [33m1344[2mms[22m[39m
+   [33m[2m✓[22m[39m an obligation is discharged by verified evidence, never by retrieval alone[2m > [22mE/F. SUPPORTED resolves it, and the verification names a real completed 063 run [33m2386[2mms[22m[39m
+   [33m[2m✓[22m[39m research reuse is exact and current, or it is not reuse[2m > [22mG. identical words under a different ResearchRequest satisfy nothing [33m1010[2mms[22m[39m
+   [33m[2m✓[22m[39m research reuse is exact and current, or it is not reuse[2m > [22mH. expired evidence for the right request satisfies nothing either [33m1179[2mms[22m[39m
+   [33m[2m✓[22m[39m a restart between retrieval and verification continues, and refetches nothing[2m > [22mI. the second process verifies the persisted capture rather than fetching again [33m1679[2mms[22m[39m
+ [32m✓[39m tests/blockers.test.ts [2m([22m[2m46 tests[22m[2m)[22m[33m 1007[2mms[22m[39m
+ [32m✓[39m tests/ai.runtime.test.ts [2m([22m[2m56 tests[22m[2m)[22m[33m 4306[2mms[22m[39m
+   [33m[2m✓[22m[39m AgentRuntime[2m > [22mretries exactly once on invalid output, then gives up [33m353[2mms[22m[39m
+   [33m[2m✓[22m[39m AgentRuntime[2m > [22mthe repair attempt carries the validation error and starts a new session [33m334[2mms[22m[39m
+   [33m[2m✓[22m[39m AgentRuntime[2m > [22mprose alone is not accepted as output [33m441[2mms[22m[39m
+   [33m[2m✓[22m[39m AgentRuntime[2m > [22man interrupted run leaves an incomplete trace and is re-dispatchable from the store [33m315[2mms[22m[39m
+   [33m[2m✓[22m[39m AgentRuntime[2m > [22mevery run gets its own session, never a shared one [33m406[2mms[22m[39m
+ [32m✓[39m tests/eng.sandboxvalidity.test.ts [2m([22m[2m42 tests[22m[2m)[22m[33m 18513[2mms[22m[39m
+   [33m[2m✓[22m[39m a rejected profile stops the Producer before any model call[2m > [22mrefuses, records no run, and spends nothing [33m2703[2mms[22m[39m
+   [33m[2m✓[22m[39m a rejected profile stops the Producer before any model call[2m > [22mthe same dispatch proceeds on an engine that accepts the profile [33m4831[2mms[22m[39m
+   [33m[2m✓[22m[39m a worktree git pointer works in the environment that will use it[2m > [22mis relative, and uses forward slashes [33m2462[2mms[22m[39m
+   [33m[2m✓[22m[39m the verified change set names the blob git will actually store[2m > [22mmatches git under core.autocrlf, and integrates [33m8370[2mms[22m[39m
+ [32m✓[39m tests/intel.authority.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 2296[2mms[22m[39m
+   [33m[2m✓[22m[39m a blocking escalation becomes a question, not an error[2m > [22mthe runtime raises the owner decision; the agent writes no canon and no approval [33m307[2mms[22m[39m
+   [33m[2m✓[22m[39m a blocking escalation becomes a question, not an error[2m > [22ma run that BLOCKED rather than escalated still gets its question asked [33m322[2mms[22m[39m
+   [33m[2m✓[22m[39m research nobody could have performed is recorded as not performed[2m > [22ma discovery run claiming interviews has the claim overridden, not believed [33m329[2mms[22m[39m
+ [32m✓[39m tests/ai.security.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 4707[2mms[22m[39m
+   [33m[2m✓[22m[39m untrusted text cannot become a command[2m > [22mevery attack string travels as one inert argv element [33m2190[2mms[22m[39m
+   [33m[2m✓[22m[39m an agent cannot obtain capability it was not granted[2m > [22mno Phase 3 run receives a write, exec, MCP or browser tool [33m1014[2mms[22m[39m
+   [33m[2m✓[22m[39m one project cannot see another[2m > [22meach runtime is pinned to its own project root [33m422[2mms[22m[39m
+ [32m✓[39m tests/intel.obligations.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 7500[2mms[22m[39m
+   [33m[2m✓[22m[39m a research obligation is consumed, not merely recorded[2m > [22mthe exact request is fulfilled, the question is resolved, and the requester resumes [33m2147[2mms[22m[39m
+   [33m[2m✓[22m[39m a research obligation is consumed, not merely recorded[2m > [22man unfulfillable request BLOCKS with the real reason, and invents nothing [33m574[2mms[22m[39m
+   [33m[2m✓[22m[39m a research obligation is consumed, not merely recorded[2m > [22mrestarting mid-obligation resumes, and raises no second request [33m1910[2mms[22m[39m
+   [33m[2m✓[22m[39m an upstream obligation drives real lifecycle control[2m > [22mthe owing department runs, the question resolves, and the downstream one resumes [33m1040[2mms[22m[39m
+   [33m[2m✓[22m[39m an upstream obligation drives real lifecycle control[2m > [22mrestarting mid-obligation resumes, and does not duplicate the upstream run [33m1227[2mms[22m[39m
+   [33m[2m✓[22m[39m an upstream obligation drives real lifecycle control[2m > [22man obligation nobody can satisfy BLOCKS rather than waiting forever [33m599[2mms[22m[39m
+ [32m✓[39m tests/intel.slice.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 14295[2mms[22m[39m
+   [33m[2m✓[22m[39m the intelligence execution core runs the upstream company[2m > [22mruns each department as a separate governed run, and reaches the Requirements Gate [33m2795[2mms[22m[39m
+   [33m[2m✓[22m[39m the intelligence execution core runs the upstream company[2m > [22ma profile that excludes a stage records the exclusion, it does not omit it [33m431[2mms[22m[39m
+   [33m[2m✓[22m[39m the intelligence execution core runs the upstream company[2m > [22ma research-free discovery is honest about it rather than claiming interviews [33m2873[2mms[22m[39m
+   [33m[2m✓[22m[39m an owner decision is control flow, not advice[2m > [22mstops the lifecycle, persists the state, and refuses to resume without a real answer [33m3426[2mms[22m[39m
+   [33m[2m✓[22m[39m an owner decision is control flow, not advice[2m > [22mresumes from the STORE, with no orchestrator and no conversation carried over [33m2760[2mms[22m[39m
+   [33m[2m✓[22m[39m the substrate refuses before it dispatches[2m > [22man open owner decision is visible without running anything [33m1675[2mms[22m[39m
+ [32m✓[39m tests/ai.engine.test.ts [2m([22m[2m46 tests[22m[2m)[22m[90m 107[2mms[22m[39m
+ [32m✓[39m tests/gates.authority.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 1615[2mms[22m[39m
+   [33m[2m✓[22m[39m NOT_APPLICABLE is a runtime determination, not a caller assertion[2m > [22m5c. NOT_APPLICABLE is rejected when the condition actually holds [33m414[2mms[22m[39m
+ [32m✓[39m tests/ai.failure.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 4435[2mms[22m[39m
+   [33m[2m✓[22m[39m malformed and invalid output[2m > [22mmalformed JSON never reaches project state [33m321[2mms[22m[39m
+   [33m[2m✓[22m[39m malformed and invalid output[2m > [22ma missing required envelope field is rejected [33m302[2mms[22m[39m
+   [33m[2m✓[22m[39m malformed and invalid output[2m > [22mthe second attempt succeeding is recorded as a success [33m626[2mms[22m[39m
+   [33m[2m✓[22m[39m an interrupted run is detectable and re-dispatchable[2m > [22mrecovery re-dispatches from the store, not from engine memory [33m314[2mms[22m[39m
+   [33m[2m✓[22m[39m an interrupted run is detectable and re-dispatchable[2m > [22mthe first run remains permanently visible after re-dispatch [33m315[2mms[22m[39m
+ [32m✓[39m tests/intel.research.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 901[2mms[22m[39m
+   [33m[2m✓[22m[39m captured external content is data, never instruction[2m > [22man injected instruction is fenced, flagged, and changes nothing [33m450[2mms[22m[39m
+ [32m✓[39m tests/ai.closure.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 5263[2mms[22m[39m
+   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m2. terminal event committed with no record is detected and repaired [33m328[2mms[22m[39m
+   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m3. recovery is a no-op when the record already exists [33m342[2mms[22m[39m
+   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m4. recovery run twice still yields exactly one record [33m300[2mms[22m[39m
+   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22m7. a recovered record preserves every field the canonical record requires [33m336[2mms[22m[39m
+   [33m[2m✓[22m[39m F1 — finalization survives a crash between its two commits[2m > [22mevery terminal outcome leaves a recoverable record [33m752[2mms[22m[39m
+   [33m[2m✓[22m[39m F2 — a decision is never recorded before the provider makes one[2m > [22m2. a successful result yields REQUESTED, DECIDED(allowed), SUCCEEDED [33m465[2mms[22m[39m
+   [33m[2m✓[22m[39m F2 — a decision is never recorded before the provider makes one[2m > [22m5. a denied call never leaves allowed=true anywhere in the trace [33m344[2mms[22m[39m
+ [32m✓[39m tests/intel.routing.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 4467[2mms[22m[39m
+   [33m[2m✓[22m[39m A. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mthe exact fact is handed back and the retry succeeds [33m884[2mms[22m[39m
+   [33m[2m✓[22m[39m A. EXISTING_STORE_FACT is supplied, not merely named[2m > [22mB. asking again after being given the fact fails explicitly, and does not loop [33m494[2mms[22m[39m
+   [33m[2m✓[22m[39m D. a RESEARCH route becomes a governed obligation[2m > [22ma research-authorised department records a request and retrieves nothing itself [33m395[2mms[22m[39m
+   [33m[2m✓[22m[39m F. a route survives the process that made it[2m > [22ma reopened Store finds the obligation and does not raise a second [33m548[2mms[22m[39m
+   [33m[2m✓[22m[39m G. the field-choice invariant holds through the runner[2m > [22mthe same question in either field produces the same operational route [33m447[2mms[22m[39m
+   [33m[2m✓[22m[39m G. the field-choice invariant holds through the runner[2m > [22mthe same question in BOTH fields produces one obligation [33m398[2mms[22m[39m
+ [32m✓[39m tests/ai.orchestration.test.ts [2m([22m[2m34 tests[22m[2m)[22m[33m 4836[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mruns the full flow and queues the validated plan [33m547[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22meach dispatched step is a separate run with its own session [33m524[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mAgentRuntime itself rejects a bad classification payload, before the orchestrator sees it [33m332[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mrejects an invalid plan and does not repair it [33m504[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mthe classifier is given the owner text as UNTRUSTED data [33m441[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mthe planner is told only about enabled agents [33m624[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22mno dispatched run is granted a write tool [33m404[2mms[22m[39m
+   [33m[2m✓[22m[39m owner request to dispatch queue[2m > [22man engine failure during planning leaves the classification intact [33m566[2mms[22m[39m
+ [32m✓[39m tests/extension.test.ts [2m([22m[2m26 tests[22m[2m)[22m[33m 777[2mms[22m[39m
+ [32m✓[39m tests/intel.writeauthority.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 15396[2mms[22m[39m
+   [33m[2m✓[22m[39m the write boundary itself refuses, atomically[2m > [22mrefuses the unauthorised write and commits NOTHING [33m361[2mms[22m[39m
+   [33m[2m✓[22m[39m the write boundary itself refuses, atomically[2m > [22ma restart reveals no partial mutation [33m300[2mms[22m[39m
+   [33m[2m✓[22m[39m the write boundary itself refuses, atomically[2m > [22man authorised department still writes normally [33m394[2mms[22m[39m
+   [33m[2m✓[22m[39m the split departments write only their own canon[2m > [22mADRs are authored by the architect, and test cases by the case designer [33m13931[2mms[22m[39m
+ [32m✓[39m tests/services.test.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 2447[2mms[22m[39m
+ [32m✓[39m tests/intel.proposalruling.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 3714[2mms[22m[39m
+   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mAPPROVE: the authority rules, Serva persists, accept() takes it [33m1074[2mms[22m[39m
+   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mREJECT: the same path refuses acceptance, and the proposal stays ASSESSED [33m967[2mms[22m[39m
+   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mDEFER: a real answer, and still not an acceptance [33m431[2mms[22m[39m
+   [33m[2m✓[22m[39m 2. a governed run produces the ruling[2m > [22mthe caller cannot supply the disposition — there is no parameter to supply it in [33m364[2mms[22m[39m
+   [33m[2m✓[22m[39m 3. the write boundary is what makes the ruling un-forgeable[2m > [22ma department that does not own the family cannot write the decision [33m310[2mms[22m[39m
+   [33m[2m✓[22m[39m 4. the ruling is durable[2m > [22msurvives the process that made it, with no chat history [33m347[2mms[22m[39m
+ [32m✓[39m tests/eng.dispatch.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 103832[2mms[22m[39m
+   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mruns in its own worktree with a write grant the contract allows [33m4717[2mms[22m[39m
+   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mthe sandbox profile Serva generated is passed to the invocation [33m2405[2mms[22m[39m
+   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mthe capability grant is recorded on the run, with its basis [33m3429[2mms[22m[39m
+   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22man unqualified substrate refuses before any model call is made [33m1278[2mms[22m[39m
+   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22mno reviewer means no dispatch, and no model call [33m3039[2mms[22m[39m
+   [33m[2m✓[22m[39m the Producer is dispatched through the one runtime, or not at all[2m > [22ma grant wider than the contract is refused by the runtime itself [33m1538[2mms[22m[39m
+   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22mis dispatched with no write tool, into its own run [33m7093[2mms[22m[39m
+   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22msees the evidence and the diff, and not the Producer reasoning [33m5171[2mms[22m[39m
+   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22ma verdict about a different ChangeSet is refused, not recorded [33m5985[2mms[22m[39m
+   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22ma rejection with no findings is not a usable verdict [33m6269[2mms[22m[39m
+   [33m[2m✓[22m[39m the reviewer is a separate, independent, read-only run[2m > [22man agent reviewing its own work is refused [33m3283[2mms[22m[39m
+   [33m[2m✓[22m[39m a reviewer verdict must be traceable to a real run[2m > [22ma runRef naming no run is refused outright [33m2690[2mms[22m[39m
+   [33m[2m✓[22m[39m a reviewer verdict must be traceable to a real run[2m > [22ma run by the wrong agent is refused [33m14444[2mms[22m[39m
+   [33m[2m✓[22m[39m a reviewer verdict must be traceable to a real run[2m > [22ma run that had write tools is not a review [33m4438[2mms[22m[39m
+   [33m[2m✓[22m[39m a governed change goes all the way to an accepted commit[2m > [22mProducer edits, runtime measures, reviewer judges, Serva integrates [33m14676[2mms[22m[39m
+   [33m[2m✓[22m[39m a governed change goes all the way to an accepted commit[2m > [22ma Producer that says the tests pass does not make them pass [33m14608[2mms[22m[39m
+   [33m[2m✓[22m[39m a governed change goes all the way to an accepted commit[2m > [22ma reviewer rejection stops the change at the gate [33m8765[2mms[22m[39m
+ [32m✓[39m tests/eng.binding.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 95173[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mWSL qualification with a native Windows engine is refused [33m4849[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mdistribution A does not authorize distribution B [33m3926[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mengine version X does not authorize engine version Y [33m3558[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22ma changed sandbox profile invalidates the prior qualification [33m2978[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22ma recipe boundary does not authorize a Producer [33m3525[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22ma simulated boundary is refused unless a test explicitly opts in [33m5911[2mms[22m[39m
+   [33m[2m✓[22m[39m a HARD qualification for one boundary does not authorize another[2m > [22mthe exact qualified boundary is eligible [33m2387[2mms[22m[39m
+   [33m[2m✓[22m[39m dispatch derives the boundary from the runtime it is about to use[2m > [22ma runtime whose engine sits elsewhere is refused, and nothing is spawned [33m3555[2mms[22m[39m
+   [33m[2m✓[22m[39m dispatch derives the boundary from the runtime it is about to use[2m > [22mCAPABILITY_BOUND records the boundary fingerprint [33m4103[2mms[22m[39m
+   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22mrefuses before any worktree, model call or command when the boundary is not HARD [33m3347[2mms[22m[39m
+   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22mdispatches a real Producer run, measures, reviews, and accepts an exact commit [33m21158[2mms[22m[39m
+   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22ma failed measurement drives rework and stops at the configured limit [33m22930[2mms[22m[39m
+   [33m[2m✓[22m[39m implementWorkItem is the production path[2m > [22mthe reviewer verdict the gate consumes is a persisted one [33m12198[2mms[22m[39m
+   [33m[2m✓[22m[39m no production code derives write authority from an enforcement class alone[2m > [22mnothing under src/ enables the simulated-boundary opt-in [33m427[2mms[22m[39m
+ [32m✓[39m tests/workflow.lifecycle.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 1384[2mms[22m[39m
+ [32m✓[39m tests/intel.scenarios.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 26686[2mms[22m[39m
+   [33m[2m✓[22m[39m Scenario B — a feature request re-enters the lifecycle, it does not restart it[2m > [22monly the affected stages re-run, and unrelated canon is left exactly as it was [33m11847[2mms[22m[39m
+   [33m[2m✓[22m[39m Scenario C — when research is unavailable, nothing is invented[2m > [22mthe run records the unavailability and the competitive gate refuses to verify [33m2991[2mms[22m[39m
+   [33m[2m✓[22m[39m Scenario D — a business policy question stops the company[2m > [22mstops at WAITING_FOR_OWNER instead of inventing the rule [33m11843[2mms[22m[39m
+ [32m✓[39m tests/intel.ownervalue.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 861[2mms[22m[39m
+   [33m[2m✓[22m[39m the owner can answer the question they were asked[2m > [22ma value survives a restart and reaches the department as the value [33m808[2mms[22m[39m
+ [32m✓[39m tests/store.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 859[2mms[22m[39m
+ [32m✓[39m tests/intel.questions.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 388[2mms[22m[39m
+ [32m✓[39m tests/intel.e2e.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 67873[2mms[22m[39m
+   [33m[2m✓[22m[39m the whole company runs[2m > [22mtakes an idea through every department to an engineering handoff [33m13564[2mms[22m[39m
+   [33m[2m✓[22m[39m the whole company runs[2m > [22mreadiness is DERIVED from the Store, with nothing handed to it [33m16985[2mms[22m[39m
+   [33m[2m✓[22m[39m the whole company runs[2m > [22ma review stops counting once the thing it reviewed changes [33m11815[2mms[22m[39m
+   [33m[2m✓[22m[39m the whole company runs[2m > [22man unanswered owner decision makes READY unreachable [33m12353[2mms[22m[39m
+   [33m[2m✓[22m[39m Phase 5 satisfies the Phase 4 contract[2m > [22mgenerates a work item the real Engineering Factory accepts [33m13133[2mms[22m[39m
+ [32m✓[39m tests/gates.compose.test.ts [2m([22m[2m24 tests[22m[2m)[22m[90m 37[2mms[22m[39m
+ [32m✓[39m tests/workflow.integrity.test.ts [2m([22m[2m19 tests[22m[2m)[22m[33m 1426[2mms[22m[39m
+   [33m[2m✓[22m[39m failStep cannot create an impossible run state[2m > [22m4. a failed step puts the run into REWORK, focused on that step [33m363[2mms[22m[39m
+ [32m✓[39m tests/intel.security.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 11953[2mms[22m[39m
+ [32m✓[39m tests/gates.mapVerifier.test.ts [2m([22m[2m17 tests[22m[2m)[22m[90m 58[2mms[22m[39m
+ [32m✓[39m tests/validity.isolation.test.ts [2m([22m[2m17 tests[22m[2m)[22m[33m 761[2mms[22m[39m
+   [33m[2m✓[22m[39m L — cross-project isolation (21 PI-1..PI-5)[2m > [22mtwo projects keep entirely separate authoritative state [33m474[2mms[22m[39m
+ [32m✓[39m tests/coverage.test.ts [2m([22m[2m15 tests[22m[2m)[22m[90m 37[2mms[22m[39m
 [90mstdout[2m | tests/app.catalogue.test.ts[2m > [22m[2mCLI foundation[2m > [22m[2mdefaults to help with no arguments
 [22m[39mserva 0.2.0  (specification baseline R4)
 
@@ -247,6 +239,18 @@ Engineering factory:
   changes [<change-set-id>]     Observed change sets and their evidence
   evidence [<id>]               Runtime-captured evidence only
   qualification                 The adversarial qualification catalogue
+
+Product, portability and recovery:
+  overview                      What the status bar shows, in a terminal
+  release                       Derived release readiness, condition by condition
+  actions                       Every validated action the UI can dispatch
+  machine doctor                Inspect this computer. Nothing is repaired.
+  backup --to <path> --confirm  Write a verified backup of this project
+  verify-backup <path>          Prove a bundle before relying on it
+  restore <bundle> --to <dir>   Inspect a restore; --confirm to perform it
+  migrate                       The guided move to another computer
+  library [list|show|forget]    Machine-local generalised knowledge (--enable)
+  acceptance                    Serva Code 1.0 status, computed from measured truth
   help                          This message
 
 Global options:
@@ -299,6 +303,18 @@ Engineering factory:
   changes [<change-set-id>]     Observed change sets and their evidence
   evidence [<id>]               Runtime-captured evidence only
   qualification                 The adversarial qualification catalogue
+
+Product, portability and recovery:
+  overview                      What the status bar shows, in a terminal
+  release                       Derived release readiness, condition by condition
+  actions                       Every validated action the UI can dispatch
+  machine doctor                Inspect this computer. Nothing is repaired.
+  backup --to <path> --confirm  Write a verified backup of this project
+  verify-backup <path>          Prove a bundle before relying on it
+  restore <bundle> --to <dir>   Inspect a restore; --confirm to perform it
+  migrate                       The guided move to another computer
+  library [list|show|forget]    Machine-local generalised knowledge (--enable)
+  acceptance                    Serva Code 1.0 status, computed from measured truth
   help                          This message
 
 Global options:
@@ -316,7 +332,7 @@ Global options:
   },
   "governance": "ACTIVE",
   "degradedReasons": [],
-  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-eS0nK7",
+  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-rUyHwy",
   "counts": {
     "stageLedgerEntries": 0,
     "gateResults": 0,
@@ -339,8 +355,8 @@ Global options:
   "riskClass": "R1",
   "profile": "PRF-NEW-PRODUCT",
   "servaVersion": "0.2.0",
-  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-eS0nK7",
-  "storePath": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-eS0nK7\\.serva",
+  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-rUyHwy",
+  "storePath": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-rUyHwy\\.serva",
   "canonVersions": [
     1
   ],
@@ -456,7 +472,7 @@ Gate outcome -> process state (31 §6.2) — as implemented:
       "id": "PROJ_PRESENT",
       "title": "Serva project",
       "status": "OK",
-      "detail": "CLI Project at C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-eS0nK7"
+      "detail": "CLI Project at C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-rUyHwy"
     },
     {
       "id": "STORE_SCHEMA",
@@ -506,90 +522,108 @@ Gate outcome -> process state (31 §6.2) — as implemented:
 }
 
 [90mstderr[2m | tests/app.catalogue.test.ts[2m > [22m[2mCLI foundation[2m > [22m[2mreports a missing project as an actionable error, not a crash
-[22m[39mE_NOT_A_PROJECT: No Serva store at C:\Users\adzor\AppData\Local\Temp\serva-test-WoeGEE\.serva
+[22m[39mE_NOT_A_PROJECT: No Serva store at C:\Users\adzor\AppData\Local\Temp\serva-test-hI8g5O\.serva
   remedy: Run `serva init` in the project root, or pass --root to point at one.
-  detail: {"searched":"C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-WoeGEE\\.serva"}
+  detail: {"searched":"C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-hI8g5O\\.serva"}
 
- [32m✓[39m tests/app.catalogue.test.ts [2m([22m[2m27 tests[22m[2m)[22m[33m 352[2mms[22m[39m
- [32m✓[39m tests/eng.status.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 753[2mms[22m[39m
-   [33m[2m✓[22m[39m reconcile reports divergence and repairs nothing[2m > [22ma project with no workspaces reports nothing to reconcile [33m383[2mms[22m[39m
- [32m✓[39m tests/eng.activation.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 49[2mms[22m[39m
- [32m✓[39m tests/intel.retriever.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 23[2mms[22m[39m
- [32m✓[39m tests/gates.regression.test.ts [2m([22m[2m14 tests[22m[2m)[22m[90m 22[2mms[22m[39m
- [32m✓[39m tests/agentRun.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 582[2mms[22m[39m
- [32m✓[39m tests/eng.factory.test.ts [2m([22m[2m52 tests[22m[2m)[22m[33m 108797[2mms[22m[39m
-   [33m[2m✓[22m[39m no command runs outside a boundary Serva has measured[2m > [22ma SOFT substrate refuses to execute a recipe [33m1482[2mms[22m[39m
-   [33m[2m✓[22m[39m no command runs outside a boundary Serva has measured[2m > [22ma NONE substrate refuses too [33m1641[2mms[22m[39m
-   [33m[2m✓[22m[39m no command runs outside a boundary Serva has measured[2m > [22mthe refused command was never offered to a process [33m1560[2mms[22m[39m
-   [33m[2m✓[22m[39m a command execution is recorded as bounded fact[2m > [22ma timeout is TIMED_OUT, which is not a test failure [33m3660[2mms[22m[39m
-   [33m[2m✓[22m[39m a command execution is recorded as bounded fact[2m > [22moutput is capped and the record says so [33m2057[2mms[22m[39m
-   [33m[2m✓[22m[39m a command execution is recorded as bounded fact[2m > [22mthe record carries the environment shape and never its values [33m1872[2mms[22m[39m
-   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22ma failing suite produces FAIL evidence with a real exit code [33m4832[2mms[22m[39m
-   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22ma passing suite produces PASS evidence bound to this ChangeSet [33m5639[2mms[22m[39m
-   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22ma Producer asserting success cannot make a failing suite pass [33m4950[2mms[22m[39m
-   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22mthe ChangeSet is computed from the repository, not declared [33m3789[2mms[22m[39m
-   [33m[2m✓[22m[39m evidence is bound to a ChangeSet, so editing the code makes it stale[2m > [22mevidence measured for one ChangeSet does not apply to the next [33m4863[2mms[22m[39m
-   [33m[2m✓[22m[39m evidence is bound to a ChangeSet, so editing the code makes it stale[2m > [22mstale evidence cannot satisfy a criterion however green it was [33m3082[2mms[22m[39m
-   [33m[2m✓[22m[39m the Engineering Gate uses the Phase 2 engine and nothing bespoke[2m > [22mmissing test evidence is NOT_VERIFIED, never FAIL [33m3407[2mms[22m[39m
-   [33m[2m✓[22m[39m the Engineering Gate uses the Phase 2 engine and nothing bespoke[2m > [22ma failing test drives the gate away from PASS [33m3802[2mms[22m[39m
-   [33m[2m✓[22m[39m the Engineering Gate uses the Phase 2 engine and nothing bespoke[2m > [22ma scope violation stops the deterministic checks from running at all [33m4290[2mms[22m[39m
-   [33m[2m✓[22m[39m the secrets scanner reports without disclosing[2m > [22ma high-confidence finding blocks, and the report withholds the value [33m3753[2mms[22m[39m
-   [33m[2m✓[22m[39m the secrets scanner reports without disclosing[2m > [22ma clean scan says what it actually checked [33m3950[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma SOFT substrate refuses write authority [33m1487[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22man agent outside the enabled set is refused [33m1518[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma VERIFIER is refused write authority whatever the substrate can do [33m1508[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mno worktree means no dispatch [33m1211[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma workspace that resolves to the primary checkout is refused [33m2340[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mno reviewer means no dispatch [33m2486[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mno evidence executors means no dispatch [33m2381[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma refused dispatch is an error, never a quiet downgrade to read-only [33m1324[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mthe granted policy denies every publishing verb and writes only the worktree [33m3249[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mthe reviewer policy has no write tool at all [33m3373[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma work item naming one agent for both roles is rejected at definition [33m2147[2mms[22m[39m
-   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma work item naming an unregistered recipe is refused before any worktree exists [33m1591[2mms[22m[39m
-   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22ma second attempt is permitted and a third is not [33m1566[2mms[22m[39m
-   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22mthe rework context is built from evidence, not from the previous reasoning [33m5394[2mms[22m[39m
-   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22man unaccepted change cannot be integrated [33m5159[2mms[22m[39m
-   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22ma verdict supplied by the caller cannot be integrated [33m4195[2mms[22m[39m
-   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22macceptance refuses when no independent review is recorded at all [33m2931[2mms[22m[39m
-   [33m[2m✓[22m[39m an unqualified substrate blocks the factory entirely[2m > [22mno workspace can be opened [33m967[2mms[22m[39m
-   [33m[2m✓[22m[39m an unqualified substrate blocks the factory entirely[2m > [22mthe refusal names the substrate rather than blaming the work item [33m866[2mms[22m[39m
-   [33m[2m✓[22m[39m an unqualified substrate blocks the factory entirely[2m > [22mthe enforcement class is reported, not assumed [33m4438[2mms[22m[39m
- [32m✓[39m tests/intel.e2e.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 60124[2mms[22m[39m
-   [33m[2m✓[22m[39m the whole company runs[2m > [22mtakes an idea through every department to an engineering handoff [33m11828[2mms[22m[39m
-   [33m[2m✓[22m[39m the whole company runs[2m > [22mreadiness is DERIVED from the Store, with nothing handed to it [33m12113[2mms[22m[39m
-   [33m[2m✓[22m[39m the whole company runs[2m > [22ma review stops counting once the thing it reviewed changes [33m11836[2mms[22m[39m
-   [33m[2m✓[22m[39m the whole company runs[2m > [22man unanswered owner decision makes READY unreachable [33m12000[2mms[22m[39m
-   [33m[2m✓[22m[39m Phase 5 satisfies the Phase 4 contract[2m > [22mgenerates a work item the real Engineering Factory accepts [33m12344[2mms[22m[39m
+ [32m✓[39m tests/app.catalogue.test.ts [2m([22m[2m27 tests[22m[2m)[22m[33m 314[2mms[22m[39m
+ [32m✓[39m tests/eng.status.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 895[2mms[22m[39m
+   [33m[2m✓[22m[39m reconcile reports divergence and repairs nothing[2m > [22ma project with no workspaces reports nothing to reconcile [33m503[2mms[22m[39m
+ [32m✓[39m tests/eng.activation.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 53[2mms[22m[39m
+ [32m✓[39m tests/eng.workspace.test.ts [2m([22m[2m31 tests[22m[2m)[22m[33m 100874[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva owns Git, and the verb set is closed[2m > [22mrefuses every publishing and history-rewriting verb [33m1438[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mcreates an isolated worktree on its own branch [33m4004[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mediting the worktree leaves the primary checkout byte-clean [33m4354[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mtwo attempts get separate worktrees that cannot see each other [33m3074[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22ma workspace id that could traverse is refused before it becomes a path [33m1760[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mthe same attempt cannot be opened twice [33m3542[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mthe protected paths include the checkout, the store and git metadata [33m2740[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer never touches the primary checkout[2m > [22mremoval is recorded and the directory is gone [33m10619[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22mobserves a modification without being told about it [33m6057[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22mobserves an untracked addition, which a diff against a commit would miss [33m6531[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma change outside the declared scope is a finding [33m4610[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma change inside the declared scope is conformant [33m6660[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma credential-shaped file is a finding whatever the scope allows [33m11096[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22man unauthorized lockfile change is a finding [33m5448[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22man unexpected binary is a finding, because nobody can review it [33m4535[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22ma symlink is a finding, because it can redirect a later write [33m2972[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva computes the change set and judges it against the declared scope[2m > [22mediting the code produces a different ChangeSet identity [33m10619[2mms[22m[39m
+   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22ma clean project with no workspaces reports nothing [33m2147[2mms[22m[39m
+   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22ma dirty primary checkout is reported and is never self-repairable [33m1836[2mms[22m[39m
+   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22ma missing worktree directory is detected as its own condition [33m3365[2mms[22m[39m
+   [33m[2m✓[22m[39m reconciliation reports divergence and never repairs by overwriting[2m > [22man external edit to a verified workspace makes its verification stale [33m3434[2mms[22m[39m
+ [32m✓[39m tests/library.test.ts [2m([22m[2m13 tests[22m[2m)[22m[90m 157[2mms[22m[39m
+ [32m✓[39m tests/acceptance.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 277[2mms[22m[39m
+ [32m✓[39m tests/agentRun.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 512[2mms[22m[39m
+ [32m✓[39m tests/gates.regression.test.ts [2m([22m[2m14 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [32m✓[39m tests/intel.retriever.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 17[2mms[22m[39m
+ [32m✓[39m tests/eng.factory.test.ts [2m([22m[2m52 tests[22m[2m)[22m[33m 138823[2mms[22m[39m
+   [33m[2m✓[22m[39m no command runs outside a boundary Serva has measured[2m > [22ma SOFT substrate refuses to execute a recipe [33m1245[2mms[22m[39m
+   [33m[2m✓[22m[39m no command runs outside a boundary Serva has measured[2m > [22ma NONE substrate refuses too [33m1393[2mms[22m[39m
+   [33m[2m✓[22m[39m no command runs outside a boundary Serva has measured[2m > [22mthe refused command was never offered to a process [33m2047[2mms[22m[39m
+   [33m[2m✓[22m[39m a command execution is recorded as bounded fact[2m > [22ma timeout is TIMED_OUT, which is not a test failure [33m3561[2mms[22m[39m
+   [33m[2m✓[22m[39m a command execution is recorded as bounded fact[2m > [22moutput is capped and the record says so [33m2170[2mms[22m[39m
+   [33m[2m✓[22m[39m a command execution is recorded as bounded fact[2m > [22mthe record carries the environment shape and never its values [33m2247[2mms[22m[39m
+   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22ma failing suite produces FAIL evidence with a real exit code [33m5149[2mms[22m[39m
+   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22ma passing suite produces PASS evidence bound to this ChangeSet [33m6660[2mms[22m[39m
+   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22ma Producer asserting success cannot make a failing suite pass [33m5711[2mms[22m[39m
+   [33m[2m✓[22m[39m the Test Executor measures; the Producer does not[2m > [22mthe ChangeSet is computed from the repository, not declared [33m5373[2mms[22m[39m
+   [33m[2m✓[22m[39m evidence is bound to a ChangeSet, so editing the code makes it stale[2m > [22mevidence measured for one ChangeSet does not apply to the next [33m9114[2mms[22m[39m
+   [33m[2m✓[22m[39m evidence is bound to a ChangeSet, so editing the code makes it stale[2m > [22mstale evidence cannot satisfy a criterion however green it was [33m13278[2mms[22m[39m
+   [33m[2m✓[22m[39m the Engineering Gate uses the Phase 2 engine and nothing bespoke[2m > [22mmissing test evidence is NOT_VERIFIED, never FAIL [33m6811[2mms[22m[39m
+   [33m[2m✓[22m[39m the Engineering Gate uses the Phase 2 engine and nothing bespoke[2m > [22ma failing test drives the gate away from PASS [33m6305[2mms[22m[39m
+   [33m[2m✓[22m[39m the Engineering Gate uses the Phase 2 engine and nothing bespoke[2m > [22ma scope violation stops the deterministic checks from running at all [33m5055[2mms[22m[39m
+   [33m[2m✓[22m[39m the secrets scanner reports without disclosing[2m > [22ma high-confidence finding blocks, and the report withholds the value [33m6386[2mms[22m[39m
+   [33m[2m✓[22m[39m the secrets scanner reports without disclosing[2m > [22ma clean scan says what it actually checked [33m10179[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma SOFT substrate refuses write authority [33m2445[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22man agent outside the enabled set is refused [33m2062[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma VERIFIER is refused write authority whatever the substrate can do [33m1434[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mno worktree means no dispatch [33m2410[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma workspace that resolves to the primary checkout is refused [33m3205[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mno reviewer means no dispatch [33m2744[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mno evidence executors means no dispatch [33m3283[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma refused dispatch is an error, never a quiet downgrade to read-only [33m1780[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mthe granted policy denies every publishing verb and writes only the worktree [33m3398[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22mthe reviewer policy has no write tool at all [33m2918[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma work item naming one agent for both roles is rejected at definition [33m1580[2mms[22m[39m
+   [33m[2m✓[22m[39m a Producer is dispatched only when every condition is true[2m > [22ma work item naming an unregistered recipe is refused before any worktree exists [33m1068[2mms[22m[39m
+   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22ma second attempt is permitted and a third is not [33m1779[2mms[22m[39m
+   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22mthe rework context is built from evidence, not from the previous reasoning [33m4883[2mms[22m[39m
+   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22man unaccepted change cannot be integrated [33m3810[2mms[22m[39m
+   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22ma verdict supplied by the caller cannot be integrated [33m2278[2mms[22m[39m
+   [33m[2m✓[22m[39m rework is bounded and acceptance is deterministic[2m > [22macceptance refuses when no independent review is recorded at all [33m2185[2mms[22m[39m
+   [33m[2m✓[22m[39m an unqualified substrate blocks the factory entirely[2m > [22mno workspace can be opened [33m679[2mms[22m[39m
+   [33m[2m✓[22m[39m an unqualified substrate blocks the factory entirely[2m > [22mthe refusal names the substrate rather than blaming the work item [33m660[2mms[22m[39m
+   [33m[2m✓[22m[39m an unqualified substrate blocks the factory entirely[2m > [22mthe enforcement class is reported, not assumed [33m1285[2mms[22m[39m
 warning: in the working copy of 'src/other.js', LF will be replaced by CRLF the next time Git touches it
- [32m✓[39m tests/eng.integration.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 50814[2mms[22m[39m
-   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a modified file [33m9770[2mms[22m[39m
-   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a new file [33m8804[2mms[22m[39m
-   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a deletion [33m6495[2mms[22m[39m
-   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a rename, including its old side [33m4667[2mms[22m[39m
-   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a mixed add, modify and delete [33m7440[2mms[22m[39m
-   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22mthe committed content is byte-identical to what was verified [33m3002[2mms[22m[39m
-   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22man unrelated dirty path is not staged and not committed [33m2344[2mms[22m[39m
-   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22ma verified file modified after the gate is refused [33m2163[2mms[22m[39m
-   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22ma verified file deleted after the gate is refused [33m2114[2mms[22m[39m
-   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22ma pre-staged index is refused rather than cleared [33m1479[2mms[22m[39m
-   [33m[2m✓[22m[39m the comparison itself[2m > [22ma staged identity is derived from git, not from what Serva remembered [33m2526[2mms[22m[39m
- [32m✓[39m tests/intel.restart.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 125918[2mms[22m[39m
-   [33m[2m✓[22m[39m readiness survives the process that produced it[2m > [22mreconstructs the independent reviews from disk and reaches READY [33m11595[2mms[22m[39m
-   [33m[2m✓[22m[39m readiness survives the process that produced it[2m > [22mgenerates the Phase 4 handoff from disk, with nothing injected [33m19303[2mms[22m[39m
-   [33m[2m✓[22m[39m readiness survives the process that produced it[2m > [22ma caller cannot assert a review it does not have [33m11531[2mms[22m[39m
-   [33m[2m✓[22m[39m a stage that half-completed does not half-repeat[2m > [22mthe completed department is not re-run, and its canon is not written twice [33m11866[2mms[22m[39m
-   [33m[2m✓[22m[39m a stage that half-completed does not half-repeat[2m > [22mno owner decision is raised twice by a resumed stage [33m12604[2mms[22m[39m
-   [33m[2m✓[22m[39m the production CLI path, in a separate process[2m > [22mserva intelligence readiness and handoff work from disk alone [33m21962[2mms[22m[39m
-   [33m[2m✓[22m[39m review evidence belongs to one work item and one gate cycle[2m > [22manother work item’s AR-2 cannot satisfy this one [33m12456[2mms[22m[39m
-   [33m[2m✓[22m[39m review evidence belongs to one work item and one gate cycle[2m > [22man evaluation the current gate result did not rest on does not count [33m9193[2mms[22m[39m
-   [33m[2m✓[22m[39m a caller cannot waive a required gate[2m > [22mthere is no waiveGates parameter to pass [33m7979[2mms[22m[39m
-   [33m[2m✓[22m[39m a caller cannot waive a required gate[2m > [22ma failing required gate keeps readiness NOT_READY, whatever a caller wants [33m7426[2mms[22m[39m
+ [32m✓[39m tests/intel.restart.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 137036[2mms[22m[39m
+   [33m[2m✓[22m[39m readiness survives the process that produced it[2m > [22mreconstructs the independent reviews from disk and reaches READY [33m11717[2mms[22m[39m
+   [33m[2m✓[22m[39m readiness survives the process that produced it[2m > [22mgenerates the Phase 4 handoff from disk, with nothing injected [33m14695[2mms[22m[39m
+   [33m[2m✓[22m[39m readiness survives the process that produced it[2m > [22ma caller cannot assert a review it does not have [33m12884[2mms[22m[39m
+   [33m[2m✓[22m[39m a stage that half-completed does not half-repeat[2m > [22mthe completed department is not re-run, and its canon is not written twice [33m12421[2mms[22m[39m
+   [33m[2m✓[22m[39m a stage that half-completed does not half-repeat[2m > [22mno owner decision is raised twice by a resumed stage [33m17020[2mms[22m[39m
+   [33m[2m✓[22m[39m the production CLI path, in a separate process[2m > [22mserva intelligence readiness and handoff work from disk alone [33m23727[2mms[22m[39m
+   [33m[2m✓[22m[39m review evidence belongs to one work item and one gate cycle[2m > [22manother work item’s AR-2 cannot satisfy this one [33m12758[2mms[22m[39m
+   [33m[2m✓[22m[39m review evidence belongs to one work item and one gate cycle[2m > [22man evaluation the current gate result did not rest on does not count [33m11887[2mms[22m[39m
+   [33m[2m✓[22m[39m a caller cannot waive a required gate[2m > [22mthere is no waiveGates parameter to pass [33m10266[2mms[22m[39m
+   [33m[2m✓[22m[39m a caller cannot waive a required gate[2m > [22ma failing required gate keeps readiness NOT_READY, whatever a caller wants [33m9654[2mms[22m[39m
+ [32m✓[39m tests/eng.integration.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 41761[2mms[22m[39m
+   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a modified file [33m9427[2mms[22m[39m
+   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a new file [33m7285[2mms[22m[39m
+   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a deletion [33m4999[2mms[22m[39m
+   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a rename, including its old side [33m3099[2mms[22m[39m
+   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22maccepts a mixed add, modify and delete [33m2827[2mms[22m[39m
+   [33m[2m✓[22m[39m every change shape integrates exactly[2m > [22mthe committed content is byte-identical to what was verified [33m2767[2mms[22m[39m
+   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22man unrelated dirty path is not staged and not committed [33m3238[2mms[22m[39m
+   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22ma verified file modified after the gate is refused [33m2040[2mms[22m[39m
+   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22ma verified file deleted after the gate is refused [33m2077[2mms[22m[39m
+   [33m[2m✓[22m[39m nothing the gate did not see reaches the commit[2m > [22ma pre-staged index is refused rather than cleared [33m1683[2mms[22m[39m
+   [33m[2m✓[22m[39m the comparison itself[2m > [22ma staged identity is derived from git, not from what Serva remembered [33m2317[2mms[22m[39m
 
-[2m Test Files [22m [1m[32m44 passed[39m[22m[90m (44)[39m
-[2m      Tests [22m [1m[32m1012 passed[39m[22m[90m (1012)[39m
-[2m   Start at [22m 20:12:27
-[2m   Duration [22m 141.40s[2m (transform 11.84s, setup 0ms, collect 35.13s, tests 719.44s, environment 22ms, prepare 13.99s)[22m
+[2m Test Files [22m [1m[32m50 passed[39m[22m[90m (50)[39m
+[2m      Tests [22m [1m[32m1146 passed[39m[22m[90m (1146)[39m
+[2m   Start at [22m 01:48:27
+[2m   Duration [22m 154.99s[2m (transform 15.20s, setup 0ms, collect 45.72s, tests 864.52s, environment 24ms, prepare 20.81s)[22m
 
 
 > serva-code@0.2.0 build

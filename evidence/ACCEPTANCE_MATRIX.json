@@ -6,7 +6,7 @@
     "gates": "19/19",
     "complete": true
   },
-  "offlineTests": "1012 passed",
+  "offlineTests": "1146 passed",
   "rows": [
     {
       "id": "R4-SPEC",

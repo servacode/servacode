@@ -270,13 +270,28 @@ export function acceptanceStatus(root: string = process.cwd()): AcceptanceStatus
   /* --------------------------------------------------------------- live proof */
 
   const live = evidence(root, 'evidence/LIVE_SERVA_ACCEPTANCE.txt');
+  /*
+   * A STRUCTURED MARKER, NOT A SUBSTRING.
+   *
+   * The first version tested `text.includes('ACCEPTED')`, and the evidence file — which
+   * records a BLOCKED run — contains the sentence "the word ACCEPTED does not appear as a
+   * claim anywhere in this file". So the check passed on a document whose whole purpose was
+   * to say the opposite. That is the third time in this file that a presence-of-string test
+   * was satisfied by a denial of the thing it looked for.
+   *
+   * The evidence must therefore declare its outcome on a `RESULT:` line, and only the
+   * exact word ACCEPTED there counts. Prose cannot reach it.
+   */
+  const liveResult = /^\s*RESULT:\s*([A-Z_]+)/m.exec(live.text)?.[1];
   add(
     'Live Acceptance',
-    live.exists && live.text.includes('ACCEPTED')
-      ? AcceptanceState.PASS
-      : AcceptanceState.NOT_VERIFIED,
+    liveResult === 'ACCEPTED' ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
     'evidence/LIVE_SERVA_ACCEPTANCE.txt',
-    live.exists ? 'a real chain was captured' : 'no live acceptance evidence is present',
+    !live.exists
+      ? 'no live acceptance evidence is present'
+      : liveResult === undefined
+        ? 'the evidence declares no RESULT, so it establishes nothing'
+        : 'the live attempt recorded RESULT: ' + liveResult,
   );
 
   const notProven = lines

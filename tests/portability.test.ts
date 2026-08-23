@@ -699,10 +699,16 @@ describe('the doctor inspects, and never reports READY for something it could no
       installed: true,
       location: '/usr/local/bin/claude',
       version: '1.2.3',
-      signedIn: true,
-      detail: 'signed in',
+      credentialsFilePresent: true,
+      detail: 'installed, with a credentials file present',
     }),
-    sandbox: () => ({ mechanism: 'bubblewrap', version: '0.8.0', available: true, detail: 'ok' }),
+    sandbox: () => ({
+      mechanism: 'bubblewrap',
+      version: '0.8.0',
+      available: true,
+      producerLauncher: '/usr/bin/claude-sandbox-runtime',
+      detail: 'ok',
+    }),
     git: () => ({ installed: true, version: '2.43.0', detail: 'ok' }),
     interop: () => ({ enabled: false, detail: 'interop disabled' }),
   };
@@ -720,7 +726,7 @@ describe('the doctor inspects, and never reports READY for something it could no
     const report = machineDoctor({
       probes: {
         ...READY_PROBES,
-        claude: () => ({ installed: false, signedIn: false, detail: 'not found' }),
+        claude: () => ({ installed: false, credentialsFilePresent: false, detail: 'not found' }),
       },
     });
     const claude = report.checks.find((c) => c.id === 'CLAUDE');
@@ -736,8 +742,8 @@ describe('the doctor inspects, and never reports READY for something it could no
         claude: () => ({
           installed: true,
           location: '/usr/local/bin/claude',
-          signedIn: false,
-          detail: 'installed, not signed in',
+          credentialsFilePresent: false,
+          detail: 'installed, with no credentials file',
         }),
       },
     });
@@ -811,7 +817,7 @@ describe('the doctor inspects, and never reports READY for something it could no
         distro: () => ({ measured: false, detail: 'no WSL guest responded' }),
         claude: () => ({
           installed: false,
-          signedIn: false,
+          credentialsFilePresent: false,
           measured: false,
           detail: 'no WSL guest responded',
         }),
@@ -843,6 +849,41 @@ describe('the doctor inspects, and never reports READY for something it could no
     expect(interop?.detail).not.toContain('disabled');
   });
 
+  it('a credentials file never reaches READY, because it is not a session', () => {
+    /*
+     * The live acceptance found this doctor reporting "Claude subscription READY" on a
+     * machine whose engine reported `authenticated: false`, and the factory then refused
+     * the Producer. A green line above a refusal is the failure this product exists to
+     * prevent, so there is now no branch that returns READY from a file.
+     */
+    const report = machineDoctor({ probes: READY_PROBES });
+    const auth = report.checks.find((c) => c.id === 'CLAUDE_AUTH');
+    expect(auth?.state).not.toBe(CheckState.READY);
+    expect(auth?.detail).toContain('not established here');
+    expect(auth?.remedy).toContain('serva engineering doctor');
+  });
+
+  it('the producer launcher is a separate check from the recipe sandbox', () => {
+    /* Two boundaries, two mechanisms; bubblewrap is no evidence about the other. */
+    const report = machineDoctor({
+      probes: {
+        ...READY_PROBES,
+        sandbox: () => ({
+          mechanism: 'bubblewrap',
+          version: '0.8.0',
+          available: true,
+          detail: 'bubblewrap only',
+        }),
+      },
+    });
+    expect(report.checks.find((c) => c.id === 'SANDBOX')?.state).toBe(CheckState.READY);
+    const producer = report.checks.find((c) => c.id === 'SANDBOX_PRODUCER');
+    expect(producer?.state).toBe(CheckState.ACTION_REQUIRED);
+    expect(producer?.remedy).toContain('sandbox-runtime');
+    expect(producer?.remedy).toContain('bubblewrap is not a substitute');
+    expect(report.engineeringReady).toBe(false);
+  });
+
   it('renders owner-facing lines with the remedies underneath', () => {
     const rendered = renderDoctor(
       machineDoctor({
@@ -852,8 +893,8 @@ describe('the doctor inspects, and never reports READY for something it could no
         },
       }),
     );
-    expect(rendered).toContain('Sandbox');
+    expect(rendered).toContain('Sandbox (recipes)');
     expect(rendered).toContain('ACTION_REQUIRED');
-    expect(rendered).toContain('→ Sandbox:');
+    expect(rendered).toContain('→ Sandbox (recipes):');
   });
 });

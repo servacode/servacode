@@ -83,6 +83,7 @@ const GUEST_SCRIPT = [
   'echo "claudeVersion=$(claude --version 2>/dev/null || true)"',
   'test -f "$HOME/.claude/.credentials.json" && echo "signedIn=yes" || echo "signedIn=no"',
   'echo "bwrap=$(command -v bwrap || true)"',
+  'echo "producerLauncher=$(command -v claude-sandbox-runtime || true)"',
   'echo "bwrapVersion=$(bwrap --version 2>/dev/null || true)"',
   'test -d /proc/sys/fs/binfmt_misc/WSLInterop && echo "interop=yes" || echo "interop=no"',
 ].join('; ');
@@ -158,7 +159,7 @@ export function nodeDoctorProbes(): DoctorProbes {
          */
         return {
           installed: false,
-          signedIn: false,
+          credentialsFilePresent: false,
           measured: false,
           detail: 'no WSL guest responded, so the engine could not be looked for',
         };
@@ -167,7 +168,7 @@ export function nodeDoctorProbes(): DoctorProbes {
       if (location === undefined) {
         return {
           installed: false,
-          signedIn: false,
+          credentialsFilePresent: false,
           detail: 'Claude Code was not found in the guest',
         };
       }
@@ -177,13 +178,15 @@ export function nodeDoctorProbes(): DoctorProbes {
        * to: the only fact it needs is whether a subscription session exists, and an
        * account name on a diagnostics screen is a privacy leak with no diagnostic value.
        */
-      const signedIn = get('signedIn') === 'yes';
+      const credentialsFilePresent = get('signedIn') === 'yes';
       return {
         installed: true,
         location,
         ...(version === undefined ? {} : { version }),
-        signedIn,
-        detail: signedIn ? 'signed in' : 'installed, not signed in',
+        credentialsFilePresent,
+        detail: credentialsFilePresent
+          ? 'installed, with a credentials file present'
+          : 'installed, with no credentials file',
       };
     },
 
@@ -200,10 +203,12 @@ export function nodeDoctorProbes(): DoctorProbes {
         return { available: false, detail: 'bubblewrap was not found in the guest' };
       }
       const version = get('bwrapVersion');
+      const producerLauncher = get('producerLauncher');
       return {
         mechanism: 'bubblewrap',
         ...(version === undefined ? {} : { version }),
         available: true,
+        ...(producerLauncher === undefined ? {} : { producerLauncher }),
         detail: bwrap + (version === undefined ? '' : ' ' + version),
       };
     },
