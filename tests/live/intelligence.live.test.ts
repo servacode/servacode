@@ -517,9 +517,9 @@ describe('the research chain, against the real web', () => {
       expect(c.retrievedByAgentId).toBe('SC-AGENT-060');
     }
     proof.proven(
-      'LC-2/3',
-      'a real source is retrieved by Serva and captured',
-      String(captures.length) + ' page(s) from en.wikipedia.org, hashed and UNTRUSTED',
+      'RS-2/3',
+      'the research gateway fetches and captures a real page',
+      String(captures.length) + ' page(s), each hashed and attributed to SC-AGENT-060',
     );
   });
 
@@ -610,22 +610,35 @@ describe('the research chain, against the real web', () => {
     }
   });
 
-  afterAll(() => {
+  /**
+   * THE LEDGER ITSELF IS AN OBLIGATION.
+   *
+   * A test, not an afterAll hook. The first version of this check lived in afterAll and a
+   * mis-recorded obligation slipped past it silently — the research slice was writing
+   * LC-2/3 instead of RS-2/3, so RS-2/3 was never classified and nothing said so. That is
+   * precisely the failure this whole mechanism replaced, reintroduced by the mechanism.
+   */
+  it('every obligation was classified, and at least one was proved', () => {
     console.log(proof.report('LIVE PROOF OBLIGATIONS'));
+    if (guard()) return;
 
-    /*
-     * The suite may finish BLOCKED. What it may not do is finish with an obligation that
-     * was never classified at all — that would be exactly the silent skip this replaced.
-     */
     const ids = new Set(proof.all().map((r) => r.id));
-    if (skip !== undefined) return;
-    for (const required of ['LC-1', 'LC-2/3', 'LC-4', 'LC-6', 'RS-2/3', 'RS-4', 'RS-5', 'RS-6']) {
-      expect(ids.has(required), required + ' was never classified').toBe(true);
+    const required = ['LC-1', 'LC-2/3', 'LC-4', 'LC-6', 'RS-2/3', 'RS-4', 'RS-5', 'RS-6'];
+    const unclassified = required.filter((r) => !ids.has(r));
+    expect(unclassified, 'obligations nobody classified: ' + unclassified.join(', ')).toEqual([]);
+
+    /* Each id is recorded exactly once: a duplicate means two obligations share a name. */
+    for (const id of ids) {
+      expect(
+        proof.all().filter((r) => r.id === id).length,
+        id + ' was classified more than once',
+      ).toBe(1);
     }
-    /* And at least one obligation must have been genuinely proved, or nothing ran. */
+
+    /* And something was genuinely proved, or the whole run was a no-op. */
     expect(
       proof.all().some((r) => r.outcome === ProofOutcome.PROVEN),
-      'no live obligation was proved: ' + proof.report('LIVE PROOF OBLIGATIONS'),
+      'no live obligation was proved',
     ).toBe(true);
   });
 });
