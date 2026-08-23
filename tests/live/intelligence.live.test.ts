@@ -13,6 +13,7 @@ import { httpRetriever } from '../../src/intelligence/research/http.js';
 import { ARTIFACT_TYPES, repository } from '../../src/intelligence/repository.js';
 import { ResearchFindingSchema } from '../../src/intelligence/artifacts/market.js';
 import { SourceCaptureSchema } from '../../src/intelligence/research/capture.js';
+import { OwnerDecisionRequestSchema } from '../../src/intelligence/artifacts/governance.js';
 import { RequirementSchema } from '../../src/intelligence/artifacts/requirements.js';
 import {
   DiscoveryFindingsSchema,
@@ -164,13 +165,8 @@ beforeAll(async () => {
     const open = openOwnerDecisions(store);
     if (open.length === 0) break;
     ownerRounds.push(open.map((d) => d.question.slice(0, 120)));
-    for (const d of open) {
-      answerOwnerDecision(intel, {
-        decisionId: d.id,
-        chosenOption: 'Declare it out of scope for now',
-        answeredBy: 'live-test-owner',
-      });
-    }
+    for (const d of open)
+      ownerRounds[ownerRounds.length - 1]?.push('  -> ' + answerAsOwner(intel, store, d.id));
   }
 }, 3_600_000);
 
@@ -178,6 +174,45 @@ afterAll(() => {
   configureResearchSeeds({ hosts: [], urls: [] });
   if (root !== undefined) cleanup(root);
 });
+
+/**
+ * Answer a decision with an option it actually offers.
+ *
+ * The first version of this loop answered every decision with the literal string
+ * "Declare it out of scope for now", which is one of the options the RUNNER offers on a
+ * blocking escalation and is not offered by anything else. The live suite then failed on a
+ * business-rule decision whose options are "Confirm the drafted rule as stated" and "State
+ * a different rule" — closure fix 1 refusing an answer nobody offered, working exactly as
+ * intended, against my own harness.
+ *
+ * So the test owner reads the options and chooses deliberately: DEFER where one exists
+ * (declining to expand scope), otherwise Serva's own recommendation, otherwise the first
+ * option. What it never does is invent an answer, which is the whole point.
+ */
+function answerAsOwner(
+  intel: Parameters<typeof answerOwnerDecision>[0],
+  store: Store,
+  decisionId: string,
+): string {
+  const decision = repository(
+    store,
+    ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+    OwnerDecisionRequestSchema,
+  ).get(decisionId);
+  const options = decision?.options ?? [];
+  const chosen =
+    options.find((o) => o.disposition === 'DEFER') ??
+    options.find((o) => o.option === decision?.recommendation) ??
+    options[0];
+  if (chosen === undefined) throw new Error('decision ' + decisionId + ' offers no options');
+
+  answerOwnerDecision(intel, {
+    decisionId,
+    chosenOption: chosen.option,
+    answeredBy: 'live-test-owner',
+  });
+  return chosen.option + ' (' + chosen.disposition + ')';
+}
 
 /** Skip with a stated reason rather than fail. A missing engine is not a defect. */
 function guard(): boolean {
@@ -440,13 +475,7 @@ describe('the research chain, against the real web', () => {
       if (researchResult.state !== OrchestratorState.WAITING_FOR_OWNER) break;
       const open = openOwnerDecisions(researchStore);
       if (open.length === 0) break;
-      for (const d of open) {
-        answerOwnerDecision(intel, {
-          decisionId: d.id,
-          chosenOption: 'Declare it out of scope for now',
-          answeredBy: 'live-test-owner',
-        });
-      }
+      for (const d of open) answerAsOwner(intel, researchStore, d.id);
     }
   }, 3_600_000);
 
