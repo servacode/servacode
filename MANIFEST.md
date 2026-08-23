@@ -1,6 +1,6 @@
-# SERVA CODE — PHASE 5 ACCEPTED CANDIDATE — PACKAGE MANIFEST
+# SERVA CODE — PHASE 5 FINAL ACCEPTANCE — PACKAGE MANIFEST
 
-Company intelligence and product authority, after the final closure. Packaged for
+Company intelligence and product authority, after the true final closure. Packaged for
 independent verification.
 
 ---
@@ -12,25 +12,36 @@ independent verification.
 | Repository root | `D:/SEVACODE` |
 | Branch | `phase-5-company-intelligence` |
 | Phase 4 baseline | `f4866b2` (unchanged; no Phase 1–4 invariant was weakened) |
-| Packaged tree | `b2396d9` — named in `evidence/BASELINE_COMMIT.txt` |
-| Packaging commit | one above it, adding only the evidence that describes it |
+| **Implementation baseline** | **`5d26bbc`** — the last commit touching `src/` or `tests/` |
+| Packaging commit | directly above it: this manifest, `PHASE_5_FINAL_ACCEPTANCE_REPORT.md` and `evidence/`, and nothing else |
 | Working tree | clean — `git status --porcelain` returns nothing |
 
-A file cannot record its own hash, which is why there are two commits rather than one.
-Reproduce the implementation from `3455cd5`, the last commit that touches `src/` or
-`tests/`. `b2396d9` adds the closure report; the commit above that adds only the evidence
-describing it.
+**One baseline, and every artifact says the same thing about it.**
+`evidence/BASELINE_COMMIT.txt`, `evidence/GIT_STATE.txt`, the acceptance report and this
+manifest all name `5d26bbc` as the implementation baseline, and all describe the commit
+above it the same way. Reproduce the implementation by checking out `5d26bbc` and running
+`npm run verify`.
+
+A file cannot record its own hash, which is why the packaging commit is separate. What it
+contains is checkable rather than asserted:
+
+```
+git diff --stat 5d26bbc..HEAD -- src tests    # empty
+```
+
+Evidence was captured after `5d26bbc`, from that exact tree.
 
 ## What this package contains
 
 | Path | What it is |
 |---|---|
-| `src/` | the implementation, including `src/intelligence/` (55 files) |
-| `tests/` | 41 test files, 987 offline tests, plus three opt-in live suites |
+| `src/` | the implementation, including `src/intelligence/` (61 files) |
+| `tests/` | 43 test files, 1004 offline tests, plus three opt-in live suites |
 | `docs/` | ADRs, prior phase reports, `SPEC_IMPLEMENTATION_FINDINGS.md` |
 | `evidence/` | the outputs below, captured at packaging time |
 | `scripts/` | the catalogue and contract generators |
-| `PHASE_5_LAST_CLOSURE_REPORT.md` | the last closure: typed proposal rulings, and routing that acts |
+| `PHASE_5_FINAL_ACCEPTANCE_REPORT.md` | the true final closure: a ruling that can be made, and an obligation that gets discharged |
+| `PHASE_5_LAST_CLOSURE_REPORT.md` | the previous closure: typed proposal rulings, and routing that acts |
 | `PHASE_5_AUTHORITY_LOCK_REPORT.md` | the authority lock: five defects plus the field-choice invariant |
 | `PHASE_5_FINAL_CLOSURE_REPORT.md` | the previous closure: nine defects, plus four found while closing them |
 | `PHASE_5_COMPANY_INTELLIGENCE_REPORT.md` | the original 46-item Phase 5 report |
@@ -44,10 +55,10 @@ catalogue can be regenerated with `npm run generate` and diffed against them.
 
 | File | What it shows |
 |---|---|
-| `evidence/GIT_STATE.txt` | branch, HEAD, working-tree status, recent log |
-| `evidence/BASELINE_COMMIT.txt` | the exact commit this package was built from |
-| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 987 tests, build |
-| `evidence/OFFLINE_ACCEPTANCE.txt` | the five acceptance suites: E2E, scenarios B/C/D, security, authority, governance |
+| `evidence/GIT_STATE.txt` | branch, HEAD, working-tree status (source separately from the evidence being written), recent log |
+| `evidence/BASELINE_COMMIT.txt` | the implementation baseline, and how to check what the commit above it contains |
+| `evidence/VERIFY.txt` | full `npm run verify` output — format, lint, typecheck, 1004 tests, build |
+| `evidence/OFFLINE_ACCEPTANCE.txt` | twelve intelligence suites, 159 tests: obligations, proposal rulings, routing, questions, governance, owner values, authority, restart, write authority, E2E, scenarios, security |
 | `evidence/LIVE_INTELLIGENCE.txt` | an earlier live run, which proved the VALUE mechanism end to end |
 | `evidence/LIVE_NORMALIZER_SLICE.txt` | the clean live slice at the final baseline — 10 tests passing |
 | `evidence/PHASE5_SURFACE.json` | every department with its declared outputs, its contract's permitted outputs, and its declared independence |
@@ -65,7 +76,7 @@ the filesystem — so a credential cannot arrive by accident.
 
 ```
 npm ci
-npm run verify          # 987 tests, offline, free
+npm run verify          # 1004 tests, offline, free
 npm run generate        # regenerate catalogues; diff against the committed ones
 ```
 

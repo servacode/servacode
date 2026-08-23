@@ -1,11 +1,28 @@
+=== branch ===
+phase-5-company-intelligence
+
+=== HEAD (implementation baseline) ===
+5d26bbcf2c1c720c88267c5e42a404044a560682
+
+=== git status --porcelain, excluding evidence/ ===
+(nothing between the headings means no src, tests, docs or config file differs
+ from the implementation baseline at the moment this evidence was captured)
+
+=== evidence/ at capture time ===
  M evidence/BASELINE_COMMIT.txt
  M evidence/GIT_STATE.txt
---- log ---
+ M evidence/OFFLINE_ACCEPTANCE.txt
+ M evidence/PHASE5_SURFACE.json
+ M evidence/VERIFY.txt
+(these are the files this capture is writing; they land in the packaging commit
+ directly above the baseline, together with the report and the manifest)
+
+=== log ===
+5d26bbc true final closure: a ruling that can be made, and an obligation that gets discharged
+76383e5 evidence: capture the accepted-candidate state
 eaef376 docs: name the evidence commit precisely
 e68dd24 docs: Phase 5 last closure report
 52e9557 last closure: typed proposal rulings, and routing that acts
 8175c23 evidence: capture the packaged state
 b2396d9 docs: Phase 5 authority lock report
 3455cd5 lock 5c: normalise open questions before routing them
---- branch ---
-phase-5-company-intelligence

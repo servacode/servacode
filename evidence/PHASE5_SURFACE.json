@@ -8,6 +8,20 @@
     "UPSTREAM_DEPARTMENT",
     "OWNER_DECISION"
   ],
+  "proposalRulingAuthorities": [
+    {
+      "id": "SC-AGENT-020",
+      "permits": [
+        "intel.productDecision"
+      ]
+    },
+    {
+      "id": "SC-AGENT-130",
+      "permits": [
+        "intel.designDecision"
+      ]
+    }
+  ],
   "departments": [
     {
       "id": "DEPT-INTAKE",
@@ -30,6 +44,7 @@
         "intel.openQuestion",
         "intel.researchRequest",
         "intel.productScope",
+        "intel.productDecision",
         "intel.validationRecommendation"
       ],
       "usesResearchGateway": false,
@@ -79,6 +94,7 @@
         "intel.openQuestion",
         "intel.researchRequest",
         "intel.productScope",
+        "intel.productDecision",
         "intel.validationRecommendation"
       ],
       "usesResearchGateway": false,
