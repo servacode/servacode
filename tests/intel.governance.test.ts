@@ -40,6 +40,7 @@ import {
   ORCHESTRATOR_STATE_TYPE,
   OrchestratorRecordSchema,
   readOrchestratorRecord,
+  writeOrchestratorRecord,
 } from '../src/intelligence/execution/orchestrator.js';
 import { readLedger } from '../src/lifecycle/stages.js';
 import { cleanup, freshStore } from './helpers.js';
@@ -474,12 +475,89 @@ describe('re-entry re-opens the lifecycle, idempotently', () => {
     expect(readLedger(f.store, WORK_ITEM).length).toBe(ledgerAfterFirst);
   });
 
-  it('an outstanding change is visible until it is carried through', () => {
+  it('an approved change cannot be completed by claim', () => {
     const f = setup();
     seedRecord(f.store, WORK_ITEM);
     const crId = approved(f);
+
+    /*
+     * The shortcut the audit found: approve, then declare it done. Nothing was re-derived,
+     * so the canon this change invalidates is still standing — and completing it would
+     * remove the readiness block that was the only thing guarding it.
+     */
+    expect(() => completeChange(f, crId)).toThrow(/re-entry was never applied/);
     expect(outstandingChanges(f.store).map((c) => c.id)).toContain(crId);
-    completeChange(f, crId);
+  });
+
+  it('a change whose re-entered stages have not re-run is still outstanding', () => {
+    const f = setup();
+    seedRecord(f.store, WORK_ITEM);
+    const crId = approved(f);
+    applyReentry(f, { workItemId: WORK_ITEM, changeRequestId: crId });
+
+    /* Re-entry applied, nothing re-run yet. */
+    expect(() => completeChange(f, crId)).toThrow(/have not completed again/);
+    expect(outstandingChanges(f.store).map((c) => c.id)).toContain(crId);
+  });
+
+  it('a partial re-entry is still outstanding', () => {
+    const f = setup();
+    seedRecord(f.store, WORK_ITEM);
+    const crId = approved(f);
+    const plan = applyReentry(f, { workItemId: WORK_ITEM, changeRequestId: crId });
+
+    /* Only the first of the re-run stages completes. */
+    const record = readOrchestratorRecord(f.store, WORK_ITEM);
+    const tx = f.store.begin();
+    writeOrchestratorRecord(tx, {
+      ...(record as NonNullable<typeof record>),
+      completedStages: [...(record?.completedStages ?? []), plan.stagesToRerun[0] as string],
+    });
+    tx.commit();
+
+    expect(() => completeChange(f, crId)).toThrow(/have not completed again/);
+  });
+
+  it('stages that re-ran but whose gate has not accepted are still outstanding', () => {
+    const f = setup();
+    seedRecord(f.store, WORK_ITEM);
+    const crId = approved(f);
+    const plan = applyReentry(f, { workItemId: WORK_ITEM, changeRequestId: crId });
+
+    /* Every stage re-ran; the gate that guards them has not been re-evaluated. */
+    const record = readOrchestratorRecord(f.store, WORK_ITEM);
+    const tx = f.store.begin();
+    writeOrchestratorRecord(tx, {
+      ...(record as NonNullable<typeof record>),
+      completedStages: [...(record?.completedStages ?? []), ...plan.stagesToRerun],
+    });
+    tx.commit();
+
+    expect(() => completeChange(f, crId)).toThrow(/have not accepted the new evidence/);
+  });
+
+  it('a change is carried through once its stages re-ran and its gates accepted', () => {
+    const f = setup();
+    seedRecord(f.store, WORK_ITEM);
+    const crId = approved(f);
+    const plan = applyReentry(f, { workItemId: WORK_ITEM, changeRequestId: crId });
+
+    const record = readOrchestratorRecord(f.store, WORK_ITEM);
+    const tx = f.store.begin();
+    writeOrchestratorRecord(tx, {
+      ...(record as NonNullable<typeof record>),
+      completedStages: [...(record?.completedStages ?? []), ...plan.stagesToRerun],
+      gateResults: [
+        ...(record?.gateResults ?? []),
+        ...['SC-GATE-REQUIREMENTS', 'SC-GATE-FEASIBILITY'].map((gateId) => ({
+          gateId,
+          verdict: 'PASS',
+        })),
+      ],
+    });
+    tx.commit();
+
+    expect(completeChange(f, crId).state).toBe('IMPLEMENTED');
     expect(outstandingChanges(f.store).map((c) => c.id)).not.toContain(crId);
   });
 });
@@ -490,11 +568,74 @@ describe('a proposal is not scope', () => {
     const p = propose(f, {
       title: 'Loyalty points',
       origin: 'SC-AGENT-120',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'Reward repeat phone orders',
     });
-    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-030' })).toThrow(
+    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' })).toThrow(
       /cannot go from PROPOSED to ACCEPTED/,
     );
+  });
+
+  it('an actor with no authority over the affected canon cannot accept it', () => {
+    const f = setup();
+    const p = propose(f, {
+      title: 'Loyalty points',
+      origin: 'SC-AGENT-120',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
+      description: 'Reward repeat phone orders',
+    });
+    assess(f, {
+      proposalId: p.id,
+      assessment: {
+        userOrBusinessValue: 'repeat custom',
+        evidenceBasis: 'none yet',
+        implementationComplexity: 'MEDIUM',
+        costImpact: 'a fortnight',
+        risk: 'dilution',
+        operationalBurden: 'training',
+        scopeEffect: 'adds a feature',
+      },
+    });
+
+    /*
+     * The security architect is a different actor from the proposer, which is all the
+     * previous rule asked. It owns threat models, not product scope — so under the rule
+     * this replaced, any passing agent could enlarge the product.
+     */
+    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-090' })).toThrow(
+      /does not own/,
+    );
+
+    /* The product manager does own it. */
+    expect(accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' }).state).toBe('ACCEPTED');
+  });
+
+  it('a proposal over canon nobody owns is the owner’s to accept', () => {
+    const f = setup();
+    const p = propose(f, {
+      title: 'Track a new project goal',
+      origin: 'SC-AGENT-030',
+      /* SF-12: no contract in 32 claims the framing artifacts. */
+      affectsCanon: ARTIFACT_TYPES.PROJECT_GOAL,
+      description: 'Add a goal about reducing wasted stock',
+    });
+    assess(f, {
+      proposalId: p.id,
+      assessment: {
+        userOrBusinessValue: 'less waste',
+        evidenceBasis: 'owner remark',
+        implementationComplexity: 'LOW',
+        costImpact: 'small',
+        risk: 'low',
+        operationalBurden: 'none',
+        scopeEffect: 'adds a goal',
+      },
+    });
+
+    expect(() => accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' })).toThrow(
+      /no agent owns/,
+    );
+    expect(accept(f, { proposalId: p.id, acceptedBy: 'owner@bakery' }).state).toBe('ACCEPTED');
   });
 
   it('it cannot accept itself', () => {
@@ -502,6 +643,7 @@ describe('a proposal is not scope', () => {
     const p = propose(f, {
       title: 'Loyalty points',
       origin: 'SC-AGENT-120',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'Reward repeat phone orders',
     });
     assess(f, {
@@ -527,6 +669,7 @@ describe('a proposal is not scope', () => {
     const p = propose(f, {
       title: 'Loyalty points',
       origin: 'SC-AGENT-120',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'Reward repeat phone orders',
     });
     assess(f, {
@@ -541,19 +684,19 @@ describe('a proposal is not scope', () => {
         scopeEffect: 'adds a feature',
       },
     });
-    accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-030' });
+    accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' });
 
     expect(() =>
       incorporate(f, {
         proposalId: p.id,
-        incorporatedBy: 'SC-AGENT-030',
+        incorporatedBy: 'SC-AGENT-020',
         into: [{ id: 'SC-FEAT-NOTHING' }],
       }),
     ).toThrow(/does not exist/);
 
     const done = incorporate(f, {
       proposalId: p.id,
-      incorporatedBy: 'SC-AGENT-030',
+      incorporatedBy: 'SC-AGENT-020',
       into: [{ id: goal }],
     });
     expect(done.state).toBe('INCORPORATED');
@@ -566,6 +709,7 @@ describe('a proposal is not scope', () => {
     const p = propose(f, {
       title: 'Blockchain the receipts',
       origin: 'SC-AGENT-062',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'Immutable order history',
     });
     const rejected = reject(f, {
@@ -583,6 +727,7 @@ describe('a proposal is not scope', () => {
     const p = propose(f, {
       title: 'Loyalty points',
       origin: 'SC-AGENT-120',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       description: 'later, maybe',
     });
     assess(f, {
@@ -599,7 +744,7 @@ describe('a proposal is not scope', () => {
     });
     const deferred = defer(f, { proposalId: p.id, rationale: 'not for the first release' });
     expect(deferred.state).toBe('DEFERRED');
-    expect(accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-030' }).state).toBe('ACCEPTED');
+    expect(accept(f, { proposalId: p.id, acceptedBy: 'SC-AGENT-020' }).state).toBe('ACCEPTED');
   });
 });
 

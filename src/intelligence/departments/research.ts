@@ -963,6 +963,11 @@ export const innovationStrategyDepartment: DepartmentConfig<typeof InnovationOut
         createdAt: at,
         title: p.title,
         origin: STRATEGIST_AGENT,
+        /*
+         * An innovation proposal changes what the product IS, which is product scope —
+         * so the product manager rules on it, not the strategist that thought of it.
+         */
+        affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
         description: p.description,
         /* PROPOSED, never accepted here. A proposal does not become scope by being good. */
         state: 'PROPOSED',

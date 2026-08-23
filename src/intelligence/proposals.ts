@@ -2,6 +2,8 @@ import { fail } from '../core/errors.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { ARTIFACT_TYPES, canonExists, repository } from './repository.js';
 import { ProposalSchema, ProposalState } from './artifacts/governance.js';
+import { ContractRegistry } from '../agents/registry.js';
+import { contractOutputTypes } from './execution/authority.js';
 import type { Proposal } from './artifacts/governance.js';
 import type { Store } from '../store/store.js';
 import type { Clock } from '../core/clock.js';
@@ -108,6 +110,89 @@ function assertTransition(from: ProposalState, to: ProposalState): void {
   });
 }
 
+/**
+ * Who may accept a proposal that would change this canon family.
+ *
+ * Resolved from the same canonical output authority the write boundary uses: the agent
+ * whose contract declares an artifact family owns decisions about it. That is not a new
+ * rule invented for proposals — it is the rule already enforced on every write, asked from
+ * the other direction.
+ *
+ * Returns an empty set for a family nobody owns, which is deliberate: an unowned family
+ * escalates to the owner rather than defaulting to anyone-may-accept.
+ */
+export function owningAuthorities(canonType: string): ReadonlySet<string> {
+  const registry = ContractRegistry.shared();
+  const owners = new Set<string>();
+  for (const contract of registry.all()) {
+    if (contractOutputTypes(contract).types.includes(canonType as never)) {
+      owners.add(contract.id);
+    }
+  }
+  return owners;
+}
+
+/**
+ * Why this actor may not accept this proposal, or undefined if they may.
+ *
+ * Three rules, in the order they matter:
+ *
+ *   the proposer may not accept their own idea — that is scope creep with a signature;
+ *   an actor with no authority over the affected canon may not accept it — the previous
+ *   rule was merely "different from the proposer", which any passing agent satisfies;
+ *   a family nobody owns is the owner's to rule on, not an agent's.
+ */
+export function acceptanceRefusal(p: Proposal, acceptedBy: string): string | undefined {
+  if (p.origin === acceptedBy) {
+    return (
+      'proposal ' +
+      p.id +
+      ' was raised and accepted by ' +
+      acceptedBy +
+      ': an actor accepting its own idea is how scope grows without anybody agreeing to it'
+    );
+  }
+
+  const owners = owningAuthorities(p.affectsCanon);
+  if (owners.size === 0) {
+    /*
+     * Nothing in `32` claims this family. That makes it owner-reserved rather than
+     * unowned: somebody still has to decide, and the somebody is the person paying.
+     */
+    if (acceptedBy.startsWith('SC-AGENT-')) {
+      return (
+        'no agent owns ' +
+        p.affectsCanon +
+        ', so proposal ' +
+        p.id +
+        ' is the owner' +
+        String.fromCharCode(0x2019) +
+        's to accept, not ' +
+        acceptedBy +
+        String.fromCharCode(0x2019) +
+        's'
+      );
+    }
+    return undefined;
+  }
+
+  if (!owners.has(acceptedBy)) {
+    /* A person may always accept: the owner outranks the canon's owning agent. */
+    if (!acceptedBy.startsWith('SC-AGENT-')) return undefined;
+    return (
+      acceptedBy +
+      ' does not own ' +
+      p.affectsCanon +
+      ', so it cannot accept proposal ' +
+      p.id +
+      '. That belongs to ' +
+      [...owners].sort().join(' or ') +
+      ', or to the owner.'
+    );
+  }
+  return undefined;
+}
+
 /** Raise a proposal. This creates a record, and creates nothing else. */
 export function propose(
   deps: ProposalDeps,
@@ -115,6 +200,8 @@ export function propose(
     readonly title: string;
     readonly origin: string;
     readonly description: string;
+    /** The canon family this would change. Decides who may accept it. */
+    readonly affectsCanon: string;
   },
 ): Proposal {
   const at = deps.clock.now();
@@ -126,6 +213,7 @@ export function propose(
       title: o.title,
       origin: o.origin,
       description: o.description,
+      affectsCanon: o.affectsCanon,
       state: ProposalState.PROPOSED,
       meta: {
         /*
@@ -182,12 +270,18 @@ export function accept(
       specRef: '§33',
     });
   }
-  if (p.origin === o.acceptedBy) {
+  const refusal = acceptanceRefusal(p, o.acceptedBy);
+  if (refusal !== undefined) {
     return fail({
       code: 'E_GATE_AUTHORITY',
-      message: 'Proposal ' + p.id + ' was raised and accepted by ' + o.acceptedBy,
+      message: 'Refusing to accept ' + p.id + ': ' + refusal,
       remedy:
-        'The authority that owns the affected canon accepts a proposal. An actor accepting its own idea is how scope grows without anybody agreeing to it.',
+        'A proposal is accepted by the authority that owns the canon it would change, or by the owner. Anyone else accepting it is a decision made by whoever happened to be passing.',
+      details: {
+        proposalId: p.id,
+        affectsCanon: p.affectsCanon,
+        owners: [...owningAuthorities(p.affectsCanon)].sort(),
+      },
       specRef: '§33',
     });
   }

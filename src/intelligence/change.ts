@@ -15,6 +15,7 @@ import {
   unassessedDimensions,
 } from './artifacts/governance.js';
 import { readOrchestratorRecord, writeOrchestratorRecord } from './execution/orchestrator.js';
+import { GateVerdict } from '../vocab/index.js';
 import { resolveApplicability } from './applicability.js';
 import type {
   ChangeRequest,
@@ -87,6 +88,12 @@ const DIMENSION_STAGES: Readonly<Record<string, readonly string[]>> = Object.fre
  * has since changed — which is worse than having no register, because it looks current.
  */
 const ALWAYS_REDERIVE: readonly string[] = Object.freeze(['SC-STAGE-016']);
+
+/** Verdicts that count as a gate accepting. A qualification is still an acceptance. */
+const ACCEPTING: readonly string[] = Object.freeze([
+  GateVerdict.PASS,
+  GateVerdict.PASS_WITH_QUALIFICATION,
+]);
 
 export interface ChangeDeps {
   readonly store: Store;
@@ -604,6 +611,28 @@ export function applyReentry(
 
   const tx = deps.store.begin();
   try {
+    /*
+     * The re-entry is RECORDED on the change, not merely performed.
+     *
+     * Without this, `completeChange` had nothing to check and accepted the word
+     * IMPLEMENTED on trust — so approve-then-complete removed the readiness block while
+     * every stale artifact the change invalidated was still standing. The obligation has
+     * to be durable, because the process that applied it will not be the process that
+     * later asks whether it happened.
+     */
+    repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema).put(tx, {
+      ...(repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema).get(
+        o.changeRequestId,
+      ) as ChangeRequest),
+      reentry: {
+        workItemId: o.workItemId,
+        appliedAt: deps.clock.now(),
+        reentryStageId: plan.reentryStageId,
+        stagesToRerun: [...plan.stagesToRerun],
+        gatesInvalidated: [...gatesOfRerun],
+      },
+    });
+
     writeOrchestratorRecord(tx, {
       ...record,
       state: 'RUNNING',
@@ -650,26 +679,92 @@ export function applyReentry(
   return plan;
 }
 
-/** Mark a change carried through. Only then does it stop blocking readiness. */
+/**
+ * Why this change has not been carried through, or undefined if it has.
+ *
+ * DERIVED, and the whole reason `completeChange` cannot be told. Previously it required
+ * only `state === APPROVED` and wrote IMPLEMENTED — so approving a change and immediately
+ * completing it removed the readiness block while every artifact the change invalidated
+ * was still standing, unrewritten and now unguarded.
+ *
+ * Each clause is a fact about persisted state:
+ *
+ *   re-entry was applied, to the work item it names
+ *   every stage the plan said to re-run has completed again since
+ *   every gate the re-entry invalidated has been re-evaluated and accepts
+ *
+ * The third is the one that matters most. Re-running a stage produces new artifacts; the
+ * gate is what says the new ones are acceptable. A change that re-ran its stages and
+ * failed their gates has not been carried through — it has been attempted.
+ */
+export function completionRefusal(store: Store, changeRequestId: string): string | undefined {
+  const cr = repository(store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema).get(
+    changeRequestId,
+  );
+  if (cr === undefined) return 'no change request ' + changeRequestId + ' exists';
+  if (cr.state !== 'APPROVED') return 'change ' + cr.id + ' is ' + cr.state + ', not APPROVED';
+
+  const reentry = cr.reentry;
+  if (reentry === undefined) {
+    return (
+      'change ' +
+      cr.id +
+      ' was approved but re-entry was never applied: nothing has been re-derived, so the canon it invalidates is still standing'
+    );
+  }
+
+  const record = readOrchestratorRecord(store, reentry.workItemId);
+  if (record === undefined) {
+    return 'the intelligence run for ' + reentry.workItemId + ' no longer exists';
+  }
+
+  const completed = new Set(record.completedStages);
+  const outstanding = reentry.stagesToRerun.filter((stage) => !completed.has(stage));
+  if (outstanding.length > 0) {
+    return (
+      'change ' +
+      cr.id +
+      ' re-entered at ' +
+      reentry.reentryStageId +
+      ', and these stages have not completed again: ' +
+      outstanding.join(', ')
+    );
+  }
+
+  const accepting = new Set(
+    record.gateResults.filter((g) => ACCEPTING.includes(g.verdict)).map((g) => g.gateId),
+  );
+  const unaccepted = reentry.gatesInvalidated.filter((gate) => !accepting.has(gate));
+  if (unaccepted.length > 0) {
+    return (
+      'change ' +
+      cr.id +
+      ' re-ran its stages, but these gates have not accepted the new evidence: ' +
+      unaccepted.join(', ')
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Mark a change carried through. Only then does it stop blocking readiness.
+ *
+ * There is no argument for "it is done". The obligations are read from the Store.
+ */
 export function completeChange(deps: ChangeDeps, changeRequestId: string): ChangeRequest {
   const repo = repository(deps.store, ARTIFACT_TYPES.CHANGE_REQUEST, ChangeRequestSchema);
-  const cr = repo.get(changeRequestId);
-  if (cr === undefined) {
+  const refusal = completionRefusal(deps.store, changeRequestId);
+  if (refusal !== undefined) {
     return fail({
       code: 'E_VALIDATION',
-      message: 'No change request ' + changeRequestId + ' exists',
-      remedy: 'Nothing to complete.',
+      message: 'Refusing to record ' + changeRequestId + ' as carried through: ' + refusal,
+      remedy:
+        'Apply the re-entry, let the affected stages run again, and let their gates accept the new evidence. Marking it done without that removes the readiness block while the stale canon stands.',
+      details: { changeRequestId },
       specRef: '§34',
     });
   }
-  if (cr.state !== 'APPROVED') {
-    return fail({
-      code: 'E_VALIDATION',
-      message: 'Change ' + cr.id + ' is ' + cr.state + ', not APPROVED',
-      remedy: 'Only an approved change can be carried through.',
-      specRef: '§34',
-    });
-  }
+  const cr = repo.get(changeRequestId) as ChangeRequest;
   const next: ChangeRequest = { ...cr, state: 'IMPLEMENTED' };
   const tx = deps.store.begin();
   try {

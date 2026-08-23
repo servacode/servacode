@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { IsoSchema } from '../../domain/schemas.js';
 import { RefSchema, artifact, enumOf } from './base.js';
 
 /**
@@ -40,6 +41,17 @@ export const ProposalSchema = artifact({
   title: z.string().min(1),
   origin: z.string().min(1),
   description: z.string().min(1),
+  /**
+   * The canon family this proposal would change.
+   *
+   * Required, because it is what decides who may accept it. Without it, "the authority
+   * that owns the affected canon" is a sentence in a specification rather than a check:
+   * the implementation could only ask whether the accepter differed from the proposer,
+   * and any unrelated agent satisfies that.
+   *
+   * A proposal that cannot name what it would change is a proposal nobody can rule on.
+   */
+  affectsCanon: z.string().min(1),
   state: enumOf(ProposalState),
   assessment: z
     .object({
@@ -164,6 +176,23 @@ export const ChangeRequestSchema = artifact({
   magnitude: z.enum(['M1', 'M2', 'M3', 'M4']),
   impactAnalysisRef: RefSchema.optional(),
   state: z.enum(['RAISED', 'ANALYSED', 'APPROVED', 'REJECTED', 'IMPLEMENTED']),
+  /**
+   * What re-entry actually obliged, recorded when it was applied.
+   *
+   * Durable because the process that applies re-entry is not the process that later asks
+   * whether the obligations were met. Without it, IMPLEMENTED is a claim; with it, it is
+   * a statement that can be checked against the ledger and the gate results.
+   */
+  reentry: z
+    .object({
+      workItemId: z.string().min(1),
+      appliedAt: IsoSchema,
+      reentryStageId: z.string().min(1),
+      stagesToRerun: z.array(z.string().min(1)).default([]),
+      gatesInvalidated: z.array(z.string().min(1)).default([]),
+    })
+    .strict()
+    .optional(),
 });
 export type ChangeRequest = z.output<typeof ChangeRequestSchema>;
 

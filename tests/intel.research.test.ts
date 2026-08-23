@@ -481,6 +481,7 @@ describe('the advantage board derives from canon and expires with it', () => {
       title: 'Voice capture',
       origin: 'SC-AGENT-062',
       description: 'take the order by speaking',
+      affectsCanon: ARTIFACT_TYPES.PRODUCT_SCOPE,
       state: 'REJECTED',
       rejectionRationale: 'a bakery at 7am is too loud for reliable recognition',
       incorporatedInto: [],
