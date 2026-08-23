@@ -200,8 +200,10 @@ money to observe nothing the fake does not show.
 ## 6. Implementation commit and Git state
 
 Implementation: **`52e9557`** — *last closure: typed proposal rulings, and routing that acts*.
-Evidence is captured in the commit above it, because a file cannot record its own hash.
-Working tree clean.
+This report is `e68dd24`. Evidence was captured **after** the implementation commit and
+committed separately, because a file cannot record its own hash.
+
+`git status --porcelain` → empty. Branch `phase-5-company-intelligence`.
 
 ## 7. Remaining Critical/High blockers
 
