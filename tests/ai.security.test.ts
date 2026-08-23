@@ -464,6 +464,28 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       if (norm.endsWith('src/engineering/sandboxProfile.ts')) continue;
       if (norm.endsWith('src/engineering/secrets.ts')) continue;
       if (norm.endsWith('src/engineering/recipe.ts')) continue;
+      /*
+       * Phase 6 exceptions, and each is one of the two reasons already established
+       * rather than a third one invented for portability:
+       *
+       *   backup.ts / restore.ts   name the provider only as a CREDENTIAL SHAPE and as
+       *                            the thing that must NOT travel — `sk-ant-`,
+       *                            `.claude`, "Claude authentication". Detecting and
+       *                            excluding a credential is the opposite of coupling
+       *                            to whoever issues it.
+       *
+       *   doctor.ts / machine.ts   the machine doctor tells the owner which engine to
+       *                            install and sign into, and the machine identity
+       *                            records WHICH binary at WHICH path would run. Both
+       *                            are irreducibly provider-specific facts about a
+       *                            computer, for the same reason host.ts is — and, like
+       *                            host.ts, neither reaches into the adapter. The test
+       *                            below proves it.
+       */
+      if (norm.endsWith('src/portability/backup.ts')) continue;
+      if (norm.endsWith('src/portability/restore.ts')) continue;
+      if (norm.endsWith('src/portability/doctor.ts')) continue;
+      if (norm.endsWith('src/portability/machine.ts')) continue;
       const text = readFileSync(file, 'utf8');
       const stripped = text
         .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -489,6 +511,10 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       'src/engineering/sandboxProfile.ts',
       'src/engineering/secrets.ts',
       'src/engineering/recipe.ts',
+      'src/portability/backup.ts',
+      'src/portability/restore.ts',
+      'src/portability/doctor.ts',
+      'src/portability/machine.ts',
     ]) {
       expect(readFileSync(file, 'utf8')).not.toContain('engine/claude');
     }
