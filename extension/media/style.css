@@ -1,0 +1,216 @@
+/*
+ * SERVA CONTROL CENTER.
+ *
+ * LOGICAL PROPERTIES THROUGHOUT. `margin-inline-start` rather than `margin-left`, so an
+ * Arabic interface moves the furniture and not only the words — a layout that sets
+ * `direction: rtl` and keeps physical margins produces mirrored text inside an unmirrored
+ * frame, which reads worse than not translating at all.
+ *
+ * Colours come from VS Code's own theme variables, so the panel follows the editor rather
+ * than fighting it, and contrast is whatever the owner already chose.
+ */
+
+:root {
+  --serva-gap: 12px;
+  --serva-radius: 6px;
+}
+
+body {
+  margin: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+
+.app {
+  padding: calc(var(--serva-gap) * 2);
+  max-width: 68rem;
+  margin-inline: auto;
+}
+
+.app__header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.app__subtitle {
+  margin-block: 4px calc(var(--serva-gap));
+  opacity: 0.8;
+}
+
+.app__status {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: var(--serva-radius);
+  font-weight: 600;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.app__status--blocked,
+.app__status--recovery_required {
+  background: var(--vscode-inputValidation-errorBackground);
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-foreground));
+}
+
+.app__status--owner_action,
+.app__status--unqualified,
+.app__status--divergence {
+  background: var(--vscode-inputValidation-warningBackground);
+  color: var(--vscode-inputValidation-warningForeground, var(--vscode-foreground));
+}
+
+section {
+  margin-block-start: calc(var(--serva-gap) * 2);
+  padding-block-start: var(--serva-gap);
+  border-block-start: 1px solid var(--vscode-panel-border);
+}
+
+h2 {
+  font-size: 1.05rem;
+  margin-block: 0 var(--serva-gap);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px var(--serva-gap);
+  margin: 0;
+}
+
+.facts dt {
+  opacity: 0.75;
+}
+
+.facts dd {
+  margin-inline-start: 0;
+}
+
+/*
+ * TECHNICAL CONTENT KEEPS ITS DIRECTION. A path, a hash or an agent id is an ordered
+ * sequence whose meaning depends on that order; `unicode-bidi: isolate` stops the
+ * surrounding RTL context from reordering it.
+ */
+.technical {
+  unicode-bidi: isolate;
+  font-family: var(--vscode-editor-font-family);
+  font-size: 0.95em;
+}
+
+.stages,
+.conditions,
+.blockers,
+.stale,
+.decision__options {
+  list-style: none;
+  padding-inline-start: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.stage,
+.condition {
+  display: flex;
+  gap: var(--serva-gap);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: var(--serva-radius);
+  background: var(--vscode-editorWidget-background);
+}
+
+.stage--complete .stage__state {
+  color: var(--vscode-testing-iconPassed, inherit);
+}
+
+.condition--not_met .condition__state {
+  color: var(--vscode-testing-iconFailed, inherit);
+  font-weight: 600;
+}
+
+.condition--not_verified .condition__state {
+  color: var(--vscode-testing-iconQueued, inherit);
+  font-weight: 600;
+}
+
+.condition__detail {
+  flex-basis: 100%;
+  opacity: 0.8;
+  font-size: 0.95em;
+}
+
+.decision {
+  padding: var(--serva-gap);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--serva-radius);
+  margin-block-end: var(--serva-gap);
+}
+
+.decision h3 {
+  margin-block: 0 8px;
+  font-size: 1rem;
+}
+
+.badge--blocking {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--serva-radius);
+  background: var(--vscode-inputValidation-warningBackground);
+  margin: 0 0 8px;
+  font-size: 0.85em;
+}
+
+.decision__options li {
+  display: flex;
+  gap: var(--serva-gap);
+  align-items: baseline;
+}
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  /* A real target size, so this is usable with a touch screen or an unsteady hand. */
+  min-height: 32px;
+  min-width: 44px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: var(--serva-radius);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+/* Focus is VISIBLE. A keyboard user who cannot see where they are cannot use this. */
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+input[type='text'] {
+  font: inherit;
+  padding: 6px 8px;
+  min-height: 32px;
+  border-radius: var(--serva-radius);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  inline-size: 100%;
+}
+
+.empty {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

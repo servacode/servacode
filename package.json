@@ -1,7 +1,7 @@
 {
   "name": "serva-code",
   "version": "0.2.0",
-  "description": "Serva Code \u2014 Local AI Software Company Operating System. Phase 2 Core Engine.",
+  "description": "Serva Code — Local AI Software Company Operating System. Phase 2 Core Engine.",
   "type": "module",
   "license": "UNLICENSED",
   "private": true,
@@ -16,12 +16,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p extension/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src tests scripts",
-    "format": "prettier --write \"{src,tests,scripts}/**/*.{ts,mjs}\"",
-    "format:check": "prettier --check \"{src,tests,scripts}/**/*.{ts,mjs}\"",
+    "lint": "eslint src tests scripts extension/src",
+    "format": "prettier --write \"{src,tests,scripts}/**/*.{ts,mjs}\" \"extension/src/**/*.ts\"",
+    "format:check": "prettier --check \"{src,tests,scripts}/**/*.{ts,mjs}\" \"extension/src/**/*.ts\"",
     "catalogues": "node scripts/generate-catalogues.mjs",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
     "serva": "node dist/cli/main.js",
@@ -29,13 +29,15 @@
     "generate": "npm run catalogues && npm run contracts",
     "test:claude": "vitest run --config vitest.live.config.ts",
     "test:engineering-live": "vitest run --config vitest.engineering.config.ts",
-    "test:intelligence-live": "vitest run --config vitest.intelligence.config.ts"
+    "test:intelligence-live": "vitest run --config vitest.intelligence.config.ts",
+    "build:extension": "tsc -p extension/tsconfig.json"
   },
   "dependencies": {
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.7.5",
+    "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^8.8.1",
     "@typescript-eslint/parser": "^8.8.1",
     "eslint": "^9.12.0",

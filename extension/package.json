@@ -1,0 +1,106 @@
+{
+  "name": "serva-code",
+  "displayName": "Serva Code",
+  "description": "Your private AI software company, inside VS Code.",
+  "version": "1.0.0",
+  "publisher": "serva",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:.serva/SCHEMA_VERSION"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Serva reads and writes a project's governed truth and can dispatch engineering work. That is not something to do in a workspace you have not decided to trust."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "serva.openControlCenter",
+        "title": "Serva: Open Control Center",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "serva.refresh",
+        "title": "Serva: Refresh"
+      },
+      {
+        "command": "serva.answerDecision",
+        "title": "Serva: Answer an owner decision"
+      },
+      {
+        "command": "serva.machineDoctor",
+        "title": "Serva: Machine doctor"
+      },
+      {
+        "command": "serva.createBackup",
+        "title": "Serva: Create a verified backup"
+      },
+      {
+        "command": "serva.restoreBackup",
+        "title": "Serva: Restore a backup"
+      },
+      {
+        "command": "serva.releaseReadiness",
+        "title": "Serva: Release readiness"
+      },
+      {
+        "command": "serva.coverage",
+        "title": "Serva: Lifecycle and gate coverage"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "serva.company",
+          "name": "Serva Company"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Serva Code",
+      "properties": {
+        "serva.language": {
+          "type": "string",
+          "enum": [
+            "en",
+            "ar"
+          ],
+          "default": "en",
+          "description": "Interface language. Arabic mirrors the layout; technical content stays left-to-right."
+        },
+        "serva.backupLocation": {
+          "type": "string",
+          "default": "",
+          "description": "Where verified backups are written. Empty means Serva asks each time."
+        },
+        "serva.advancedDiagnostics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show run ids, boundary fingerprints and raw evidence alongside the owner view."
+        },
+        "serva.organizationalLearning": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow generalized patterns and lessons to be reused across your local projects. Never raw requirements, code, research or identifying facts."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0"
+  }
+}

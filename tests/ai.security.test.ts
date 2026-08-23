@@ -486,6 +486,13 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       if (norm.endsWith('src/portability/restore.ts')) continue;
       if (norm.endsWith('src/portability/doctor.ts')) continue;
       if (norm.endsWith('src/portability/machine.ts')) continue;
+      /*
+       * probes.ts is host.ts's reason exactly: probing WSL for the engine binary and for
+       * whether a subscription session exists are measurements of a computer, not
+       * knowledge of an adapter. It reads a credentials FILE's existence and never its
+       * contents, and never the account behind it.
+       */
+      if (norm.endsWith('src/portability/probes.ts')) continue;
       const text = readFileSync(file, 'utf8');
       const stripped = text
         .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -515,6 +522,7 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       'src/portability/restore.ts',
       'src/portability/doctor.ts',
       'src/portability/machine.ts',
+      'src/portability/probes.ts',
     ]) {
       expect(readFileSync(file, 'utf8')).not.toContain('engine/claude');
     }
