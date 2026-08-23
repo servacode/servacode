@@ -1,19 +1,17 @@
  M evidence/BASELINE_COMMIT.txt
  M evidence/GIT_STATE.txt
 --- log ---
+b2396d9 docs: Phase 5 authority lock report
+3455cd5 lock 5c: normalise open questions before routing them
+d3325ab lock 5b: an unresolved item is a question too
+805081f live: the test owner answers value questions with real answers
+8d878d4 lock: five authority defects — handoff, waivers, review scope, proposals, VALUE answers
+5737085 evidence: capture the packaged state
 e4e4a77 docs: Phase 5 final closure report
 7efdfce live: the test owner answers an option that was actually offered
 98d3c15 closure 8c: an unclassified obligation is now impossible, not merely caught
 146e71c closure 8b: the ledger caught a green no-op in the ledger
 b795457 closure 11: the production CLI path, proved in a separate process
 150b6c7 closure 8: a live test cannot pass for an assertion it never reached
-c2db858 closure 6: the learning roles run on the governed substrate
-d39af14 closure 7: a stage that half-completed does not half-repeat
-5adff93 closure 4+5: a change must be carried through, a proposal accepted by its owner
-62c8f87 closure 3: canonical output authority, enforced at the write boundary
-d38f650 closure 2: readiness reconstructs its reviews from the Store
-1a7b4a7 closure 1: an owner approval is bound to what it approves
-a37cdde docs: manifest test count
-8190fef docs: manifest names both commits
 --- branch ---
 phase-5-company-intelligence
