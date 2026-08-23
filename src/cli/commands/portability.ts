@@ -10,6 +10,7 @@ import {
   libraryProvenance,
   readLibrary,
 } from '../../learning/library.js';
+import { acceptanceStatus } from '../../acceptance/status.js';
 import { emitJson, openRuntime, tryOpenRuntime, wantsJson } from './_shared.js';
 import type { ParsedArgs } from '../main.js';
 
@@ -357,4 +358,21 @@ export function cmdOverview(args: ParsedArgs): number {
   console.log('Machine: ' + snapshot.machine.state + ' — ' + snapshot.machine.reason);
   console.log('Release: ' + snapshot.release.status);
   return 0;
+}
+
+/**
+ * `serva acceptance` — the status Serva issues about itself.
+ *
+ * Exits non-zero unless every line is proven. A readiness command that always succeeded
+ * would be a readiness command nobody could put in a pipeline, and the whole point is that
+ * READY is a conjunction rather than a headline.
+ */
+export function cmdAcceptance(args: ParsedArgs): number {
+  const status = acceptanceStatus();
+  if (wantsJson(args)) {
+    emitJson(status);
+    return status.readyForOwnerUse ? 0 : 1;
+  }
+  console.log(status.rendered);
+  return status.readyForOwnerUse ? 0 : 1;
 }

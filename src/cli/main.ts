@@ -18,6 +18,7 @@ import {
 import { cmdImplement } from './commands/implement.js';
 import { cmdIntelligence, INTELLIGENCE_USAGE } from './commands/intelligence.js';
 import {
+  cmdAcceptance,
   cmdActions,
   cmdBackup,
   cmdLibrary,
@@ -119,6 +120,7 @@ const USAGE = [
   '  restore <bundle> --to <dir>   Inspect a restore; --confirm to perform it',
   '  migrate                       The guided move to another computer',
   '  library [list|show|forget]    Machine-local generalised knowledge (--enable)',
+  '  acceptance                    Serva Code 1.0 status, computed from measured truth',
   '  help                          This message',
   '',
   'Global options:',
@@ -159,6 +161,7 @@ const COMMANDS: Readonly<Record<string, Handler>> = {
   restore: cmdRestore,
   migrate: cmdMigrate,
   library: cmdLibrary,
+  acceptance: cmdAcceptance,
   help: () => {
     console.log(USAGE);
     return 0;
