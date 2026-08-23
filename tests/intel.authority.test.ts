@@ -412,13 +412,15 @@ describe('a blocking escalation becomes a question, not an error', () => {
     expect(result.outcome).toBe(DepartmentOutcome.ESCALATED_TO_OWNER);
 
     /*
-     * BOTH escalations become questions. The run's status is ESCALATED — it produced
-     * nothing — so the stage is blocked whatever the agent ticked on the individual
-     * entries. A live run made the point by raising four genuinely unanswerable questions
-     * and marking none of them blocking; hinging the lifecycle on that flag would put the
-     * company behind a checkbox.
+     * BOTH escalations become questions, AND the unresolved item does too — three in all.
+     *
+     * The run's status is ESCALATED, so the stage is blocked whatever the agent ticked on
+     * the individual entries. Two live runs made the point: one raised four genuinely
+     * unanswerable questions and marked none of them blocking, and a later one put four
+     * more in `unresolved` and none in `escalations`. The envelope has two fields for
+     * "I could not resolve this", and reading either one alone loses real questions.
      */
-    expect(result.ownerDecisionIds).toHaveLength(2);
+    expect(result.ownerDecisionIds).toHaveLength(3);
     const decisions = repository(
       f.store,
       ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
@@ -426,6 +428,8 @@ describe('a blocking escalation becomes a question, not an error', () => {
     ).list();
     expect(decisions.map((d) => d.question).join(' ')).toContain('deposit');
     expect(decisions.map((d) => d.question).join(' ')).toContain('baseline');
+    /* The unresolved item is a question too, and reads as one. */
+    expect(decisions.map((d) => d.question).join(' ')).toContain('No-show handling');
     for (const d of decisions) {
       expect(d.state).toBe('OPEN');
       expect(d.blocksWork).toBe(true);

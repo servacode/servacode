@@ -538,7 +538,24 @@ export async function runDepartment<S extends z.ZodTypeAny>(
      * The flag is still honoured where it can be: a run that COMPLETED does not come
      * through here at all, so a concern noted alongside real output raises nothing.
      */
-    const blocking = escalations;
+    /*
+     * ESCALATIONS AND UNRESOLVED ITEMS ARE THE SAME THING.
+     *
+     * A third live run, a third version of the same mistake. This one recorded four
+     * genuine owner questions — the budget ceiling, the payment model, the hold duration,
+     * the catchment — in `unresolved` and none in `escalations`, so nothing was raised and
+     * the company stopped with four answerable questions nobody was asked.
+     *
+     * The envelope has two fields for "I could not resolve this" and Serva was reading
+     * one. An unresolved item IS a question by definition: it is the agent saying it could
+     * not settle something. Both become questions, and an escalation keeps its richer
+     * condition/detail where it has one.
+     */
+    const questions = [
+      ...escalations.map((e) => ({ condition: e.condition, detail: e.detail })),
+      ...unresolved.map((u) => ({ condition: 'UNRESOLVED', detail: u })),
+    ];
+    const blocking = questions;
     if (blocking.length > 0) {
       const raised = raiseEscalationDecisions(deps, config, ctx, blocking);
       if (raised.length > 0) {
