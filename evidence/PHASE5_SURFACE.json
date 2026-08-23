@@ -2,6 +2,7 @@
   "artifactTypes": 110,
   "questionRoutings": [
     "ALREADY_ANSWERED",
+    "ALREADY_ROUTED",
     "EXISTING_STORE_FACT",
     "RESEARCH",
     "UPSTREAM_DEPARTMENT",
@@ -21,15 +22,17 @@
       "beyondContract": [
         "intel.clientInput",
         "intel.projectGoal",
-        "intel.constraint",
-        "intel.openQuestion"
+        "intel.constraint"
       ],
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.productScope",
         "intel.validationRecommendation"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -47,12 +50,15 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.userSegment",
         "intel.jobToBeDone",
         "intel.currentAlternative",
         "intel.pain",
         "intel.discoveryFindings"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -70,9 +76,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.productScope",
         "intel.validationRecommendation"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -92,6 +101,8 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.businessRule",
         "intel.actor",
         "intel.role",
@@ -100,6 +111,7 @@
         "intel.glossary",
         "intel.financialLogic"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -114,10 +126,13 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.requirement",
         "intel.acceptanceCriterion",
         "intel.requirementBaseline"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -131,8 +146,11 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.nfr"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -143,8 +161,11 @@
       "beyondContract": [],
       "contractPermits": [
         "intel.ownerDecisionRequest",
-        "intel.assumption"
+        "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-050",
         "SC-AGENT-051"
@@ -162,9 +183,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.researchFinding",
         "intel.competitorProfile"
       ],
+      "usesResearchGateway": true,
       "independentOf": []
     },
     {
@@ -178,8 +202,11 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.claimVerification"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-060",
         "SC-AGENT-061",
@@ -198,9 +225,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.tableStakes",
         "intel.marketGap"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-063"
       ]
@@ -218,10 +248,13 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.differentiator",
         "intel.competitivePosition",
         "intel.proposal"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-063"
       ]
@@ -241,6 +274,8 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.architectureModel",
         "intel.moduleContract",
         "intel.adr",
@@ -248,6 +283,7 @@
         "intel.complexityJustification",
         "intel.nfrMapping"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -258,8 +294,11 @@
       "beyondContract": [],
       "contractPermits": [
         "intel.ownerDecisionRequest",
-        "intel.assumption"
+        "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-070",
         "SC-AGENT-071"
@@ -276,9 +315,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.technologyEvaluation",
         "intel.researchFinding"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -292,6 +334,8 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.architectureModel",
         "intel.moduleContract",
         "intel.adr",
@@ -299,6 +343,7 @@
         "intel.complexityJustification",
         "intel.nfrMapping"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -316,12 +361,15 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.dataModel",
         "intel.entityOwnership",
         "intel.dataClassification",
         "intel.retentionPolicy",
         "intel.migrationStrategy"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -332,8 +380,11 @@
       "beyondContract": [],
       "contractPermits": [
         "intel.ownerDecisionRequest",
-        "intel.assumption"
+        "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-080"
       ]
@@ -356,6 +407,8 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.threatModel",
         "intel.trustBoundary",
         "intel.abuseCase",
@@ -366,6 +419,7 @@
         "intel.securityNfr",
         "intel.residualRisk"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -383,12 +437,15 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.userJourney",
         "intel.flow",
         "intel.informationArchitecture",
         "intel.navigationModel",
         "intel.stateCoverage"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -399,8 +456,11 @@
       "beyondContract": [],
       "contractPermits": [
         "intel.ownerDecisionRequest",
-        "intel.assumption"
+        "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-120"
       ]
@@ -420,6 +480,8 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.designTokenSet",
         "intel.componentSpec",
         "intel.layoutSystem",
@@ -429,6 +491,7 @@
         "intel.designDecision",
         "intel.designException"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -442,9 +505,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.screenComposition",
         "intel.layoutSystem"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -455,8 +521,11 @@
       "beyondContract": [],
       "contractPermits": [
         "intel.ownerDecisionRequest",
-        "intel.assumption"
+        "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-130",
         "SC-AGENT-131"
@@ -476,11 +545,14 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.adminOperabilityReview",
         "intel.configurationRegister",
         "intel.protectedRule",
         "intel.adminAuditRequirement"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -495,9 +567,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.adminIa",
         "intel.operationalControl"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -512,8 +587,11 @@
       ],
       "contractPermits": [
         "intel.ownerDecisionRequest",
-        "intel.assumption"
+        "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -528,9 +606,12 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.costModel",
         "intel.costAssessment"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -547,6 +628,8 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.environmentModel",
         "intel.deploymentStrategy",
         "intel.configurationDelivery",
@@ -554,6 +637,7 @@
         "intel.backupSpec",
         "intel.rollbackSpec"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -567,8 +651,11 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.testStrategy"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -582,8 +669,11 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.testCase"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -597,8 +687,11 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.proposal"
       ],
+      "usesResearchGateway": false,
       "independentOf": []
     },
     {
@@ -614,10 +707,13 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.lessonLearned",
         "intel.reusablePattern",
         "intel.failedApproach"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-291"
       ]
@@ -633,68 +729,14 @@
       "contractPermits": [
         "intel.ownerDecisionRequest",
         "intel.assumption",
+        "intel.openQuestion",
+        "intel.researchRequest",
         "intel.applicabilityAssessment"
       ],
+      "usesResearchGateway": false,
       "independentOf": [
         "SC-AGENT-290"
       ]
-    }
-  ],
-  "gatesDefined": [
-    {
-      "id": "SC-GATE-INTAKE",
-      "blocking": true,
-      "criteria": 3
-    },
-    {
-      "id": "SC-GATE-DISCOVERY",
-      "blocking": true,
-      "criteria": 4
-    },
-    {
-      "id": "SC-GATE-PRODUCT_VALIDATION",
-      "blocking": true,
-      "criteria": 3
-    },
-    {
-      "id": "SC-GATE-REQUIREMENTS",
-      "blocking": true,
-      "criteria": 5
-    },
-    {
-      "id": "SC-GATE-COMPETITIVE",
-      "blocking": true,
-      "criteria": 4
-    },
-    {
-      "id": "SC-GATE-FEASIBILITY",
-      "blocking": true,
-      "criteria": 3
-    },
-    {
-      "id": "SC-GATE-ARCHITECTURE",
-      "blocking": true,
-      "criteria": 4
-    },
-    {
-      "id": "SC-GATE-SECURITY_DESIGN",
-      "blocking": true,
-      "criteria": 4
-    },
-    {
-      "id": "SC-GATE-TECHNOLOGY",
-      "blocking": true,
-      "criteria": 3
-    },
-    {
-      "id": "SC-GATE-DESIGN",
-      "blocking": true,
-      "criteria": 6
-    },
-    {
-      "id": "SC-GATE-PLAN",
-      "blocking": true,
-      "criteria": 2
     }
   ]
 }
