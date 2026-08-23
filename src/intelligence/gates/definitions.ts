@@ -1,4 +1,5 @@
 import { EvidenceClass, OnMissingEvidence, Severity } from '../../vocab/index.js';
+import { DOWNSTREAM_GATES } from './downstream.js';
 import type { Criterion, QualityGate } from '../../gates/types.js';
 
 /**
@@ -309,6 +310,18 @@ export const UPSTREAM_GATES: readonly QualityGate[] = Object.freeze([
   PLAN_GATE,
 ]);
 
+/**
+ * Every gate Serva defines, upstream and downstream.
+ *
+ * Phase 4 owns SC-GATE-CODE_REVIEW against real engineering evidence and is deliberately
+ * NOT re-declared here: two definitions of one gate would be two answers to one question,
+ * and the one that lost would be whichever module a caller happened to import.
+ */
+export const INTELLIGENCE_GATES: readonly QualityGate[] = Object.freeze([
+  ...UPSTREAM_GATES,
+  ...DOWNSTREAM_GATES,
+]);
+
 export function gateById(id: string): QualityGate | undefined {
-  return UPSTREAM_GATES.find((g) => g.id === id);
+  return INTELLIGENCE_GATES.find((g) => g.id === id);
 }

@@ -172,6 +172,26 @@ export const ARTIFACT_TYPES = {
   FAILED_APPROACH: 'intel.failedApproach',
   APPLICABILITY_ASSESSMENT: 'intel.applicabilityAssessment',
   CANDIDATE_ITEM: 'intel.candidateItem',
+
+  /* ------------------------------------------------- downstream quality (Phase 6) */
+  QA_VERDICT: 'intel.qaVerdict',
+  DEFECT: 'intel.defect',
+  ACCESSIBILITY_VERDICT: 'intel.accessibilityVerdict',
+  SECURITY_VERDICT: 'intel.securityVerdict',
+  SECURITY_FINDING: 'intel.securityFinding',
+  PERFORMANCE_VERDICT: 'intel.performanceVerdict',
+  ACCEPTANCE_VERDICT: 'intel.acceptanceVerdict',
+
+  /* --------------------------------------------- release and operations (Phase 6) */
+  RELEASE: 'intel.release',
+  RELEASE_RECOMMENDATION: 'intel.releaseRecommendation',
+  HANDOVER_PACKAGE: 'intel.handoverPackage',
+  RUNBOOK: 'intel.runbook',
+  OPERATIONAL_READINESS_VERDICT: 'intel.operationalReadinessVerdict',
+
+  /* ------------------------------------------------------- incidents (Phase 6) */
+  INCIDENT: 'intel.incident',
+  POST_INCIDENT_REVIEW: 'intel.postIncidentReview',
 } as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[keyof typeof ARTIFACT_TYPES];
 

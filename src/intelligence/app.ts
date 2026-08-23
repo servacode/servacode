@@ -20,6 +20,9 @@ import { DATA_SECURITY_DEPARTMENTS } from './departments/dataSecurity.js';
 import { EXPERIENCE_DEPARTMENTS } from './departments/experience.js';
 import { PLANNING_DEPARTMENTS } from './departments/planning.js';
 import { LEARNING_DEPARTMENTS } from './departments/learning.js';
+import { QUALITY_DEPARTMENTS } from './departments/quality.js';
+import { RELEASE_DEPARTMENTS } from './departments/release.js';
+import { INCIDENT_DEPARTMENTS } from './departments/incident.js';
 import { PHASE5_ENABLED_AGENTS } from './enabled.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { fail } from '../core/errors.js';
@@ -72,6 +75,32 @@ export const UPSTREAM_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
    * checked when it runs is a department nobody checks.
    */
   ...LEARNING_DEPARTMENTS,
+]);
+
+/**
+ * The downstream company: quality, release, operations and incidents.
+ *
+ * Kept separate from `UPSTREAM_DEPARTMENTS` because the two answer different questions.
+ * Upstream decides WHAT to build and stops at the engineering handoff; downstream judges
+ * what was built and decides whether it may be delivered. An orchestrator run for a
+ * profile's upstream plan must not accidentally schedule an acceptance verifier over a
+ * product that does not exist yet.
+ */
+export const DOWNSTREAM_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
+  ...QUALITY_DEPARTMENTS,
+  ...RELEASE_DEPARTMENTS,
+  ...INCIDENT_DEPARTMENTS,
+]);
+
+/**
+ * Every department Serva has, upstream and downstream.
+ *
+ * The list coverage is computed from, and the list authority validation runs over — a
+ * department that is only checked when it happens to run is a department nobody checks.
+ */
+export const ALL_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
+  ...UPSTREAM_DEPARTMENTS,
+  ...DOWNSTREAM_DEPARTMENTS,
 ]);
 
 export interface IntelligenceDeps {

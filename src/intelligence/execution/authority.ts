@@ -159,6 +159,40 @@ const OUTPUT_NAMES: Readonly<Record<string, ArtifactType>> = Object.freeze({
   'screen compositions': ARTIFACT_TYPES.SCREEN_COMPOSITION,
   'layout specifications': ARTIFACT_TYPES.LAYOUT_SYSTEM,
   CandidateItem: ARTIFACT_TYPES.CANDIDATE_ITEM,
+
+  /* ------------------------------------------------ downstream quality (Phase 6) */
+  QAVerdict: ARTIFACT_TYPES.QA_VERDICT,
+  Defect: ARTIFACT_TYPES.DEFECT,
+  AccessibilityVerdict: ARTIFACT_TYPES.ACCESSIBILITY_VERDICT,
+  SecurityVerdict: ARTIFACT_TYPES.SECURITY_VERDICT,
+  SecurityFinding: ARTIFACT_TYPES.SECURITY_FINDING,
+  PerformanceVerdict: ARTIFACT_TYPES.PERFORMANCE_VERDICT,
+  /*
+   * SC-AGENT-240's contract states its output as prose — "AcceptanceVerdict with
+   * qualifications" — and the qualification is part of the artifact rather than a second
+   * output. Mapped literally rather than by loosening the parser, which would quietly
+   * widen every authority that happens to have a trailing clause.
+   */
+  'AcceptanceVerdict with qualifications': ARTIFACT_TYPES.ACCEPTANCE_VERDICT,
+
+  /* -------------------------------------------- release and operations (Phase 6) */
+  Release: ARTIFACT_TYPES.RELEASE,
+  ReleaseRecommendation: ARTIFACT_TYPES.RELEASE_RECOMMENDATION,
+  HandoverPackage: ARTIFACT_TYPES.HANDOVER_PACKAGE,
+  Runbook: ARTIFACT_TYPES.RUNBOOK,
+  OperationalReadinessVerdict: ARTIFACT_TYPES.OPERATIONAL_READINESS_VERDICT,
+
+  /* ------------------------------------------------------ incidents (Phase 6) */
+  Incident: ARTIFACT_TYPES.INCIDENT,
+  /*
+   * SC-AGENT-271 states its second output as "corrective action Proposal[]". The parser
+   * strips the array marker and then the trailing qualifier — which exists for phrasings
+   * like "CompetitorProfile[] raw" — and here the qualifier IS the type name, leaving
+   * "corrective action". Mapped literally rather than by loosening the strip, which would
+   * quietly change how every other contract's outputs resolve.
+   */
+  'corrective action': ARTIFACT_TYPES.PROPOSAL,
+  PostIncidentReview: ARTIFACT_TYPES.POST_INCIDENT_REVIEW,
 });
 
 /**

@@ -64,6 +64,7 @@ import { checkConfiguration } from '../checks/configuration.js';
 import { checkTraceability } from '../checks/traceability.js';
 import { questionKindRefusal } from '../departments/intake.js';
 import { gateById } from './definitions.js';
+import { downstreamGateById, downstreamStoreAnswer } from './downstream.js';
 import type { CriterionEvaluation } from '../../gates/types.js';
 import type { GateEngineDeps } from '../../gates/engine.js';
 import type { GateEvaluator } from '../execution/orchestrator.js';
@@ -208,6 +209,35 @@ export function evaluationsFor(
   };
 
   const store = deps.store;
+
+  /*
+   * DOWNSTREAM GATES ARE EVALUATED GENERICALLY.
+   *
+   * The eleven upstream gates each ask something specific enough to need its own query, and
+   * the switch below is that. The downstream seven are uniform by construction: a criterion
+   * is either a verdict somebody INDEPENDENT reached, which `judged` already resolves from
+   * the run that reached it, or a fact about the Store, which `downstreamStoreAnswer`
+   * computes.
+   *
+   * Writing seven more hand-rolled cases would have produced seven more places to forget
+   * that absent evidence is INDETERMINATE rather than NOT_MET — and `undefined` is carried
+   * through the answer type precisely so that cannot be collapsed into a false.
+   */
+  if (downstreamGateById(gateId) !== undefined) {
+    for (const c of gate.criteria) {
+      if (c.evaluation.kind === 'VERIFIER_RESULT') {
+        out.push(judged(c.id));
+        continue;
+      }
+      const answer = downstreamStoreAnswer(store, c.id);
+      out.push(
+        answer === undefined
+          ? indeterminate(c.id, IndeterminateReason.EVIDENCE_ABSENT)
+          : measured(c.id, answer),
+      );
+    }
+    return out;
+  }
 
   switch (gateId) {
     case 'SC-GATE-INTAKE': {
