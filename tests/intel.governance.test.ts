@@ -749,7 +749,13 @@ describe('a proposal is not scope', () => {
 });
 
 describe('learning crosses the boundary only as a generalisation', () => {
-  const CURATOR = 'SC-AGENT-280';
+  /*
+   * SC-AGENT-290, not 280. `32` gives LessonLearned, ReusablePattern and FailedApproach to
+   * the Knowledge Curator; SC-AGENT-280 is the Improvement Analyst and produces proposals
+   * about the project it is looking at. The tests previously used 280 here, which named
+   * the wrong role for the right behaviour.
+   */
+  const CURATOR = 'SC-AGENT-290';
 
   it('a lesson still carrying project specifics is refused, with every reason', () => {
     const f = setup();
@@ -830,6 +836,77 @@ describe('learning crosses the boundary only as a generalisation', () => {
     });
     expect(patternUsageRefusal(f.store, pattern.id)).toBeUndefined();
     expect(applyPattern(f, { patternId: pattern.id }).status).toBe('APPLIED');
+  });
+
+  it('a curator cannot assess that its own pattern applies', () => {
+    const f = setup();
+    const pattern = contributePattern(f, {
+      name: 'Offline-first order capture',
+      problem: 'connectivity drops during service',
+      solution: 'queue locally and reconcile',
+      applicableWhen: 'the operator cannot wait for the network',
+      notApplicableWhen: ['when two operators may edit the same order'],
+      curatedBy: CURATOR,
+    });
+
+    /*
+     * SPEC §40. The curator has just spent a run arguing this is worth reusing; asking it
+     * whether the pattern applies is asking it to agree with itself. The refusal is on the
+     * ACTOR, so a caller-supplied string cannot stand in for the governed assessor.
+     */
+    expect(() =>
+      assessApplicability(f, {
+        patternId: pattern.id,
+        applies: true,
+        rationale: 'it is obviously right',
+        confidence: 'HIGH',
+        differences: ['none worth mentioning'],
+        assessedBy: CURATOR,
+      }),
+    ).toThrow(/assessed by SC-AGENT-291/);
+
+    /* And an arbitrary third actor is not the assessor either. */
+    expect(() =>
+      assessApplicability(f, {
+        patternId: pattern.id,
+        applies: true,
+        rationale: 'looks fine',
+        confidence: 'LOW',
+        differences: ['a different shop'],
+        assessedBy: 'SC-AGENT-070',
+      }),
+    ).toThrow(/assessed by SC-AGENT-291/);
+
+    /* The canonical assessor may. */
+    assessApplicability(f, {
+      patternId: pattern.id,
+      applies: true,
+      rationale: 'the same interruption pattern applies here',
+      confidence: 'MEDIUM',
+      differences: ['a single operator, where the earlier project had three'],
+      assessedBy: 'SC-AGENT-291',
+    });
+    expect(patternUsageRefusal(f.store, pattern.id)).toBeUndefined();
+  });
+
+  it('the three learning roles are separate governed departments', async () => {
+    const { LEARNING_DEPARTMENTS } = await import('../src/intelligence/departments/learning.js');
+    const byAgent = new Map(LEARNING_DEPARTMENTS.map((d) => [d.agentId, d]));
+
+    /* Each writes only what 32 gives it. */
+    expect(byAgent.get('SC-AGENT-280')?.produces).toEqual([ARTIFACT_TYPES.PROPOSAL]);
+    expect(byAgent.get('SC-AGENT-290')?.produces).toEqual([
+      ARTIFACT_TYPES.LESSON_LEARNED,
+      ARTIFACT_TYPES.REUSABLE_PATTERN,
+      ARTIFACT_TYPES.FAILED_APPROACH,
+    ]);
+    expect(byAgent.get('SC-AGENT-291')?.produces).toEqual([
+      ARTIFACT_TYPES.APPLICABILITY_ASSESSMENT,
+    ]);
+
+    /* And the curator and the assessor are declared independent, both ways. */
+    expect(byAgent.get('SC-AGENT-290')?.independentOf).toContain('SC-AGENT-291');
+    expect(byAgent.get('SC-AGENT-291')?.independentOf).toContain('SC-AGENT-290');
   });
 
   it('a pattern assessed as NOT applying stays unusable', () => {

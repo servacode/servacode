@@ -266,6 +266,15 @@ export function assessApplicability(
       specRef: '§38',
     });
   }
+  if (o.assessedBy !== APPLICABILITY_ASSESSOR) {
+    return fail({
+      code: 'E_GATE_AUTHORITY',
+      message: 'Applicability is assessed by ' + APPLICABILITY_ASSESSOR + ', not ' + o.assessedBy,
+      remedy:
+        'A caller-supplied actor string is not proof of a governed run. Route this through the applicability department, which runs as the canonical assessor.',
+      specRef: '§38',
+    });
+  }
   if (o.applies && o.differences.length === 0) {
     return fail({
       code: 'E_VALIDATION',
@@ -308,6 +317,10 @@ export function assessApplicability(
  * SPEC: §38 — prior success is not authority. A pattern is usable here only when somebody
  * independent assessed it as applying HERE, and said why. Returns the refusal rather than
  * a boolean so the caller can put the reason in front of whoever is about to be told no.
+ *
+ * "Somebody independent" is checked, not assumed. The assessment must come from
+ * SC-AGENT-291 and the pattern must not have been curated by the same actor — an assessor
+ * that curated the pattern is answering a question it has already argued the answer to.
  */
 export function patternUsageRefusal(store: Store, patternId: string): string | undefined {
   const pattern = repository(store, ARTIFACT_TYPES.REUSABLE_PATTERN, ReusablePatternSchema).get(
@@ -328,11 +341,34 @@ export function patternUsageRefusal(store: Store, patternId: string): string | u
       ' has no applicability assessment for this project: it worked somewhere else, which is not a reason'
     );
   }
-  if (!assessments.some((a) => a.applies)) {
+  const accepting = assessments.filter((a) => a.applies);
+  if (accepting.length === 0) {
     return 'pattern ' + patternId + ' was assessed as NOT applying to this project';
+  }
+
+  /* §40: the assessor is the canonical one, and is not the curator. */
+  const curator = pattern.meta.attribution.agentId;
+  const independent = accepting.filter(
+    (a) => a.assessedBy === APPLICABILITY_ASSESSOR && a.assessedBy !== curator,
+  );
+  if (independent.length === 0) {
+    return (
+      'pattern ' +
+      patternId +
+      ' has no INDEPENDENT applicability assessment: it was curated by ' +
+      String(curator) +
+      ' and assessed by ' +
+      accepting.map((a) => a.assessedBy).join(', ') +
+      '. A curator judging its own pattern is not a second opinion.'
+    );
   }
   return undefined;
 }
+
+/** The one role `32` authorises to judge whether a pattern applies. */
+export const APPLICABILITY_ASSESSOR = 'SC-AGENT-291';
+/** The one role `32` authorises to publish cross-project knowledge. */
+export const KNOWLEDGE_CURATOR = 'SC-AGENT-290';
 
 /** Mark a candidate applied, once something independent said it applies. */
 export function applyPattern(

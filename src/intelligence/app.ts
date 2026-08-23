@@ -19,6 +19,7 @@ import { ARCHITECTURE_DEPARTMENTS } from './departments/architecture.js';
 import { DATA_SECURITY_DEPARTMENTS } from './departments/dataSecurity.js';
 import { EXPERIENCE_DEPARTMENTS } from './departments/experience.js';
 import { PLANNING_DEPARTMENTS } from './departments/planning.js';
+import { LEARNING_DEPARTMENTS } from './departments/learning.js';
 import { PHASE5_ENABLED_AGENTS } from './enabled.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { fail } from '../core/errors.js';
@@ -65,6 +66,12 @@ export const UPSTREAM_DEPARTMENTS: readonly DepartmentConfig[] = Object.freeze([
   ...DATA_SECURITY_DEPARTMENTS,
   ...EXPERIENCE_DEPARTMENTS,
   ...PLANNING_DEPARTMENTS,
+  /*
+   * Learning sits at stage 053, which is phase G and therefore not in any upstream plan.
+   * Registered anyway so the authority validation covers it: a department that is only
+   * checked when it runs is a department nobody checks.
+   */
+  ...LEARNING_DEPARTMENTS,
 ]);
 
 export interface IntelligenceDeps {

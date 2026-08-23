@@ -75,9 +75,25 @@ export const PHASE5_RESEARCH_AGENTS: ReadonlySet<string> = new Set([
   'SC-AGENT-063', // Source Verifier      - NO network, by design; checks captures only
 ]);
 
+/**
+ * Organizational learning: SC-AGENT-280/290/291.
+ *
+ * A separate decision again, because this is the only class whose output is intended to
+ * OUTLIVE the project it came from. Enabling it grants the ability to write things a
+ * future project may read — which is why the leakage wall is enforced at persist time
+ * rather than trusted to the prompt, and why the curator and the assessor are declared
+ * independent of one another.
+ */
+export const PHASE5_LEARNING_AGENTS: ReadonlySet<string> = new Set([
+  'SC-AGENT-280', // Improvement Analyst    - what a future project would want to know
+  'SC-AGENT-290', // Knowledge Curator      - generalises, or refuses
+  'SC-AGENT-291', // Applicability Assessor - INDEPENDENT of 290
+]);
+
 /** Everything Phase 5 can currently run. */
 export const PHASE5_ENABLED_AGENTS: ReadonlySet<string> = new Set([
   ...PHASE5_INTELLIGENCE_AGENTS,
   ...PHASE5_RESEARCH_AGENTS,
   ...PHASE5_DESIGN_AGENTS,
+  ...PHASE5_LEARNING_AGENTS,
 ]);
