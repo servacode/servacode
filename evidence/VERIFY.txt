@@ -23,187 +23,157 @@ All matched files use Prettier code style!
 
  RUN  v2.1.9 D:/SEVACODE
 
- ✓ tests/intel.invariants.test.ts (54 tests) 40ms
- ✓ tests/eng.substrate.test.ts (63 tests) 1061ms
-   ✓ the simulated substrate is deterministic and claims no containment > a command past its deadline is killed and reported as timed out 339ms
- ✓ tests/blockers.test.ts (46 tests) 1048ms
- ✓ tests/ai.runtime.test.ts (56 tests) 11975ms
-   ✓ AgentRuntime > creates the run record before invoking the engine (RI-1) 735ms
-   ✓ AgentRuntime > the run event chain is verifiable 333ms
-   ✓ AgentRuntime > completes when the envelope is valid 716ms
-   ✓ AgentRuntime > retries exactly once on invalid output, then gives up 937ms
-   ✓ AgentRuntime > the repair attempt carries the validation error and starts a new session 1413ms
-   ✓ AgentRuntime > prose alone is not accepted as output 837ms
-   ✓ AgentRuntime > a correct refusal is recorded as REFUSED, not as a failure 402ms
-   ✓ AgentRuntime > an unauthenticated engine BLOCKS the work item rather than failing it 519ms
-   ✓ AgentRuntime > a timeout is FAILED with RUN_TIMEOUT preserving the cause 401ms
-   ✓ AgentRuntime > an interrupted run leaves an incomplete trace and is re-dispatchable from the store 1236ms
-   ✓ AgentRuntime > every run gets its own session, never a shared one 1196ms
-   ✓ AgentRuntime > the projection is rebuilt from the event log 1181ms
-   ✓ evidence claims are claims until the runtime corroborates them > a fabricated claim terminates the run as EVIDENCE_VIOLATION 776ms
-   ✓ evidence claims are claims until the runtime corroborates them > an honest run with no claims completes normally 351ms
- ✓ tests/eng.sandboxvalidity.test.ts (42 tests) 15167ms
-   ✓ a rejected profile stops the Producer before any model call > refuses, records no run, and spends nothing 2399ms
-   ✓ a rejected profile stops the Producer before any model call > the same dispatch proceeds on an engine that accepts the profile 3365ms
-   ✓ a worktree git pointer works in the environment that will use it > is relative, and uses forward slashes 2049ms
-   ✓ the verified change set names the blob git will actually store > matches git under core.autocrlf, and integrates 7115ms
- ✓ tests/intel.authority.test.ts (15 tests) 14312ms
-   ✓ independence is enforced by the runtime, not by the prompt > an actor cannot be independent of itself 470ms
-   ✓ independence is enforced by the runtime, not by the prompt > a reviewer handed the author’s own run is refused before it is dispatched 527ms
-   ✓ independence is enforced by the runtime, not by the prompt > the same reviewer reading the ARTIFACT rather than the author runs normally 2093ms
-   ✓ external content cannot become instruction > a run that hallucinates an owner approval writes no owner approval 1082ms
-   ✓ an owner answer is idempotent and attributable > answering twice with the same answer produces one decision, not two 511ms
-   ✓ an owner answer is idempotent and attributable > the answer is versioned, so the store can say what was answered and when 464ms
-   ✓ READY is derived from the profile, and cannot be reached by omission > a project with no run at all is NOT_READY, and says so once 344ms
-   ✓ a blocking escalation becomes a question, not an error > the runtime raises the owner decision; the agent writes no canon and no approval 1866ms
-   ✓ a blocking escalation becomes a question, not an error > a run that BLOCKED rather than escalated still gets its question asked 2241ms
-   ✓ a blocking escalation becomes a question, not an error > a run that COMPLETED and merely flagged a concern raises nothing 2052ms
-   ✓ research nobody could have performed is recorded as not performed > a discovery run claiming interviews has the claim overridden, not believed 2601ms
- ✓ tests/intel.governance.test.ts (22 tests) 13450ms
-   ✓ a change is assessed before it is anything else > an analysis that skips a dimension is refused, by name 531ms
-   ✓ a change is assessed before it is anything else > affected canon that does not exist is refused rather than silently dropped 451ms
-   ✓ a change is assessed before it is anything else > a complete analysis records what re-entry will cost 545ms
-   ✓ approving a change is the owner’s act, not the analysis’ > an unanalysed change cannot be approved 409ms
-   ✓ approving a change is the owner’s act, not the analysis’ > an M4 change with no owner decision is refused 561ms
-   ✓ approving a change is the owner’s act, not the analysis’ > an agent cannot stand in for the owner 522ms
-   ✓ approving a change is the owner’s act, not the analysis’ > a real owner answer approves it 980ms
-   ✓ re-entry re-opens the lifecycle, idempotently > the stages from the re-entry point are no longer complete, and their gates are dropped 2050ms
-   ✓ re-entry re-opens the lifecycle, idempotently > applying the same change twice changes nothing the second time 1877ms
-   ✓ re-entry re-opens the lifecycle, idempotently > an outstanding change is visible until it is carried through 1647ms
-   ✓ a proposal is not scope > it cannot be accepted before it is assessed 331ms
-   ✓ a proposal is not scope > it cannot accept itself 602ms
-   ✓ a proposal is not scope > incorporation must point at canon that exists 1077ms
-   ✓ a proposal is not scope > a rejection keeps its rationale, and is terminal 412ms
-   ✓ a proposal is not scope > deferred is a real answer, and revisitable 965ms
- ✓ tests/ai.integrity.test.ts (50 tests) 30245ms
-   ✓ B1 — the grant Serva records is the grant the engine is given > two concurrent runs cannot read each other prompt files 386ms
-   ✓ B2 — a run context is persisted and reconstructible > the whole bundle is stored, not a summary of it 695ms
-   ✓ B2 — a run context is persisted and reconstructible > the AgentRun reference resolves to the persisted bundle 447ms
-   ✓ B2 — a run context is persisted and reconstructible > survives a process restart with an identical digest 1027ms
-   ✓ B2 — a run context is persisted and reconstructible > a tampered bundle is detected, not silently returned 1016ms
-   ✓ B2 — a run context is persisted and reconstructible > one project cannot resolve another project bundle 1169ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for COMPLETED 537ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for PARTIAL 364ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for BLOCKED 622ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for ESCALATED 936ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for REFUSED 688ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for FAILED 667ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record after a timeout 647ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record after an interrupt 957ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record after an engine failure 642ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record after an unauthenticated engine 432ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for INVALID_OUTPUT and for EVIDENCE_VIOLATION 615ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > the record digest matches the final trace head 370ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > the record carries the self-review and the claim adjudications 634ms
-   ✓ B3A — every terminal run has an immutable AgentRunRecord > a second finalization does not create a conflicting terminal truth 1582ms
-   ✓ B3B — a tool call is not a tool result > records the full REQUESTED / DECIDED / RESULT sequence 1614ms
-   ✓ B3B — a tool call is not a tool result > captures safe metadata and never the whole tool output 1565ms
-   ✓ B3B — a tool call is not a tool result > records a denial with its error class 1065ms
-   ✓ B3B — a tool call is not a tool result > a call that never returned leaves no RESULT event 1008ms
-   ✓ B3B — a tool call is not a tool result > the same fact observed twice is recorded once 2174ms
-   ✓ B4 — Serva validates the role-specific result itself > a valid envelope with an invalid role result triggers one repair attempt 2175ms
-   ✓ B4 — Serva validates the role-specific result itself > a second invalid role result is INVALID_OUTPUT 1973ms
-   ✓ B4 — Serva validates the role-specific result itself > a valid role result is accepted 1523ms
-   ✓ B4 — Serva validates the role-specific result itself > a structurally perfect envelope with the wrong payload type is rejected 1507ms
-   ✓ prompt files leave nothing behind > the per-run prompt directory does not survive the run 315ms
- ✓ tests/ai.engine.test.ts (46 tests) 68ms
- ✓ tests/gates.authority.test.ts (31 tests) 1473ms
- ✓ tests/ai.failure.test.ts (33 tests) 9063ms
-   ✓ every engine failure has a name and a route > maps ENGINE_ERROR to FAILED without throwing 382ms
-   ✓ every engine failure has a name and a route > maps INTERRUPTED to FAILED without throwing 312ms
-   ✓ every engine failure has a name and a route > an unavailable engine blocks rather than failing, so the work item survives 420ms
-   ✓ every engine failure has a name and a route > a rate-limit retry is visible in diagnostics rather than swallowed 609ms
-   ✓ malformed and invalid output > malformed JSON never reaches project state 990ms
-   ✓ malformed and invalid output > a missing required envelope field is rejected 736ms
-   ✓ malformed and invalid output > an empty observations array is accepted, an absent one is not 756ms
-   ✓ malformed and invalid output > exactly one repair attempt is made, never a loop 687ms
-   ✓ malformed and invalid output > the second attempt succeeding is recorded as a success 583ms
-   ✓ an interrupted run is detectable and re-dispatchable > recovery re-dispatches from the store, not from engine memory 745ms
-   ✓ an interrupted run is detectable and re-dispatchable > the first run remains permanently visible after re-dispatch 851ms
- ✓ tests/ai.closure.test.ts (19 tests) 9214ms
-   ✓ F1 — finalization survives a crash between its two commits > 7. a recovered record preserves every field the canonical record requires 540ms
-   ✓ F1 — finalization survives a crash between its two commits > a second finalization attempt after a crash cannot append a second terminal event 583ms
-   ✓ F1 — finalization survives a crash between its two commits > the record is a pure function of the log, so it derives identically every time 670ms
-   ✓ F1 — finalization survives a crash between its two commits > every terminal outcome leaves a recoverable record 1672ms
-   ✓ F2 — a decision is never recorded before the provider makes one > 1. a request with no result leaves REQUESTED and nothing else 713ms
-   ✓ F2 — a decision is never recorded before the provider makes one > 2. a successful result yields REQUESTED, DECIDED(allowed), SUCCEEDED 650ms
-   ✓ F2 — a decision is never recorded before the provider makes one > 3. an ordinary execution error yields DECIDED(allowed) then FAILED 749ms
-   ✓ F2 — a decision is never recorded before the provider makes one > 4. a permission refusal yields DECIDED(allowed=false) then DENIED 640ms
-   ✓ F2 — a decision is never recorded before the provider makes one > 5. a denied call never leaves allowed=true anywhere in the trace 719ms
-   ✓ F2 — a decision is never recorded before the provider makes one > 6. the live observer and the post-hoc sweep together produce no duplicates 568ms
- ✓ tests/intel.research.test.ts (9 tests) 780ms
-   ✓ captured external content is data, never instruction > an injected instruction is fenced, flagged, and changes nothing 373ms
- ✓ tests/ai.security.test.ts (20 tests) 8146ms
-   ✓ untrusted text cannot become a command > every attack string travels as one inert argv element 1615ms
-   ✓ an agent cannot obtain capability it was not granted > no Phase 3 run receives a write, exec, MCP or browser tool 2343ms
-   ✓ credentials never enter the project > no Serva project file contains a credential-shaped value 884ms
-   ✓ one project cannot see another > each runtime is pinned to its own project root 1101ms
-   ✓ one project cannot see another > a run recorded in project A is not visible in project B 587ms
-   ✓ trust labels survive the whole pipeline > a repository instruction file is data, not system authority 673ms
- ✓ tests/intel.slice.test.ts (10 tests) 42709ms
-   ✓ the intelligence execution core runs the upstream company > runs each department as a separate governed run, and reaches the Requirements Gate 13249ms
-   ✓ the intelligence execution core runs the upstream company > a profile that excludes a stage records the exclusion, it does not omit it 3321ms
-   ✓ the intelligence execution core runs the upstream company > a research-free discovery is honest about it rather than claiming interviews 6451ms
-   ✓ an owner decision is control flow, not advice > stops the lifecycle, persists the state, and refuses to resume without a real answer 7523ms
-   ✓ an owner decision is control flow, not advice > resumes from the STORE, with no orchestrator and no conversation carried over 7154ms
-   ✓ the substrate refuses before it dispatches > an agent that is not enabled cannot run, and costs no model call 441ms
-   ✓ the substrate refuses before it dispatches > a missing prerequisite blocks the stage deterministically, before any model call 434ms
-   ✓ the substrate refuses before it dispatches > an open owner decision is visible without running anything 4126ms
- ✓ tests/ai.orchestration.test.ts (34 tests) 5429ms
-   ✓ owner request to dispatch queue > runs the full flow and queues the validated plan 566ms
-   ✓ owner request to dispatch queue > each dispatched step is a separate run with its own session 593ms
-   ✓ owner request to dispatch queue > halts when classification does not complete 464ms
-   ✓ owner request to dispatch queue > AgentRuntime itself rejects a bad classification payload, before the orchestrator sees it 383ms
-   ✓ owner request to dispatch queue > rejects an invalid plan and does not repair it 627ms
-   ✓ owner request to dispatch queue > a QUERY is answered from the store and produces no plan 322ms
-   ✓ owner request to dispatch queue > a GOVERNANCE request is routed away from production 344ms
-   ✓ owner request to dispatch queue > the classifier is given the owner text as UNTRUSTED data 572ms
-   ✓ owner request to dispatch queue > the planner is told only about enabled agents 487ms
-   ✓ owner request to dispatch queue > no dispatched run is granted a write tool 434ms
-   ✓ owner request to dispatch queue > an engine failure during planning leaves the classification intact 550ms
- ✓ tests/workflow.lifecycle.test.ts (19 tests) 1568ms
- ✓ tests/eng.binding.test.ts (21 tests) 61532ms
-   ✓ a HARD qualification for one boundary does not authorize another > WSL qualification with a native Windows engine is refused 3830ms
-   ✓ a HARD qualification for one boundary does not authorize another > distribution A does not authorize distribution B 2520ms
-   ✓ a HARD qualification for one boundary does not authorize another > engine version X does not authorize engine version Y 3624ms
-   ✓ a HARD qualification for one boundary does not authorize another > a changed sandbox profile invalidates the prior qualification 4540ms
-   ✓ a HARD qualification for one boundary does not authorize another > a recipe boundary does not authorize a Producer 3978ms
-   ✓ a HARD qualification for one boundary does not authorize another > a simulated boundary is refused unless a test explicitly opts in 3548ms
-   ✓ a HARD qualification for one boundary does not authorize another > the exact qualified boundary is eligible 2444ms
-   ✓ dispatch derives the boundary from the runtime it is about to use > a runtime whose engine sits elsewhere is refused, and nothing is spawned 1818ms
-   ✓ dispatch derives the boundary from the runtime it is about to use > CAPABILITY_BOUND records the boundary fingerprint 3197ms
-   ✓ implementWorkItem is the production path > refuses before any worktree, model call or command when the boundary is not HARD 1220ms
-   ✓ implementWorkItem is the production path > dispatches a real Producer run, measures, reviews, and accepts an exact commit 8962ms
-   ✓ implementWorkItem is the production path > a failed measurement drives rework and stops at the configured limit 11252ms
-   ✓ implementWorkItem is the production path > the reviewer verdict the gate consumes is a persisted one 10123ms
- ✓ tests/eng.dispatch.test.ts (17 tests) 69719ms
-   ✓ the Producer is dispatched through the one runtime, or not at all > runs in its own worktree with a write grant the contract allows 3754ms
-   ✓ the Producer is dispatched through the one runtime, or not at all > the sandbox profile Serva generated is passed to the invocation 2730ms
-   ✓ the Producer is dispatched through the one runtime, or not at all > the capability grant is recorded on the run, with its basis 2805ms
-   ✓ the Producer is dispatched through the one runtime, or not at all > an unqualified substrate refuses before any model call is made 1490ms
-   ✓ the Producer is dispatched through the one runtime, or not at all > no reviewer means no dispatch, and no model call 3840ms
-   ✓ the Producer is dispatched through the one runtime, or not at all > a grant wider than the contract is refused by the runtime itself 2220ms
-   ✓ the reviewer is a separate, independent, read-only run > is dispatched with no write tool, into its own run 7253ms
-   ✓ the reviewer is a separate, independent, read-only run > sees the evidence and the diff, and not the Producer reasoning 4965ms
-   ✓ the reviewer is a separate, independent, read-only run > a verdict about a different ChangeSet is refused, not recorded 5614ms
-   ✓ the reviewer is a separate, independent, read-only run > a rejection with no findings is not a usable verdict 4124ms
-   ✓ the reviewer is a separate, independent, read-only run > an agent reviewing its own work is refused 1655ms
-   ✓ a reviewer verdict must be traceable to a real run > a runRef naming no run is refused outright 875ms
-   ✓ a reviewer verdict must be traceable to a real run > a run by the wrong agent is refused 3950ms
-   ✓ a reviewer verdict must be traceable to a real run > a run that had write tools is not a review 2388ms
-   ✓ a governed change goes all the way to an accepted commit > Producer edits, runtime measures, reviewer judges, Serva integrates 11098ms
-   ✓ a governed change goes all the way to an accepted commit > a Producer that says the tests pass does not make them pass 5322ms
-   ✓ a governed change goes all the way to an accepted commit > a reviewer rejection stops the change at the gate 5633ms
- ✓ tests/store.test.ts (19 tests) 833ms
- ✓ tests/workflow.integrity.test.ts (19 tests) 1128ms
- ✓ tests/gates.compose.test.ts (24 tests) 39ms
- ✓ tests/intel.security.test.ts (15 tests) 13010ms
- ✓ tests/gates.mapVerifier.test.ts (17 tests) 34ms
- ✓ tests/validity.isolation.test.ts (17 tests) 533ms
- ✓ tests/intel.scenarios.test.ts (3 tests) 29129ms
-   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 14236ms
-   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 4975ms
-   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 9905ms
+ ✓ tests/intel.invariants.test.ts (54 tests) 60ms
+ ✓ tests/eng.substrate.test.ts (63 tests) 1380ms
+   ✓ the simulated substrate is deterministic and claims no containment > a command past its deadline is killed and reported as timed out 373ms
+ ✓ tests/blockers.test.ts (46 tests) 1148ms
+ ✓ tests/ai.runtime.test.ts (56 tests) 4566ms
+   ✓ AgentRuntime > an interrupted run leaves an incomplete trace and is re-dispatchable from the store 427ms
+   ✓ AgentRuntime > every run gets its own session, never a shared one 461ms
+   ✓ evidence claims are claims until the runtime corroborates them > an honest run with no claims completes normally 334ms
+ ✓ tests/intel.governance.test.ts (36 tests) 6465ms
+   ✓ an owner approval is bound to the change it approves > an unrelated answered decision cannot approve it 623ms
+   ✓ re-entry re-opens the lifecycle, idempotently > the stages from the re-entry point are no longer complete, and their gates are dropped 389ms
+   ✓ re-entry re-opens the lifecycle, idempotently > a partial re-entry is still outstanding 358ms
+   ✓ re-entry re-opens the lifecycle, idempotently > a change is carried through once its stages re-ran and its gates accepted 760ms
+   ✓ a proposal is not scope > incorporation must point at canon that exists 377ms
+ ✓ tests/ai.integrity.test.ts (50 tests) 8959ms
+   ✓ B1 — the grant Serva records is the grant the engine is given > two concurrent runs cannot read each other prompt files 589ms
+   ✓ B2 — a run context is persisted and reconstructible > the whole bundle is stored, not a summary of it 363ms
+   ✓ B2 — a run context is persisted and reconstructible > it is persisted BEFORE the engine is invoked 331ms
+   ✓ B3A — every terminal run has an immutable AgentRunRecord > emits a record for INVALID_OUTPUT and for EVIDENCE_VIOLATION 553ms
+   ✓ B3A — every terminal run has an immutable AgentRunRecord > the record digest matches the final trace head 359ms
+   ✓ B3B — a tool call is not a tool result > records the full REQUESTED / DECIDED / RESULT sequence 334ms
+   ✓ B4 — Serva validates the role-specific result itself > a valid envelope with an invalid role result triggers one repair attempt 303ms
+   ✓ B4 — Serva validates the role-specific result itself > a second invalid role result is INVALID_OUTPUT 498ms
+   ✓ B4 — Serva validates the role-specific result itself > the trace names which validation stage failed 310ms
+ ✓ tests/intel.authority.test.ts (15 tests) 3042ms
+   ✓ independence is enforced by the runtime, not by the prompt > a reviewer handed the author’s own run is refused before it is dispatched 435ms
+   ✓ independence is enforced by the runtime, not by the prompt > the same reviewer reading the ARTIFACT rather than the author runs normally 482ms
+   ✓ external content cannot become instruction > a run that hallucinates an owner approval writes no owner approval 334ms
+   ✓ a blocking escalation becomes a question, not an error > the runtime raises the owner decision; the agent writes no canon and no approval 343ms
+   ✓ research nobody could have performed is recorded as not performed > a discovery run claiming interviews has the claim overridden, not believed 408ms
+ ✓ tests/eng.sandboxvalidity.test.ts (42 tests) 16156ms
+   ✓ a rejected profile stops the Producer before any model call > refuses, records no run, and spends nothing 2907ms
+   ✓ a rejected profile stops the Producer before any model call > the same dispatch proceeds on an engine that accepts the profile 3394ms
+   ✓ a worktree git pointer works in the environment that will use it > is relative, and uses forward slashes 2426ms
+   ✓ the verified change set names the blob git will actually store > matches git under core.autocrlf, and integrates 7282ms
+ ✓ tests/ai.engine.test.ts (46 tests) 81ms
+ ✓ tests/ai.failure.test.ts (33 tests) 5197ms
+   ✓ every engine failure has a name and a route > maps BUDGET_EXCEEDED to FAILED without throwing 302ms
+   ✓ every engine failure has a name and a route > maps RATE_LIMITED to FAILED without throwing 307ms
+   ✓ malformed and invalid output > a missing required envelope field is rejected 364ms
+   ✓ malformed and invalid output > an empty observations array is accepted, an absent one is not 320ms
+   ✓ malformed and invalid output > exactly one repair attempt is made, never a loop 330ms
+   ✓ malformed and invalid output > the second attempt succeeding is recorded as a success 364ms
+   ✓ an interrupted run is detectable and re-dispatchable > recovery re-dispatches from the store, not from engine memory 482ms
+   ✓ an interrupted run is detectable and re-dispatchable > the first run remains permanently visible after re-dispatch 339ms
+ ✓ tests/gates.authority.test.ts (31 tests) 1685ms
+ ✓ tests/intel.slice.test.ts (10 tests) 17943ms
+   ✓ the intelligence execution core runs the upstream company > runs each department as a separate governed run, and reaches the Requirements Gate 4114ms
+   ✓ the intelligence execution core runs the upstream company > a profile that excludes a stage records the exclusion, it does not omit it 562ms
+   ✓ the intelligence execution core runs the upstream company > a research-free discovery is honest about it rather than claiming interviews 4083ms
+   ✓ an owner decision is control flow, not advice > stops the lifecycle, persists the state, and refuses to resume without a real answer 3749ms
+   ✓ an owner decision is control flow, not advice > resumes from the STORE, with no orchestrator and no conversation carried over 3345ms
+   ✓ the substrate refuses before it dispatches > an open owner decision is visible without running anything 1785ms
+ ✓ tests/ai.security.test.ts (20 tests) 5007ms
+   ✓ untrusted text cannot become a command > every attack string travels as one inert argv element 2171ms
+   ✓ an agent cannot obtain capability it was not granted > no Phase 3 run receives a write, exec, MCP or browser tool 1197ms
+   ✓ one project cannot see another > each runtime is pinned to its own project root 450ms
+ ✓ tests/ai.closure.test.ts (19 tests) 5156ms
+   ✓ F1 — finalization survives a crash between its two commits > 2. terminal event committed with no record is detected and repaired 306ms
+   ✓ F1 — finalization survives a crash between its two commits > 2b. a real process restart performs the repair before anything reads the store 423ms
+   ✓ F1 — finalization survives a crash between its two commits > 5. a record that disagrees with the log is an integrity failure 306ms
+   ✓ F1 — finalization survives a crash between its two commits > 6. a recovered record binds to the final trace head 304ms
+   ✓ F1 — finalization survives a crash between its two commits > every terminal outcome leaves a recoverable record 763ms
+   ✓ F2 — a decision is never recorded before the provider makes one > 4. a permission refusal yields DECIDED(allowed=false) then DENIED 320ms
+   ✓ F2 — a decision is never recorded before the provider makes one > 6. the live observer and the post-hoc sweep together produce no duplicates 316ms
+ ✓ tests/intel.research.test.ts (9 tests) 864ms
+   ✓ captured external content is data, never instruction > an injected instruction is fenced, flagged, and changes nothing 415ms
+ ✓ tests/ai.orchestration.test.ts (34 tests) 5885ms
+   ✓ owner request to dispatch queue > runs the full flow and queues the validated plan 792ms
+   ✓ owner request to dispatch queue > each dispatched step is a separate run with its own session 591ms
+   ✓ owner request to dispatch queue > halts when classification does not complete 338ms
+   ✓ owner request to dispatch queue > AgentRuntime itself rejects a bad classification payload, before the orchestrator sees it 368ms
+   ✓ owner request to dispatch queue > rejects an invalid plan and does not repair it 696ms
+   ✓ owner request to dispatch queue > a QUERY is answered from the store and produces no plan 380ms
+   ✓ owner request to dispatch queue > the classifier is given the owner text as UNTRUSTED data 817ms
+   ✓ owner request to dispatch queue > the planner is told only about enabled agents 479ms
+   ✓ owner request to dispatch queue > no dispatched run is granted a write tool 450ms
+   ✓ owner request to dispatch queue > an engine failure during planning leaves the classification intact 605ms
+ ✓ tests/intel.writeauthority.test.ts (15 tests) 13877ms
+   ✓ the write boundary itself refuses, atomically > refuses the unauthorised write and commits NOTHING 342ms
+   ✓ the write boundary itself refuses, atomically > the refusal names the department, the agent and what it may write 343ms
+   ✓ the write boundary itself refuses, atomically > a restart reveals no partial mutation 344ms
+   ✓ the split departments write only their own canon > ADRs are authored by the architect, and test cases by the case designer 12504ms
+ ✓ tests/eng.binding.test.ts (21 tests) 68897ms
+   ✓ a HARD qualification for one boundary does not authorize another > WSL qualification with a native Windows engine is refused 3896ms
+   ✓ a HARD qualification for one boundary does not authorize another > distribution A does not authorize distribution B 3358ms
+   ✓ a HARD qualification for one boundary does not authorize another > engine version X does not authorize engine version Y 2522ms
+   ✓ a HARD qualification for one boundary does not authorize another > a changed sandbox profile invalidates the prior qualification 2540ms
+   ✓ a HARD qualification for one boundary does not authorize another > a recipe boundary does not authorize a Producer 3214ms
+   ✓ a HARD qualification for one boundary does not authorize another > a simulated boundary is refused unless a test explicitly opts in 3971ms
+   ✓ a HARD qualification for one boundary does not authorize another > the exact qualified boundary is eligible 2905ms
+   ✓ dispatch derives the boundary from the runtime it is about to use > a runtime whose engine sits elsewhere is refused, and nothing is spawned 2302ms
+   ✓ dispatch derives the boundary from the runtime it is about to use > CAPABILITY_BOUND records the boundary fingerprint 3681ms
+   ✓ implementWorkItem is the production path > refuses before any worktree, model call or command when the boundary is not HARD 1599ms
+   ✓ implementWorkItem is the production path > dispatches a real Producer run, measures, reviews, and accepts an exact commit 11585ms
+   ✓ implementWorkItem is the production path > a failed measurement drives rework and stops at the configured limit 14790ms
+   ✓ implementWorkItem is the production path > the reviewer verdict the gate consumes is a persisted one 12122ms
+ ✓ tests/eng.dispatch.test.ts (17 tests) 76954ms
+   ✓ the Producer is dispatched through the one runtime, or not at all > runs in its own worktree with a write grant the contract allows 3347ms
+   ✓ the Producer is dispatched through the one runtime, or not at all > the sandbox profile Serva generated is passed to the invocation 3481ms
+   ✓ the Producer is dispatched through the one runtime, or not at all > the capability grant is recorded on the run, with its basis 2879ms
+   ✓ the Producer is dispatched through the one runtime, or not at all > an unqualified substrate refuses before any model call is made 1891ms
+   ✓ the Producer is dispatched through the one runtime, or not at all > no reviewer means no dispatch, and no model call 2374ms
+   ✓ the Producer is dispatched through the one runtime, or not at all > a grant wider than the contract is refused by the runtime itself 1085ms
+   ✓ the reviewer is a separate, independent, read-only run > is dispatched with no write tool, into its own run 5476ms
+   ✓ the reviewer is a separate, independent, read-only run > sees the evidence and the diff, and not the Producer reasoning 5016ms
+   ✓ the reviewer is a separate, independent, read-only run > a verdict about a different ChangeSet is refused, not recorded 5126ms
+   ✓ the reviewer is a separate, independent, read-only run > a rejection with no findings is not a usable verdict 5768ms
+   ✓ the reviewer is a separate, independent, read-only run > an agent reviewing its own work is refused 2665ms
+   ✓ a reviewer verdict must be traceable to a real run > a runRef naming no run is refused outright 1609ms
+   ✓ a reviewer verdict must be traceable to a real run > a run by the wrong agent is refused 5473ms
+   ✓ a reviewer verdict must be traceable to a real run > a run that had write tools is not a review 3779ms
+   ✓ a governed change goes all the way to an accepted commit > Producer edits, runtime measures, reviewer judges, Serva integrates 11518ms
+   ✓ a governed change goes all the way to an accepted commit > a Producer that says the tests pass does not make them pass 7117ms
+   ✓ a governed change goes all the way to an accepted commit > a reviewer rejection stops the change at the gate 8347ms
+ ✓ tests/workflow.lifecycle.test.ts (19 tests) 1586ms
+   ✓ H — workflow state machine > step failure moves the run to REWORK and focuses the failing step 333ms
+ ✓ tests/intel.scenarios.test.ts (3 tests) 35108ms
+   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 19890ms
+   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 2966ms
+   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 12244ms
+ ✓ tests/store.test.ts (19 tests) 1149ms
+ ✓ tests/eng.workspace.test.ts (31 tests) 73567ms
+   ✓ Serva owns Git, and the verb set is closed > refuses every publishing and history-rewriting verb 2055ms
+   ✓ a Producer never touches the primary checkout > creates an isolated worktree on its own branch 2801ms
+   ✓ a Producer never touches the primary checkout > editing the worktree leaves the primary checkout byte-clean 2850ms
+   ✓ a Producer never touches the primary checkout > two attempts get separate worktrees that cannot see each other 3831ms
+   ✓ a Producer never touches the primary checkout > a workspace id that could traverse is refused before it becomes a path 1370ms
+   ✓ a Producer never touches the primary checkout > the same attempt cannot be opened twice 3167ms
+   ✓ a Producer never touches the primary checkout > the protected paths include the checkout, the store and git metadata 1266ms
+   ✓ a Producer never touches the primary checkout > removal is recorded and the directory is gone 3856ms
+   ✓ Serva computes the change set and judges it against the declared scope > observes a modification without being told about it 4871ms
+   ✓ Serva computes the change set and judges it against the declared scope > observes an untracked addition, which a diff against a commit would miss 4934ms
+   ✓ Serva computes the change set and judges it against the declared scope > a change outside the declared scope is a finding 4716ms
+   ✓ Serva computes the change set and judges it against the declared scope > a change inside the declared scope is conformant 3444ms
+   ✓ Serva computes the change set and judges it against the declared scope > a credential-shaped file is a finding whatever the scope allows 2184ms
+   ✓ Serva computes the change set and judges it against the declared scope > an unauthorized lockfile change is a finding 2562ms
+   ✓ Serva computes the change set and judges it against the declared scope > an unexpected binary is a finding, because nobody can review it 2288ms
+   ✓ Serva computes the change set and judges it against the declared scope > a symlink is a finding, because it can redirect a later write 3732ms
+   ✓ Serva computes the change set and judges it against the declared scope > editing the code produces a different ChangeSet identity 9013ms
+   ✓ reconciliation reports divergence and never repairs by overwriting > a clean project with no workspaces reports nothing 2154ms
+   ✓ reconciliation reports divergence and never repairs by overwriting > a dirty primary checkout is reported and is never self-repairable 2359ms
+   ✓ reconciliation reports divergence and never repairs by overwriting > a missing worktree directory is detected as its own condition 5117ms
+   ✓ reconciliation reports divergence and never repairs by overwriting > an external edit to a verified workspace makes its verification stale 4908ms
+ ✓ tests/gates.compose.test.ts (24 tests) 28ms
+ ✓ tests/workflow.integrity.test.ts (19 tests) 1129ms
+ ✓ tests/gates.mapVerifier.test.ts (17 tests) 36ms
+ ✓ tests/validity.isolation.test.ts (17 tests) 499ms
+ ✓ tests/intel.security.test.ts (15 tests) 13042ms
+ ✓ tests/eng.status.test.ts (13 tests) 1264ms
+   ✓ reconcile reports divergence and repairs nothing > a project with no workspaces reports nothing to reconcile 805ms
 stdout | tests/app.catalogue.test.ts > CLI foundation > defaults to help with no arguments
 serva 0.2.0  (specification baseline R4)
 
@@ -317,7 +287,7 @@ stdout | tests/app.catalogue.test.ts > CLI foundation > status and project run a
   },
   "governance": "ACTIVE",
   "degradedReasons": [],
-  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-QOElvs",
+  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-YUbTIR",
   "counts": {
     "stageLedgerEntries": 0,
     "gateResults": 0,
@@ -340,8 +310,8 @@ stdout | tests/app.catalogue.test.ts > CLI foundation > status and project run a
   "riskClass": "R1",
   "profile": "PRF-NEW-PRODUCT",
   "servaVersion": "0.2.0",
-  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-QOElvs",
-  "storePath": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-QOElvs\\.serva",
+  "root": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-YUbTIR",
+  "storePath": "C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-YUbTIR\\.serva",
   "canonVersions": [
     1
   ],
@@ -457,7 +427,7 @@ Gate outcome -> process state (31 §6.2) — as implemented:
       "id": "PROJ_PRESENT",
       "title": "Serva project",
       "status": "OK",
-      "detail": "CLI Project at C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-QOElvs"
+      "detail": "CLI Project at C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-YUbTIR"
     },
     {
       "id": "STORE_SCHEMA",
@@ -507,100 +477,84 @@ Gate outcome -> process state (31 §6.2) — as implemented:
 }
 
 stderr | tests/app.catalogue.test.ts > CLI foundation > reports a missing project as an actionable error, not a crash
-E_NOT_A_PROJECT: No Serva store at C:\Users\adzor\AppData\Local\Temp\serva-test-iR1Tb4\.serva
+E_NOT_A_PROJECT: No Serva store at C:\Users\adzor\AppData\Local\Temp\serva-test-XDNkCL\.serva
   remedy: Run `serva init` in the project root, or pass --root to point at one.
-  detail: {"searched":"C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-iR1Tb4\\.serva"}
+  detail: {"searched":"C:\\Users\\adzor\\AppData\\Local\\Temp\\serva-test-XDNkCL\\.serva"}
 
- ✓ tests/app.catalogue.test.ts (27 tests) 588ms
- ✓ tests/eng.status.test.ts (13 tests) 906ms
-   ✓ reconcile reports divergence and repairs nothing > a project with no workspaces reports nothing to reconcile 453ms
- ✓ tests/eng.activation.test.ts (12 tests) 46ms
- ✓ tests/gates.regression.test.ts (14 tests) 27ms
- ✓ tests/intel.retriever.test.ts (8 tests) 19ms
- ✓ tests/agentRun.test.ts (9 tests) 642ms
- ✓ tests/eng.workspace.test.ts (31 tests) 58019ms
-   ✓ Serva owns Git, and the verb set is closed > refuses every publishing and history-rewriting verb 1711ms
-   ✓ a Producer never touches the primary checkout > creates an isolated worktree on its own branch 2742ms
-   ✓ a Producer never touches the primary checkout > editing the worktree leaves the primary checkout byte-clean 2262ms
-   ✓ a Producer never touches the primary checkout > two attempts get separate worktrees that cannot see each other 2742ms
-   ✓ a Producer never touches the primary checkout > a workspace id that could traverse is refused before it becomes a path 963ms
-   ✓ a Producer never touches the primary checkout > the same attempt cannot be opened twice 1577ms
-   ✓ a Producer never touches the primary checkout > the protected paths include the checkout, the store and git metadata 1082ms
-   ✓ a Producer never touches the primary checkout > removal is recorded and the directory is gone 2042ms
-   ✓ Serva computes the change set and judges it against the declared scope > observes a modification without being told about it 2781ms
-   ✓ Serva computes the change set and judges it against the declared scope > observes an untracked addition, which a diff against a commit would miss 3279ms
-   ✓ Serva computes the change set and judges it against the declared scope > a change outside the declared scope is a finding 3773ms
-   ✓ Serva computes the change set and judges it against the declared scope > a change inside the declared scope is conformant 4040ms
-   ✓ Serva computes the change set and judges it against the declared scope > a credential-shaped file is a finding whatever the scope allows 3342ms
-   ✓ Serva computes the change set and judges it against the declared scope > an unauthorized lockfile change is a finding 3019ms
-   ✓ Serva computes the change set and judges it against the declared scope > an unexpected binary is a finding, because nobody can review it 2824ms
-   ✓ Serva computes the change set and judges it against the declared scope > a symlink is a finding, because it can redirect a later write 2067ms
-   ✓ Serva computes the change set and judges it against the declared scope > editing the code produces a different ChangeSet identity 8595ms
-   ✓ reconciliation reports divergence and never repairs by overwriting > a clean project with no workspaces reports nothing 1759ms
-   ✓ reconciliation reports divergence and never repairs by overwriting > a dirty primary checkout is reported and is never self-repairable 1642ms
-   ✓ reconciliation reports divergence and never repairs by overwriting > a missing worktree directory is detected as its own condition 3083ms
-   ✓ reconciliation reports divergence and never repairs by overwriting > an external edit to a verified workspace makes its verification stale 2653ms
- ✓ tests/eng.factory.test.ts (52 tests) 93936ms
-   ✓ no command runs outside a boundary Serva has measured > a SOFT substrate refuses to execute a recipe 1365ms
-   ✓ no command runs outside a boundary Serva has measured > a NONE substrate refuses too 1169ms
-   ✓ no command runs outside a boundary Serva has measured > the refused command was never offered to a process 1331ms
-   ✓ a command execution is recorded as bounded fact > a timeout is TIMED_OUT, which is not a test failure 2624ms
-   ✓ a command execution is recorded as bounded fact > output is capped and the record says so 1813ms
-   ✓ a command execution is recorded as bounded fact > the record carries the environment shape and never its values 2187ms
-   ✓ the Test Executor measures; the Producer does not > a failing suite produces FAIL evidence with a real exit code 7206ms
-   ✓ the Test Executor measures; the Producer does not > a passing suite produces PASS evidence bound to this ChangeSet 4406ms
-   ✓ the Test Executor measures; the Producer does not > a Producer asserting success cannot make a failing suite pass 3989ms
-   ✓ the Test Executor measures; the Producer does not > the ChangeSet is computed from the repository, not declared 3268ms
-   ✓ evidence is bound to a ChangeSet, so editing the code makes it stale > evidence measured for one ChangeSet does not apply to the next 6577ms
-   ✓ evidence is bound to a ChangeSet, so editing the code makes it stale > stale evidence cannot satisfy a criterion however green it was 3340ms
-   ✓ the Engineering Gate uses the Phase 2 engine and nothing bespoke > missing test evidence is NOT_VERIFIED, never FAIL 2701ms
-   ✓ the Engineering Gate uses the Phase 2 engine and nothing bespoke > a failing test drives the gate away from PASS 3265ms
-   ✓ the Engineering Gate uses the Phase 2 engine and nothing bespoke > a scope violation stops the deterministic checks from running at all 2705ms
-   ✓ the secrets scanner reports without disclosing > a high-confidence finding blocks, and the report withholds the value 3213ms
-   ✓ the secrets scanner reports without disclosing > a clean scan says what it actually checked 4169ms
-   ✓ a Producer is dispatched only when every condition is true > a SOFT substrate refuses write authority 1346ms
-   ✓ a Producer is dispatched only when every condition is true > an agent outside the enabled set is refused 1456ms
-   ✓ a Producer is dispatched only when every condition is true > a VERIFIER is refused write authority whatever the substrate can do 1173ms
-   ✓ a Producer is dispatched only when every condition is true > no worktree means no dispatch 1225ms
-   ✓ a Producer is dispatched only when every condition is true > a workspace that resolves to the primary checkout is refused 3046ms
-   ✓ a Producer is dispatched only when every condition is true > no reviewer means no dispatch 1757ms
-   ✓ a Producer is dispatched only when every condition is true > no evidence executors means no dispatch 1946ms
-   ✓ a Producer is dispatched only when every condition is true > a refused dispatch is an error, never a quiet downgrade to read-only 1129ms
-   ✓ a Producer is dispatched only when every condition is true > the granted policy denies every publishing verb and writes only the worktree 1711ms
-   ✓ a Producer is dispatched only when every condition is true > the reviewer policy has no write tool at all 2497ms
-   ✓ a Producer is dispatched only when every condition is true > a work item naming one agent for both roles is rejected at definition 1749ms
-   ✓ a Producer is dispatched only when every condition is true > a work item naming an unregistered recipe is refused before any worktree exists 1465ms
-   ✓ rework is bounded and acceptance is deterministic > a second attempt is permitted and a third is not 1819ms
-   ✓ rework is bounded and acceptance is deterministic > the rework context is built from evidence, not from the previous reasoning 4515ms
-   ✓ rework is bounded and acceptance is deterministic > an unaccepted change cannot be integrated 4332ms
-   ✓ rework is bounded and acceptance is deterministic > a verdict supplied by the caller cannot be integrated 2525ms
-   ✓ rework is bounded and acceptance is deterministic > acceptance refuses when no independent review is recorded at all 2038ms
-   ✓ an unqualified substrate blocks the factory entirely > no workspace can be opened 916ms
-   ✓ an unqualified substrate blocks the factory entirely > the refusal names the substrate rather than blaming the work item 666ms
-   ✓ an unqualified substrate blocks the factory entirely > the enforcement class is reported, not assumed 1255ms
+ ✓ tests/app.catalogue.test.ts (27 tests) 429ms
+ ✓ tests/eng.activation.test.ts (12 tests) 48ms
+ ✓ tests/agentRun.test.ts (9 tests) 655ms
+ ✓ tests/gates.regression.test.ts (14 tests) 23ms
+ ✓ tests/intel.retriever.test.ts (8 tests) 21ms
+ ✓ tests/intel.e2e.test.ts (5 tests) 69367ms
+   ✓ the whole company runs > takes an idea through every department to an engineering handoff 12323ms
+   ✓ the whole company runs > readiness is DERIVED from the Store, with nothing handed to it 19465ms
+   ✓ the whole company runs > a review stops counting once the thing it reviewed changes 12555ms
+   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 12037ms
+   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 12981ms
+ ✓ tests/eng.factory.test.ts (52 tests) 108543ms
+   ✓ no command runs outside a boundary Serva has measured > a SOFT substrate refuses to execute a recipe 1355ms
+   ✓ no command runs outside a boundary Serva has measured > a NONE substrate refuses too 1498ms
+   ✓ no command runs outside a boundary Serva has measured > the refused command was never offered to a process 1628ms
+   ✓ a command execution is recorded as bounded fact > a timeout is TIMED_OUT, which is not a test failure 2725ms
+   ✓ a command execution is recorded as bounded fact > output is capped and the record says so 2065ms
+   ✓ a command execution is recorded as bounded fact > the record carries the environment shape and never its values 1968ms
+   ✓ the Test Executor measures; the Producer does not > a failing suite produces FAIL evidence with a real exit code 4906ms
+   ✓ the Test Executor measures; the Producer does not > a passing suite produces PASS evidence bound to this ChangeSet 4960ms
+   ✓ the Test Executor measures; the Producer does not > a Producer asserting success cannot make a failing suite pass 5142ms
+   ✓ the Test Executor measures; the Producer does not > the ChangeSet is computed from the repository, not declared 5348ms
+   ✓ evidence is bound to a ChangeSet, so editing the code makes it stale > evidence measured for one ChangeSet does not apply to the next 8207ms
+   ✓ evidence is bound to a ChangeSet, so editing the code makes it stale > stale evidence cannot satisfy a criterion however green it was 5805ms
+   ✓ the Engineering Gate uses the Phase 2 engine and nothing bespoke > missing test evidence is NOT_VERIFIED, never FAIL 4017ms
+   ✓ the Engineering Gate uses the Phase 2 engine and nothing bespoke > a failing test drives the gate away from PASS 3205ms
+   ✓ the Engineering Gate uses the Phase 2 engine and nothing bespoke > a scope violation stops the deterministic checks from running at all 3141ms
+   ✓ the secrets scanner reports without disclosing > a high-confidence finding blocks, and the report withholds the value 4776ms
+   ✓ the secrets scanner reports without disclosing > a clean scan says what it actually checked 3942ms
+   ✓ a Producer is dispatched only when every condition is true > a SOFT substrate refuses write authority 2215ms
+   ✓ a Producer is dispatched only when every condition is true > an agent outside the enabled set is refused 1450ms
+   ✓ a Producer is dispatched only when every condition is true > a VERIFIER is refused write authority whatever the substrate can do 1565ms
+   ✓ a Producer is dispatched only when every condition is true > no worktree means no dispatch 1392ms
+   ✓ a Producer is dispatched only when every condition is true > a workspace that resolves to the primary checkout is refused 2872ms
+   ✓ a Producer is dispatched only when every condition is true > no reviewer means no dispatch 3609ms
+   ✓ a Producer is dispatched only when every condition is true > no evidence executors means no dispatch 3190ms
+   ✓ a Producer is dispatched only when every condition is true > a refused dispatch is an error, never a quiet downgrade to read-only 1563ms
+   ✓ a Producer is dispatched only when every condition is true > the granted policy denies every publishing verb and writes only the worktree 3809ms
+   ✓ a Producer is dispatched only when every condition is true > the reviewer policy has no write tool at all 3147ms
+   ✓ a Producer is dispatched only when every condition is true > a work item naming one agent for both roles is rejected at definition 1720ms
+   ✓ a Producer is dispatched only when every condition is true > a work item naming an unregistered recipe is refused before any worktree exists 2047ms
+   ✓ rework is bounded and acceptance is deterministic > a second attempt is permitted and a third is not 1744ms
+   ✓ rework is bounded and acceptance is deterministic > the rework context is built from evidence, not from the previous reasoning 3375ms
+   ✓ rework is bounded and acceptance is deterministic > an unaccepted change cannot be integrated 2644ms
+   ✓ rework is bounded and acceptance is deterministic > a verdict supplied by the caller cannot be integrated 2334ms
+   ✓ rework is bounded and acceptance is deterministic > acceptance refuses when no independent review is recorded at all 2407ms
+   ✓ an unqualified substrate blocks the factory entirely > no workspace can be opened 809ms
+   ✓ an unqualified substrate blocks the factory entirely > the refusal names the substrate rather than blaming the work item 580ms
+   ✓ an unqualified substrate blocks the factory entirely > the enforcement class is reported, not assumed 1352ms
 warning: in the working copy of 'src/other.js', LF will be replaced by CRLF the next time Git touches it
- ✓ tests/eng.integration.test.ts (13 tests) 42620ms
-   ✓ every change shape integrates exactly > accepts a modified file 5650ms
-   ✓ every change shape integrates exactly > accepts a new file 5048ms
-   ✓ every change shape integrates exactly > accepts a deletion 7868ms
-   ✓ every change shape integrates exactly > accepts a rename, including its old side 6440ms
-   ✓ every change shape integrates exactly > accepts a mixed add, modify and delete 4107ms
-   ✓ every change shape integrates exactly > the committed content is byte-identical to what was verified 3270ms
-   ✓ nothing the gate did not see reaches the commit > an unrelated dirty path is not staged and not committed 2729ms
-   ✓ nothing the gate did not see reaches the commit > a verified file modified after the gate is refused 1827ms
-   ✓ nothing the gate did not see reaches the commit > a verified file deleted after the gate is refused 1723ms
-   ✓ nothing the gate did not see reaches the commit > a pre-staged index is refused rather than cleared 1549ms
-   ✓ the comparison itself > a staged identity is derived from git, not from what Serva remembered 2405ms
- ✓ tests/intel.e2e.test.ts (4 tests) 52321ms
-   ✓ the whole company runs > takes an idea through every department to an engineering handoff 11386ms
-   ✓ the whole company runs > readiness is DERIVED, and READY is impossible while anything blocks 14789ms
-   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 10291ms
-   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 15852ms
+ ✓ tests/eng.integration.test.ts (13 tests) 42124ms
+   ✓ every change shape integrates exactly > accepts a modified file 9431ms
+   ✓ every change shape integrates exactly > accepts a new file 8507ms
+   ✓ every change shape integrates exactly > accepts a deletion 4011ms
+   ✓ every change shape integrates exactly > accepts a rename, including its old side 3277ms
+   ✓ every change shape integrates exactly > accepts a mixed add, modify and delete 3419ms
+   ✓ every change shape integrates exactly > the committed content is byte-identical to what was verified 3419ms
+   ✓ nothing the gate did not see reaches the commit > an unrelated dirty path is not staged and not committed 2294ms
+   ✓ nothing the gate did not see reaches the commit > a verified file modified after the gate is refused 2084ms
+   ✓ nothing the gate did not see reaches the commit > a verified file deleted after the gate is refused 1719ms
+   ✓ nothing the gate did not see reaches the commit > a pre-staged index is refused rather than cleared 1418ms
+   ✓ the comparison itself > a staged identity is derived from git, not from what Serva remembered 2537ms
+ ✓ tests/intel.restart.test.ts (6 tests) 84131ms
+   ✓ readiness survives the process that produced it > reconstructs the independent reviews from disk and reaches READY 20274ms
+   ✓ readiness survives the process that produced it > generates the Phase 4 handoff from disk, with nothing injected 14068ms
+   ✓ readiness survives the process that produced it > a caller cannot assert a review it does not have 11807ms
+   ✓ a stage that half-completed does not half-repeat > the completed department is not re-run, and its canon is not written twice 13431ms
+   ✓ a stage that half-completed does not half-repeat > no owner decision is raised twice by a resumed stage 11352ms
+   ✓ the production CLI path, in a separate process > serva intelligence readiness and handoff work from disk alone 13196ms
 
- Test Files  36 passed (36)
-      Tests  904 passed (904)
-   Start at  00:42:43
-   Duration  106.81s (transform 13.17s, setup 0ms, collect 29.47s, tests 590.83s, environment 17ms, prepare 10.89s)
+ Test Files  38 passed (38)
+      Tests  940 passed (940)
+   Start at  03:59:26
+   Duration  124.47s (transform 11.41s, setup 0ms, collect 33.15s, tests 676.07s, environment 22ms, prepare 13.81s)
 
 
 > serva-code@0.2.0 build

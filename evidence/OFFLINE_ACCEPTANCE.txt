@@ -1,21 +1,47 @@
 
  RUN  v2.1.9 D:/SEVACODE
 
- ✓ tests/intel.governance.test.ts (22 tests) 1866ms
- ✓ tests/intel.authority.test.ts (15 tests) 1739ms
- ✓ tests/intel.security.test.ts (15 tests) 7886ms
- ✓ tests/intel.scenarios.test.ts (3 tests) 17746ms
-   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 7817ms
-   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 2389ms
-   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 7538ms
- ✓ tests/intel.e2e.test.ts (4 tests) 28635ms
-   ✓ the whole company runs > takes an idea through every department to an engineering handoff 7683ms
-   ✓ the whole company runs > readiness is DERIVED, and READY is impossible while anything blocks 7819ms
-   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 6730ms
-   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 6401ms
+ ✓ tests/intel.authority.test.ts (15 tests) 9832ms
+   ✓ independence is enforced by the runtime, not by the prompt > the same reviewer reading the ARTIFACT rather than the author runs normally 640ms
+   ✓ a blocking escalation becomes a question, not an error > the runtime raises the owner decision; the agent writes no canon and no approval 587ms
+   ✓ a blocking escalation becomes a question, not an error > a run that BLOCKED rather than escalated still gets its question asked 1859ms
+   ✓ a blocking escalation becomes a question, not an error > a run that COMPLETED and merely flagged a concern raises nothing 2342ms
+   ✓ research nobody could have performed is recorded as not performed > a discovery run claiming interviews has the claim overridden, not believed 3640ms
+ ✓ tests/intel.governance.test.ts (36 tests) 14169ms
+   ✓ a change is assessed before it is anything else > a complete analysis records what re-entry will cost 527ms
+   ✓ an owner approval is bound to the change it approves > an unrelated answered decision cannot approve it 315ms
+   ✓ an owner approval is bound to the change it approves > an agent cannot answer it at all 1701ms
+   ✓ an owner approval is bound to the change it approves > the exact bound approval, chosen by a person, is accepted 2371ms
+   ✓ an owner approval is bound to the change it approves > an approval question cannot be raised for an unassessed change 720ms
+   ✓ re-entry re-opens the lifecycle, idempotently > the stages from the re-entry point are no longer complete, and their gates are dropped 2150ms
+   ✓ re-entry re-opens the lifecycle, idempotently > applying the same change twice changes nothing the second time 2022ms
+   ✓ learning crosses the boundary only as a generalisation > a failed approach carries no code and no client 330ms
+ ✓ tests/intel.security.test.ts (15 tests) 23678ms
+ ✓ tests/intel.writeauthority.test.ts (15 tests) 25420ms
+   ✓ the write boundary itself refuses, atomically > refuses the unauthorised write and commits NOTHING 419ms
+   ✓ the write boundary itself refuses, atomically > the refusal names the department, the agent and what it may write 743ms
+   ✓ the write boundary itself refuses, atomically > an authorised department still writes normally 334ms
+   ✓ the split departments write only their own canon > ADRs are authored by the architect, and test cases by the case designer 23583ms
+ ✓ tests/intel.scenarios.test.ts (3 tests) 42479ms
+   ✓ Scenario B — a feature request re-enters the lifecycle, it does not restart it > only the affected stages re-run, and unrelated canon is left exactly as it was 24332ms
+   ✓ Scenario C — when research is unavailable, nothing is invented > the run records the unavailability and the competitive gate refuses to verify 5351ms
+   ✓ Scenario D — a business policy question stops the company > stops at WAITING_FOR_OWNER instead of inventing the rule 12793ms
+ ✓ tests/intel.e2e.test.ts (5 tests) 67393ms
+   ✓ the whole company runs > takes an idea through every department to an engineering handoff 23727ms
+   ✓ the whole company runs > readiness is DERIVED from the Store, with nothing handed to it 15204ms
+   ✓ the whole company runs > a review stops counting once the thing it reviewed changes 9507ms
+   ✓ the whole company runs > an unanswered owner decision makes READY unreachable 9244ms
+   ✓ Phase 5 satisfies the Phase 4 contract > generates a work item the real Engineering Factory accepts 9707ms
+ ✓ tests/intel.restart.test.ts (6 tests) 77558ms
+   ✓ readiness survives the process that produced it > reconstructs the independent reviews from disk and reaches READY 24509ms
+   ✓ readiness survives the process that produced it > generates the Phase 4 handoff from disk, with nothing injected 15981ms
+   ✓ readiness survives the process that produced it > a caller cannot assert a review it does not have 9264ms
+   ✓ a stage that half-completed does not half-repeat > the completed department is not re-run, and its canon is not written twice 9375ms
+   ✓ a stage that half-completed does not half-repeat > no owner decision is raised twice by a resumed stage 9305ms
+   ✓ the production CLI path, in a separate process > serva intelligence readiness and handoff work from disk alone 9120ms
 
- Test Files  5 passed (5)
-      Tests  59 passed (59)
-   Start at  00:39:58
-   Duration  30.74s (transform 1.54s, setup 0ms, collect 5.74s, tests 57.87s, environment 1ms, prepare 743ms)
+ Test Files  7 passed (7)
+      Tests  95 passed (95)
+   Start at  04:01:48
+   Duration  80.55s (transform 3.81s, setup 0ms, collect 15.98s, tests 260.53s, environment 3ms, prepare 2.29s)
 

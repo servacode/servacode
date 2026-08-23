@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FixedClock } from '../src/core/clock.js';
 import { SequentialIdSource } from '../src/core/ids.js';
 import { Store } from '../src/store/store.js';
+import { ServaRuntime } from '../src/app/runtime.js';
 import { FakeEngineAdapter } from '../src/engine/fake.js';
 import { intelligenceOrchestrator, recordIdea } from '../src/intelligence/app.js';
 import { OrchestratorState } from '../src/intelligence/execution/orchestrator.js';
@@ -44,9 +45,33 @@ async function runCompanyAndForget(): Promise<string> {
   const root = tempRoot();
   roots.push(root);
 
-  const clock = new FixedClock();
+  /*
+   * The clock starts at the real "now" rather than at FixedClock's 2026-01-01 default.
+   *
+   * Everything else in this suite reads the Store with the same fake clock that wrote it,
+   * so the difference never shows. The CLI subprocess does not: it uses the system clock,
+   * and research stamped with a 180-day window from a fixed past date has genuinely
+   * expired by the time a real process reads it. The first run of this test found exactly
+   * that — five STALE blockers — which is the freshness rule working, not failing.
+   *
+   * Pinning the fixture's clock to today keeps the window open while leaving ids and
+   * ordering deterministic. `intel.security.test.ts` still winds a clock forward to prove
+   * that expiry does bite.
+   */
+  const clock = new FixedClock(new Date().toISOString());
   const ids = new SequentialIdSource();
-  const store = Store.initialize(root, { clock, ids, actor: 'RESTART_TEST' });
+  /*
+   * A real project, not a bare store: `ServaRuntime.init` writes the metadata the CLI
+   * opens, and running the company into it is what lets a separate process read the
+   * result the way an operator would.
+   */
+  const rt = ServaRuntime.init('Restart Fixture', 'bakery order capture', {
+    root,
+    clock,
+    ids,
+    actor: 'RESTART_TEST',
+  });
+  const store = rt.store;
 
   const engine = new FakeEngineAdapter({ clock });
   for (const [agentId, output] of E2E_SCRIPT) engine.script(agentId, { structuredOutput: output });
@@ -299,5 +324,70 @@ describe('a stage that half-completed does not half-repeat', () => {
     expect(new Set(afterSecond).size).toBe(afterSecond.length);
 
     configureResearchSeeds({ hosts: [], urls: [] });
+  }, 180_000);
+});
+
+describe('the production CLI path, in a separate process', () => {
+  /**
+   * The closure asks for the real path: a persisted Store, a restart, then readiness and
+   * handoff with nothing injected. Every other test here calls the API in-process, which
+   * proves the derivation but not the wiring — a CLI that forgot to pass the work item, or
+   * that reintroduced an authority argument, would still pass them all.
+   *
+   * So this shells out to the BUILT CLI. Different process, different Node instance,
+   * nothing in memory, and the only input is the directory on disk.
+   */
+  it('serva intelligence readiness and handoff work from disk alone', async () => {
+    const root = await runCompanyAndForget();
+
+    /* The project metadata the CLI opens. The company ran into this same store. */
+    const cli = (...args: string[]): { code: number; out: string } => {
+      const r = spawnSync(
+        process.execPath,
+        [join(process.cwd(), 'dist', 'cli', 'main.js'), ...args],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env },
+        },
+      );
+      return { code: r.status ?? -1, out: (r.stdout ?? '') + (r.stderr ?? '') };
+    };
+
+    /* --- readiness, derived in a process that has seen nothing --- */
+    const readiness = cli('intelligence', 'readiness', WORK_ITEM, '--json');
+    expect(readiness.out).toContain('"status"');
+    const parsed = JSON.parse(readiness.out) as { status: string; blockers: string[] };
+    expect(parsed.blockers, parsed.blockers.join(' | ')).toEqual([]);
+    expect(parsed.status).toBe('READY');
+    expect(readiness.code).toBe(0);
+
+    /* --- and the handoff, from the same disk --- */
+    const repo = join(root, 'repo');
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(
+      join(repo, 'src', 'total.js'),
+      'module.exports = 1;' + String.fromCharCode(10),
+      'utf8',
+    );
+    const g = (...a: string[]): string =>
+      execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    g('init', '-q', '-b', 'main');
+    g('config', 'user.email', 'fx@localhost');
+    g('config', 'user.name', 'Fixture');
+    g('config', 'commit.gpgsign', 'false');
+    g('add', '.');
+    g('commit', '-q', '-m', 'base');
+    const base = g('rev-parse', 'HEAD').trim();
+
+    const handoff = cli('intelligence', 'handoff', WORK_ITEM, '--base', base, '--json');
+    expect(handoff.code, handoff.out).toBe(0);
+    const generated = JSON.parse(handoff.out) as { items: { requirements: string[] }[] };
+    expect(generated.items.length).toBeGreaterThan(0);
+    expect(generated.items[0]?.requirements.join(' ')).toMatch(/\[SC-REQ-/);
+
+    /* --- and status reports the same thing a person would read --- */
+    const status = cli('intelligence', 'status', WORK_ITEM);
+    expect(status.out).toContain('Engineering readiness: READY');
   }, 180_000);
 });
