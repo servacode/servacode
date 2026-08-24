@@ -1,0 +1,29 @@
+{
+  "id": "SC-WI-01M0TBYDQF001CMHN8JR2-a02",
+  "type": "engineeringWorkspace",
+  "revision": 3,
+  "updatedAt": "2026-08-24T17:14:15.116Z",
+  "updatedBy": "RUNTIME",
+  "body": {
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a02",
+    "projectId": "D:\\SEVACODE\\out\\live-join-fixture",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "attempt": 2,
+    "producerAgentId": "SC-AGENT-150",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "branch": "serva/SC-WI-01M0TBYDQF001CMHN8JR2/02",
+    "path": "D:\\SEVACODE\\out\\.serva-workspaces\\live-join-fixture-1bf62e0d\\SC-WI-01M0TBYDQF001CMHN8JR2-a02",
+    "createdAt": "2026-08-24T17:14:13.100Z",
+    "state": "IN_USE",
+    "expectedScope": {
+      "allow": [
+        "src/"
+      ],
+      "forbid": []
+    },
+    "sandboxProfileDigest": "3b8d33c6d17d60ccff3e963218a2c265fe89acde5f2f83f1b4fb613fb18c9507",
+    "substrateClass": "HARD",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "cleanupState": "PENDING"
+  }
+}

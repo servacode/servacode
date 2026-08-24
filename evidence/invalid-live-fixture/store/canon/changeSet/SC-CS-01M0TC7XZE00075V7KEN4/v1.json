@@ -1,0 +1,23 @@
+{
+  "id": "SC-CS-01M0TC7XZE00075V7KEN4",
+  "type": "changeSet",
+  "version": 1,
+  "createdAt": "2026-08-24T17:14:13.358Z",
+  "createdBy": "RUNTIME",
+  "digest": "b128c91e22a626789b8e9674453d8bcd13f03696523815e07f55c590aae21f4d",
+  "source": "SYSTEM",
+  "body": {
+    "changeSetId": "SC-CS-01M0TC7XZE00075V7KEN4",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a02",
+    "attempt": 2,
+    "producerAgentId": "SC-AGENT-150",
+    "producerRunId": "SC-RUN-01M0TC7XR3001F1ZR60XV",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "entries": [],
+    "diffDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "digest": "56ccf284a969e1b2648add8524947d121da839c2c866166141753564dbd12239",
+    "createdAt": "2026-08-24T17:14:13.358Z"
+  }
+}

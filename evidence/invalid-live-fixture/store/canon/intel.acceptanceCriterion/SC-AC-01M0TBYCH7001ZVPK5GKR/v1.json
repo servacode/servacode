@@ -1,0 +1,29 @@
+{
+  "id": "SC-AC-01M0TBYCH7001ZVPK5GKR",
+  "type": "intel.acceptanceCriterion",
+  "version": 1,
+  "createdAt": "2026-08-24T17:09:00.586Z",
+  "createdBy": "RUNTIME",
+  "digest": "95839e5a31e0b48ee399f6bea65906ce08d39c8f1bee5dac3637df3cf243ca63",
+  "source": "SYSTEM",
+  "body": {
+    "id": "SC-AC-01M0TBYCH7001ZVPK5GKR",
+    "version": 1,
+    "createdAt": "2026-08-24T17:09:00.583Z",
+    "meta": {
+      "provenance": {
+        "marking": "SYSTEM",
+        "component": "deterministic-preseed"
+      },
+      "attribution": {
+        "at": "2026-08-24T17:09:00.583Z"
+      }
+    },
+    "requirementRef": {
+      "id": "SC-REQ-01M0TBYCH70002X2ZAYTD",
+      "version": 1
+    },
+    "criterion": "The declared test suite (`node test.js`) exits 0.",
+    "verificationMethod": "AUTOMATED_TEST"
+  }
+}

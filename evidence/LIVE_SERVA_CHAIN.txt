@@ -6,18 +6,27 @@
 [1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/SEVACODE[39m
 
 [90mstdout[2m | tests/live/servachain.live.test.ts[2m > [22m[2mServa 1.0 — one owner request, across the governed join[2m > [22m[2mreaches an accepted commit, or stops for the owner
-[22m[39mowner request: HALTED — work item SC-WI-01M0T0J2JT001WVBXFDP9
-SERVA CODE — the request halted at HALTED
-  Planning did not complete: ESCALATED
+[22m[39mowner request: QUEUED — work item SC-WI-01M0TBYDQF001CMHN8JR2
+
+bash: line 1: /mnt/c/Windows/System32/cmd.exe: cannot execute binary file: Exec format error
+[90mstdout[2m | tests/live/servachain.live.test.ts[2m > [22m[2mServa 1.0 — one owner request, across the governed join[2m > [22m[2mreaches an accepted commit, or stops for the owner
+[22m[39mos sandbox measured: 15/16 contained, policy d61db1d7f539
+
+[90mstdout[2m | tests/live/servachain.live.test.ts[2m > [22m[2mServa 1.0 — one owner request, across the governed join[2m > [22m[2mreaches an accepted commit, or stops for the owner
+[22m[39mengineering outcome: REWORK_EXHAUSTED
+  attempt 1: producer SC-RUN-01M0TC4Y4K0017Q6ZZE7N, reviewer SC-RUN-01M0TC6YQZ001NSYT2APZ, gate FAIL
+  attempt 2: producer SC-RUN-01M0TC7XR3001F1ZR60XV, reviewer SC-RUN-01M0TC7YRJ0015C79A980, gate FAIL
+SERVA CODE — the chain did not reach an accepted commit.
+  (no refusal recorded)
 
 [90mstdout[2m | tests/live/servachain.live.test.ts
 [22m[39mpreserved: D:\SEVACODE\out\live-join-fixture
 
- [32m✓[39m tests/live/servachain.live.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 312412[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva 1.0 — one owner request, across the governed join[2m > [22mreaches an accepted commit, or stops for the owner [33m275500[2mms[22m[39m
+ [32m✓[39m tests/live/servachain.live.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 357155[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva 1.0 — one owner request, across the governed join[2m > [22mreaches an accepted commit, or stops for the owner [33m315013[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
 [2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
-[2m   Start at [22m 16:49:22
-[2m   Duration [22m 313.59s[2m (transform 533ms, setup 0ms, collect 858ms, tests 312.41s, environment 0ms, prepare 107ms)[22m
+[2m   Start at [22m 20:08:16
+[2m   Duration [22m 358.38s[2m (transform 633ms, setup 0ms, collect 967ms, tests 357.15s, environment 0ms, prepare 73ms)[22m
 

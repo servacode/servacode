@@ -1,0 +1,25 @@
+{
+  "id": "SC-EEV-01M0TC6YMS000QM1GHA7C",
+  "type": "engineeringEvidence",
+  "version": 1,
+  "createdAt": "2026-08-24T17:13:41.273Z",
+  "createdBy": "RUNTIME",
+  "digest": "9eee976e3860c6dea02b2e537a92d0a2092c0695b7f066f9566baf644a931e48",
+  "source": "SYSTEM",
+  "body": {
+    "id": "SC-EEV-01M0TC6YMS000QM1GHA7C",
+    "evidenceClass": "EXECUTION",
+    "claim": "The declared test suite passes against this ChangeSet.",
+    "basis": "MEASURED",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "changeSetId": "SC-CS-01M0TC6XPW000ST1WY3P2",
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a01",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "executionId": "SC-EXEC-01M0TC6YM8000D5CJY389",
+    "runtimeComponentId": "SC-RTC-012",
+    "outcome": "FAIL",
+    "detail": "SC-RECIPE-UNIT-TEST -> FAILED (exit 1): exited 1",
+    "capturedAt": "2026-08-24T17:13:41.273Z",
+    "capturedBy": "RUNTIME"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "SC-RUN-01M0TC6YQZ001NSYT2APZ",
+  "type": "agentRunRecord",
+  "version": 1,
+  "createdAt": "2026-08-24T17:14:12.009Z",
+  "createdBy": "RUNTIME",
+  "digest": "edf0ca02a95129a1af332cd3115bb2515538468cef2e19db37593ef6abc2d7b2",
+  "source": "SYSTEM",
+  "body": {
+    "runId": "SC-RUN-01M0TC6YQZ001NSYT2APZ",
+    "taskId": "SC-TASK-01M0TC6YQZ000FMFFWG29",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "agentId": "SC-AGENT-180",
+    "contractVersion": "1.0.0",
+    "roleInTask": "PRODUCER",
+    "contextBundleRef": "SC-CTX-01M0TC6YRM006TWDDZCGB",
+    "createdAt": "2026-08-24T17:13:41.375Z",
+    "startedAt": "2026-08-24T17:13:41.417Z",
+    "endedAt": "2026-08-24T17:14:11.994Z",
+    "outcome": "BLOCKED",
+    "toolCalls": [],
+    "evidenceRefs": [],
+    "scopeDeclared": [
+      "Review only ChangeSet SC-CS-01M0TC6XPW000ST1WY3P2. Do not review the repository at large, and do not propose work outside the declared scope."
+    ],
+    "scopeActual": [],
+    "consumption": {
+      "invocations": 0,
+      "turns": 0,
+      "toolCalls": 0,
+      "wallTimeMs": 0
+    },
+    "terminal": true,
+    "eventCount": 6,
+    "claimAssessments": [],
+    "attempts": 1,
+    "diagnostics": [
+      "UNAUTHENTICATED",
+      "The provider did not report an authentication status, so the billing route cannot be determined.",
+      "Sign in to Claude Code yourself (`/usr/bin/claude auth login`). Serva deliberately does not run a login flow, request a key, or create an account on your behalf.",
+      "terminated: UNAUTHENTICATED"
+    ],
+    "eventLogDigest": "b5cb6a3c018a17c4c4feba2cc39b63687a9fb06f2459cc7ecf0c705da6dc0483"
+  }
+}

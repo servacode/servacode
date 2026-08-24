@@ -1,0 +1,45 @@
+{
+  "id": "SC-EXEC-01M0TC7XGM000BCQ6TNX7",
+  "type": "commandExecution",
+  "version": 1,
+  "createdAt": "2026-08-24T17:14:12.884Z",
+  "createdBy": "RUNTIME",
+  "digest": "fb375733291e46f72638fd895938a6cbfb39feee8f0feaed0373df343aeaf5ce",
+  "source": "SYSTEM",
+  "body": {
+    "executionId": "SC-EXEC-01M0TC7XGM000BCQ6TNX7",
+    "runtimeComponentId": "SC-RTC-012",
+    "recipeId": "SC-RECIPE-UNIT-TEST",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a01",
+    "changeSetId": "SC-CS-01M0TC6XPW000ST1WY3P2",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "executable": "node",
+    "args": [
+      "test.js"
+    ],
+    "cwd": "D:\\SEVACODE\\out\\.serva-workspaces\\live-join-fixture-1bf62e0d\\SC-WI-01M0TBYDQF001CMHN8JR2-a01",
+    "environmentDigest": "e65f920c9bf34a3c1146d5f6bb4920815a5f8add5dfdf9f67eff3ff6abcc5e3c",
+    "environmentPolicy": "MINIMAL",
+    "networkPolicy": "NONE",
+    "substrateClass": "HARD",
+    "substrateQualificationDigest": "5899e9268110950341a38677ef6df9f3c8ac93f6b67fad9432c2aae0f1d22cae",
+    "startedAt": "2026-08-24T17:14:12.235Z",
+    "endedAt": "2026-08-24T17:14:12.884Z",
+    "durationMs": 649,
+    "exitCode": 1,
+    "outcome": "FAILED",
+    "terminationReason": "exited 1",
+    "stdoutDigest": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126",
+    "stderrDigest": "f5e9968c10f12913e0cbe1455f7ff762e1a1acbae98dad977a687a86a3bc363d",
+    "stdoutExcerpt": "",
+    "stderrExcerpt": "file:///mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-a01/test.js:1\nconst total = require('./src/total.js');\n              ^\n\nReferenceError: require is not defined in ES module scope, you can use import instead\nThis file is being treated as an ES module because it has a '.js' file extension and '/mnt/d/SEVACODE/package.json' contains \"type\": \"module\". To treat it as a CommonJS script, rename it to use the '.cjs' file extension.\n    at file:///mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-a01/test.js:1:15\n    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)\n    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)\n\nNode.js v22.22.1\n",
+    "truncated": {
+      "stdout": false,
+      "stderr": false
+    },
+    "toolVersions": {},
+    "correlationId": "SC-RUN-01M0TC4Y4K0017Q6ZZE7N"
+  }
+}

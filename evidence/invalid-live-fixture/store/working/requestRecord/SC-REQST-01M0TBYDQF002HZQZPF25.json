@@ -1,0 +1,14 @@
+{
+  "id": "SC-REQST-01M0TBYDQF002HZQZPF25",
+  "type": "requestRecord",
+  "revision": 1,
+  "updatedAt": "2026-08-24T17:09:01.808Z",
+  "updatedBy": "RUNTIME",
+  "body": {
+    "id": "SC-REQST-01M0TBYDQF002HZQZPF25",
+    "text": "The declared test suite fails: total() is short by one element and total([]) throws. Please make the suite pass.",
+    "receivedAt": "2026-08-24T17:09:01.808Z",
+    "source": "OWNER_CLI",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2"
+  }
+}

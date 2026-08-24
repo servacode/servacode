@@ -703,7 +703,21 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     };
 
     for (const program of programs(layout.guest, this.opts.transport.kind)) {
-      const scriptHost = join(fixtureDir, 'programs', program.id + '.js');
+      /*
+       * `.cjs`, NOT `.js`.
+       *
+       * SPEC: Phase 6 final acceptance sequence §2.
+       *
+       * These probes are CommonJS and they are written INSIDE the project being qualified. A
+       * project whose `package.json` declares `"type": "module"` makes Node read every `.js`
+       * as an ES module, so `require` is undefined, Q-A dies on its first line, and the
+       * substrate reports NONE — telling an owner their machine has no boundary when the
+       * machine is fine and their project merely uses ESM.
+       *
+       * Serva's own repository is such a project, which is how the live acceptance found it.
+       * The extension pins the module system regardless of what the host package says.
+       */
+      const scriptHost = join(fixtureDir, 'programs', program.id + '.cjs');
       writeFileSync(scriptHost, program.source, 'utf8');
       const scriptGuest = this.opts.transport.toGuestPath(scriptHost);
 

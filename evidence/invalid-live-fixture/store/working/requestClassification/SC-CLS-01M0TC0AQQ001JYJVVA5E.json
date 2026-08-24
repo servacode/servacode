@@ -1,0 +1,59 @@
+{
+  "id": "SC-CLS-01M0TC0AQQ001JYJVVA5E",
+  "type": "requestClassification",
+  "revision": 1,
+  "updatedAt": "2026-08-24T17:10:04.279Z",
+  "updatedBy": "RUNTIME",
+  "body": {
+    "requestRef": "SC-REQST-01M0TBYDQF002HZQZPF25",
+    "requestClass": "BUG",
+    "magnitude": "M0",
+    "affectedAreas": [
+      "src/total.js",
+      "test.js"
+    ],
+    "signals": [
+      {
+        "signal": "Off-by-one loop bound `i < xs.length - 1` omits the final element",
+        "readFrom": "src/total.js:3",
+        "effect": "total([1,2,3]) returns 3 instead of 6; confirms a genuine defect -> BUG class"
+      },
+      {
+        "signal": "Declared test suite with two assertions (sums every element; empty list is zero)",
+        "readFrom": "test.js:9-10",
+        "effect": "Acceptance is objectively defined by existing tests; narrow, verifiable blast radius"
+      },
+      {
+        "signal": "Requester claim 'total([]) throws' is not reproducible from current code (empty array yields loop bound -1, returns 0)",
+        "readFrom": "src/total.js:1-5 vs UNTRUSTED request text",
+        "effect": "Per 04 CL-3, signal taken from project state not requester adjectives; the empty-array symptom is unsubstantiated, leaving a single real defect"
+      },
+      {
+        "signal": "Single module, single pure function, no dependents in tree",
+        "readFrom": "Glob of source files: only src/total.js and test.js",
+        "effect": "Minimal blast radius -> magnitude M0"
+      },
+      {
+        "signal": "Project state exists (requirements baselined 1, acceptance baselined 1, work items 0); request targets existing product code",
+        "readFrom": "store:project-state v4",
+        "effect": "Not a NEW_PROJECT; a corrective change to existing baselined product"
+      }
+    ],
+    "researchRequired": false,
+    "impactAnalysisRequired": false,
+    "ownerDecisionRequired": false,
+    "recommendedDepartments": [
+      "SC-DEPT-030",
+      "SC-DEPT-051"
+    ],
+    "riskFlags": [
+      "REQUEST_STATE_MISMATCH"
+    ],
+    "confidence": "MEDIUM",
+    "multiIntent": false,
+    "unresolved": [
+      "Requester asserts total([]) throws, but current src/total.js returns 0 for an empty array; the throwing symptom could not be reproduced from present state and may reflect a different/older revision or misdescription"
+    ],
+    "classifiedByRun": "SC-RUN-01M0TBYDR9000BG52JN86"
+  }
+}

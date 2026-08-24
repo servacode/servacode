@@ -1,0 +1,371 @@
+{
+  "id": "SC-RUN-01M0TC27GK0017TDBNKVC",
+  "type": "agentRunRecord",
+  "version": 1,
+  "createdAt": "2026-08-24T17:12:34.850Z",
+  "createdBy": "RUNTIME",
+  "digest": "417c870568c821ea471561ee57d7be22f95b40f3349159361820677b30f14bc9",
+  "source": "SYSTEM",
+  "body": {
+    "runId": "SC-RUN-01M0TC27GK0017TDBNKVC",
+    "taskId": "SC-TASK-01M0TC27GK0009ESCBWVT",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe",
+    "agentId": "SC-AGENT-150",
+    "contractVersion": "1.0.0",
+    "roleInTask": "PRODUCER",
+    "contextBundleRef": "SC-CTX-01M0TC27GV003804FBY4H",
+    "createdAt": "2026-08-24T17:11:06.515Z",
+    "startedAt": "2026-08-24T17:11:06.538Z",
+    "endedAt": "2026-08-24T17:12:34.835Z",
+    "outcome": "COMPLETED",
+    "toolCalls": [
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:18.741Z",
+        "useId": "toolu_01GuLGmNa1pR2Fyh99nt7stj",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/P1.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:20.064Z",
+        "useId": "toolu_01Q8K8C5bY314gA4oSFogmVf",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/P2.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:21.721Z",
+        "useId": "toolu_013mhLF2vvQ7F6qJ64GciRmQ",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/P3.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:22.536Z",
+        "useId": "toolu_01LiVscyK3GmvWeFmNQnaCja",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/P4.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:23.663Z",
+        "useId": "toolu_01EWagA4bCBSkrZVyZJadgQA",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/P5.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:24.564Z",
+        "useId": "toolu_01UUxQKr9A1JkQCNKch7Cs2X",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/P6.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:29.818Z",
+        "useId": "toolu_01W6NmpjtsNeimwWyEATy3dM",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/W1.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:30.546Z",
+        "useId": "toolu_01CeDWfdzSafBFbeYdFuBAz4",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R1.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:32.142Z",
+        "useId": "toolu_01U8Gp1aXSV9NmkHcZcekVsF",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R2.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:32.878Z",
+        "useId": "toolu_01PM2mo54f1XVjiavHVqTRoP",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R3.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:34.950Z",
+        "useId": "toolu_012Kupdgt84akVjSRBiXvL3k",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R4.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:36.750Z",
+        "useId": "toolu_01UMULMMKTxoJn5HoveGWnqf",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R5.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:37.537Z",
+        "useId": "toolu_01G33yCMMmviCXV3QoQ4kV2w",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R6.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:38.240Z",
+        "useId": "toolu_01DJWLkYRTUgyruTM9zHpUR2",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R7.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:38.947Z",
+        "useId": "toolu_01YBzXFXe5M67HXSHuFcabuA",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R8.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:39.608Z",
+        "useId": "toolu_01MuwcRBZZhw65GeEryY25g1",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/R9.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:44.834Z",
+        "useId": "toolu_01E4t7Q7k3JSFLw37YhzXJfp",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/W2.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:46.063Z",
+        "useId": "toolu_01Ugj9QXPfhwFKFhhJpSApKs",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/W3.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:47.926Z",
+        "useId": "toolu_01RF8wDHwetqRMxW9HnmvKev",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/W4.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:48.616Z",
+        "useId": "toolu_017qebg84Z2rq5K1ZsQKoF9f",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/W5.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:49.709Z",
+        "useId": "toolu_01GFLc6rKGJWitDfKP1kf5gG",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/W6.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:51.796Z",
+        "useId": "toolu_01EYHh32TtZrGJqkDLTRF7k4",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/N1.sh"
+      },
+      {
+        "tool": "Bash",
+        "allowed": true,
+        "at": "2026-08-24T17:11:52.887Z",
+        "useId": "toolu_01XzCX9kouzc72G3DbAQjgsJ",
+        "subject": "bash /mnt/d/SEVACODE/out/.serva-workspaces/live-join-fixture-1bf62e0d/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01/probes/H1.sh"
+      }
+    ],
+    "evidenceRefs": [],
+    "scopeDeclared": [
+      "Edit only files under: src/. Everything else in this worktree is out of scope; report it as an observation rather than changing it."
+    ],
+    "scopeActual": [],
+    "consumption": {
+      "invocations": 1,
+      "turns": 25,
+      "toolCalls": 23,
+      "wallTimeMs": 83165,
+      "inputTokens": 8,
+      "outputTokens": 7608,
+      "costUsd": 0.38719500000000007
+    },
+    "terminal": true,
+    "eventCount": 102,
+    "selfReview": {
+      "contractConformance": "Within contract. The task was execution of a fixed list of shell probes via a granted tool (Bash), which falls under EXECUTE authority and is well below the M2 magnitude ceiling. No evidence, AuditEvent, GateResult or provenance was written; no gate verdict was rendered; no project state was changed. No business rules were invented, no contracts or schemas altered, no dependencies added, no security controls weakened, and no capability escalation was requested. I did not verify my own output or judge probe outcomes.",
+      "scopeConformance": "Conformant. The edit scope was src/ only; I made no edits at all. The only actions taken were the 23 Bash invocations enumerated in the task. I did not read, summarise or repeat the contents of any file the probe scripts touch, as instructed, and I did not retry or work around anything.",
+      "knownGaps": [
+        "Individual probe exit codes and outcomes are unknown to me by design — the task forbade reading the result files, so Serva must read them to determine per-probe results.",
+        "Because all invocations returned empty output, I cannot independently distinguish a probe that ran and failed from one that ran and succeeded; I claim only that each was attempted."
+      ],
+      "confidence": "HIGH",
+      "assumptionsMade": [
+        {
+          "statement": "Empty tool output for each probe indicates the script executed and self-recorded its result to a file, rather than indicating the script did not run.",
+          "loadBearing": true,
+          "validatedBy": "Task statement explicitly says each script records its own exit code and output to a file and that no output capture is needed; all 23 calls returned normally without a tool-level refusal or error."
+        },
+        {
+          "statement": "No Bash call was refused, so the task's 're-send once if refused for added text' clause never applied.",
+          "loadBearing": false,
+          "validatedBy": "All 23 tool results returned normally with no refusal message."
+        }
+      ]
+    },
+    "observations": [
+      {
+        "kind": "SANDBOX_MEASUREMENT",
+        "statement": "All 23 probe commands (P1-P6, W1, R1-R9, W2-W6, N1, H1) were accepted and executed by the Bash tool; none were refused at the permission layer.",
+        "severity": "INFO"
+      },
+      {
+        "kind": "OUTPUT_SUPPRESSED",
+        "statement": "Every probe returned no stdout/stderr on the tool channel, consistent with each script writing its own output and exit code to a result file.",
+        "severity": "INFO"
+      },
+      {
+        "kind": "SCOPE",
+        "statement": "No files were edited. The declared edit scope (src/) was not exercised because this was a measurement run rather than development work.",
+        "severity": "INFO"
+      },
+      {
+        "kind": "EVIDENCE_LIMIT",
+        "statement": "Per explicit task instruction I did not read the probe result files, so per-probe pass/fail determination is left entirely to Serva.",
+        "severity": "INFO"
+      }
+    ],
+    "escalations": [],
+    "claimAssessments": [
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe P1 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe P2 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe P3 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe P4 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe P5 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe P6 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe W1 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R1 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R2 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R3 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R4 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R5 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R6 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R7 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R8 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe R9 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe W2 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe W3 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe W4 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe W5 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe W6 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe N1 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "COMMAND_RUN",
+        "statement": "Ran probe H1 via Bash with the command string exactly as specified; returned with no output.",
+        "verification": "CORROBORATED"
+      },
+      {
+        "kind": "OTHER",
+        "statement": "Made no file edits and created no files during this run; the src/ edit scope was not touched.",
+        "verification": "UNVERIFIED"
+      }
+    ],
+    "attempts": 1,
+    "engineSessionRef": "1fc93f84-7793-41dc-aec3-65918893a936",
+    "diagnostics": [],
+    "eventLogDigest": "287b72d5de7ff6bd7e3ac9d20d4f1964b3b70885dbc6e3cce8c2e874010a68dd"
+  }
+}

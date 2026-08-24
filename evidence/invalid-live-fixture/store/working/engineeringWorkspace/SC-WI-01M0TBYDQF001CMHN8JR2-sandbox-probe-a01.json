@@ -1,0 +1,28 @@
+{
+  "id": "SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01",
+  "type": "engineeringWorkspace",
+  "revision": 1,
+  "updatedAt": "2026-08-24T17:11:05.679Z",
+  "updatedBy": "RUNTIME",
+  "body": {
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01",
+    "projectId": "D:\\SEVACODE\\out\\live-join-fixture",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe",
+    "attempt": 1,
+    "producerAgentId": "SC-AGENT-150",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "branch": "serva/SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe/01",
+    "path": "D:\\SEVACODE\\out\\.serva-workspaces\\live-join-fixture-1bf62e0d\\SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe-a01",
+    "createdAt": "2026-08-24T17:11:05.679Z",
+    "state": "CREATED",
+    "expectedScope": {
+      "allow": [
+        "src/"
+      ],
+      "forbid": []
+    },
+    "sandboxProfileDigest": "3b8d33c6d17d60ccff3e963218a2c265fe89acde5f2f83f1b4fb613fb18c9507",
+    "substrateClass": "HARD",
+    "cleanupState": "PENDING"
+  }
+}

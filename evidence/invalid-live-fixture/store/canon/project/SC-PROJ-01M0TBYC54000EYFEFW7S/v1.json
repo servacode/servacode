@@ -1,0 +1,22 @@
+{
+  "id": "SC-PROJ-01M0TBYC54000EYFEFW7S",
+  "type": "project",
+  "version": 1,
+  "createdAt": "2026-08-24T17:09:00.198Z",
+  "createdBy": "RUNTIME",
+  "digest": "79c4c88950138fca5c644d5ab403afb5fa197eee942e0e3692510323d1d61996",
+  "source": "OWNER_STATED",
+  "body": {
+    "id": "SC-PROJ-01M0TBYC54000EYFEFW7S",
+    "name": "TotalsFixture",
+    "createdAt": "2026-08-24T17:09:00.196Z",
+    "idea": {
+      "text": "A tiny library that adds up numbers, used by the ordering flow.",
+      "capturedAt": "2026-08-24T17:09:00.196Z",
+      "source": "OWNER_STATED"
+    },
+    "riskClass": "R1",
+    "profile": "PRF-NEW-PRODUCT",
+    "servaVersion": "1.0.0"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "SC-CS-01M0TC6XPW000ST1WY3P2",
+  "type": "changeSet",
+  "version": 1,
+  "createdAt": "2026-08-24T17:13:40.316Z",
+  "createdBy": "RUNTIME",
+  "digest": "e99c610a43cf53d487aa999c721c28ffd9bab948ffcbacaf4547c67a20b97556",
+  "source": "SYSTEM",
+  "body": {
+    "changeSetId": "SC-CS-01M0TC6XPW000ST1WY3P2",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a01",
+    "attempt": 1,
+    "producerAgentId": "SC-AGENT-150",
+    "producerRunId": "SC-RUN-01M0TC4Y4K0017Q6ZZE7N",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "entries": [
+      {
+        "status": "M",
+        "path": "src/total.js",
+        "isBinary": false,
+        "isSymlink": false,
+        "digest": "a6fdff5986c4332fe0c0fd720f94f9f93496a58ae78cbc6eda8d330595a3cb10",
+        "blobId": "b0907e89683dde04787101de23d0cea1c2b893d6",
+        "sizeBytes": 127
+      }
+    ],
+    "diffDigest": "fa03b442279287ad9f98beab5506960e92579feb54508420ada0f5ba666e2883",
+    "digest": "8bcc1827ba5e400b05732d6a00038198cf709f9b610049313835e95d47f6bb6d",
+    "createdAt": "2026-08-24T17:13:40.316Z"
+  }
+}

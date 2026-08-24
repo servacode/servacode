@@ -1,0 +1,24 @@
+{
+  "id": "SC-EEV-01M0TC7Z06000DE9VX0PR",
+  "type": "engineeringEvidence",
+  "version": 1,
+  "createdAt": "2026-08-24T17:14:14.406Z",
+  "createdBy": "RUNTIME",
+  "digest": "102071a893bee8a1e95db45e33b2192f8f489902aa8b6c5a41cdedb49b4c8872",
+  "source": "SYSTEM",
+  "body": {
+    "id": "SC-EEV-01M0TC7Z06000DE9VX0PR",
+    "evidenceClass": "ANALYSIS",
+    "claim": "The change introduces no credential-shaped content matching the rule set.",
+    "basis": "DERIVED",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "changeSetId": "SC-CS-01M0TC7XZE00075V7KEN4",
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a02",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "runtimeComponentId": "SC-RTC-015",
+    "outcome": "PASS",
+    "detail": "No credential-shaped content matched the rule set across 0 scanned file(s). This means nothing matched these rules; it is not a security review.",
+    "capturedAt": "2026-08-24T17:14:14.406Z",
+    "capturedBy": "RUNTIME"
+  }
+}

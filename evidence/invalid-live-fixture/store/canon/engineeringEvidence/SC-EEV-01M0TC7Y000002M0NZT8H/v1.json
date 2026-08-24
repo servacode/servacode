@@ -1,0 +1,24 @@
+{
+  "id": "SC-EEV-01M0TC7Y000002M0NZT8H",
+  "type": "engineeringEvidence",
+  "version": 1,
+  "createdAt": "2026-08-24T17:14:13.376Z",
+  "createdBy": "RUNTIME",
+  "digest": "87a91d43c35b8e2138565a0e0c604d390a7efc5e31738eacb25a9a88583f6272",
+  "source": "SYSTEM",
+  "body": {
+    "id": "SC-EEV-01M0TC7Y000002M0NZT8H",
+    "evidenceClass": "ANALYSIS",
+    "claim": "The change stays inside the declared scope.",
+    "basis": "DERIVED",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "changeSetId": "SC-CS-01M0TC7XZE00075V7KEN4",
+    "workspaceId": "SC-WI-01M0TBYDQF001CMHN8JR2-a02",
+    "headCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "runtimeComponentId": "SC-RTC-005",
+    "outcome": "PASS",
+    "detail": "0 changed path(s), all within scope",
+    "capturedAt": "2026-08-24T17:14:13.376Z",
+    "capturedBy": "RUNTIME"
+  }
+}

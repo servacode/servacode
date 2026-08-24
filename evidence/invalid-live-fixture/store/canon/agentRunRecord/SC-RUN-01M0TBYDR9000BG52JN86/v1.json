@@ -1,0 +1,131 @@
+{
+  "id": "SC-RUN-01M0TBYDR9000BG52JN86",
+  "type": "agentRunRecord",
+  "version": 1,
+  "createdAt": "2026-08-24T17:10:04.271Z",
+  "createdBy": "RUNTIME",
+  "digest": "411171cea62b5ccc8d529788794b7efafefbf7fdb38d72138dc7ff630a3200a5",
+  "source": "SYSTEM",
+  "body": {
+    "runId": "SC-RUN-01M0TBYDR9000BG52JN86",
+    "taskId": "SC-TASK-01M0TBYDR7000A4ESHQRE",
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "agentId": "SC-AGENT-003",
+    "contractVersion": "1.0.0",
+    "roleInTask": "ANALYST",
+    "contextBundleRef": "SC-CTX-01M0TBYDRR004AJRGBVMV",
+    "createdAt": "2026-08-24T17:09:01.833Z",
+    "startedAt": "2026-08-24T17:09:01.874Z",
+    "endedAt": "2026-08-24T17:10:04.255Z",
+    "outcome": "COMPLETED",
+    "toolCalls": [
+      {
+        "tool": "Grep",
+        "allowed": true,
+        "at": "2026-08-24T17:09:12.766Z",
+        "useId": "toolu_01ENK3sCMtY7kct6GSy1Xc7H",
+        "subject": "function total|def total|const total|total\\s*=|total\\("
+      },
+      {
+        "tool": "Glob",
+        "allowed": true,
+        "at": "2026-08-24T17:09:13.274Z",
+        "useId": "toolu_01ANRsv74Y1Wgq6tnjGXCrxP",
+        "subject": "**/*.{js,ts,py,go,java,rb}"
+      },
+      {
+        "tool": "Read",
+        "allowed": true,
+        "at": "2026-08-24T17:09:16.200Z",
+        "useId": "toolu_01KY4QGCwQP7MtqE7FX88HzU",
+        "subject": "src/total.js"
+      },
+      {
+        "tool": "Read",
+        "allowed": true,
+        "at": "2026-08-24T17:09:16.228Z",
+        "useId": "toolu_01UYQg11gcqdCwGnNjfvXoyi",
+        "subject": "test.js"
+      }
+    ],
+    "evidenceRefs": [],
+    "scopeDeclared": [
+      "classification only; propose nothing and change nothing"
+    ],
+    "scopeActual": [],
+    "consumption": {
+      "invocations": 1,
+      "turns": 6,
+      "toolCalls": 4,
+      "wallTimeMs": 57917,
+      "inputTokens": 105,
+      "outputTokens": 4196,
+      "costUsd": 0.1584075
+    },
+    "terminal": true,
+    "eventCount": 24,
+    "selfReview": {
+      "contractConformance": "Stayed within ANALYST/ADVISE authority: extracted classification signals, estimated blast radius, checked for multi-intent. Proposed no implementation and changed no state. Did not select a profile, dispatch, or write evidence/verdicts.",
+      "scopeConformance": "Classification only. Signals derived from project state (source files + store), not from requester adjectives (04 CL-3). Classified within M4 ceiling.",
+      "knownGaps": [
+        "Cannot confirm the reported empty-array throw against current code; noted as unresolved rather than invented",
+        "No prior conversation history available per withheld policy; did not reconstruct it"
+      ],
+      "confidence": "MEDIUM",
+      "assumptionsMade": [
+        {
+          "statement": "The two reported symptoms constitute one intent ('make the suite pass') rather than separate work items",
+          "loadBearing": true,
+          "validatedBy": "test.js contains a single suite of two assertions over one function; both point to one deliverable"
+        },
+        {
+          "statement": "The relevant runtime is Node.js given require/module.exports and test.js",
+          "loadBearing": false,
+          "validatedBy": "src/total.js and test.js CommonJS syntax"
+        }
+      ]
+    },
+    "observations": [
+      {
+        "kind": "STATE_MISMATCH",
+        "statement": "Requester states total([]) throws, but src/total.js returns 0 for an empty array (loop bound becomes -1, body never executes). The empty-array symptom is not corroborated by current project state.",
+        "severity": "MINOR",
+        "location": "src/total.js:3"
+      },
+      {
+        "kind": "DEFECT_LOCATED",
+        "statement": "Genuine off-by-one defect: loop uses `i < xs.length - 1`, dropping the last element so total([1,2,3]) yields 3 not the expected 6.",
+        "severity": "MAJOR",
+        "location": "src/total.js:3"
+      },
+      {
+        "kind": "SCOPE",
+        "statement": "Blast radius is minimal: one pure function and its test file, no other source files present.",
+        "severity": "INFO",
+        "location": "repository root"
+      }
+    ],
+    "escalations": [],
+    "claimAssessments": [
+      {
+        "kind": "FILE_READ",
+        "statement": "Read src/total.js and observed off-by-one loop bound `for (let i = 0; i < xs.length - 1; i++)`",
+        "verification": "UNVERIFIED"
+      },
+      {
+        "kind": "FILE_READ",
+        "statement": "Read test.js and observed two assertions: total([1,2,3])===6 and total([])===0",
+        "verification": "UNVERIFIED"
+      },
+      {
+        "kind": "STORE_QUERY",
+        "statement": "Referenced project-state store v4: 0 work items, 1 requirement baselined, 1 acceptance criterion baselined, 0 features",
+        "verification": "UNVERIFIED"
+      }
+    ],
+    "attempts": 1,
+    "engineSessionRef": "99031521-5937-4a14-8d38-dd79fc4a864a",
+    "diagnostics": [],
+    "eventLogDigest": "e34a06f6673705c0ec305aed5864862d3d89840a2bf182fd140e17d9c06b73f1"
+  }
+}

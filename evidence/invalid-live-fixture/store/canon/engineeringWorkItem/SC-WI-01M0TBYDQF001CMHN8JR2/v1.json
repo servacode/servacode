@@ -1,0 +1,33 @@
+{
+  "id": "SC-WI-01M0TBYDQF001CMHN8JR2",
+  "type": "engineeringWorkItem",
+  "version": 1,
+  "createdAt": "2026-08-24T17:12:35.029Z",
+  "createdBy": "RUNTIME",
+  "digest": "a63c69f2f5558969a56aa28847b4be552b91a7630395f48db2dc369b56cf4ee7",
+  "source": "SYSTEM",
+  "body": {
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2",
+    "title": "the declared test suite must pass",
+    "requirements": [
+      "total(xs) returns the sum of every element, and total([]) returns 0."
+    ],
+    "acceptanceCriteria": [
+      "The declared test suite (`node test.js`) exits 0."
+    ],
+    "decisions": [],
+    "allowedScope": [
+      "src/"
+    ],
+    "forbiddenScope": [],
+    "producerAgentId": "SC-AGENT-150",
+    "reviewerAgentId": "SC-AGENT-180",
+    "recipes": [
+      "SC-RECIPE-UNIT-TEST"
+    ],
+    "magnitude": "M1",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "expectedOutputs": [],
+    "maxAttempts": 2
+  }
+}

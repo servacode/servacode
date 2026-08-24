@@ -1,3 +1,4 @@
+import type { OrchestratorDeps } from '../orchestration/orchestrator.js';
 import { BillingMode } from '../vocab/index.js';
 import { ContractRegistry } from '../agents/registry.js';
 import { AgentRuntime } from '../agents/runtime.js';
@@ -85,6 +86,15 @@ export interface AiLayerOptions {
   readonly registry?: ContractRegistry;
   readonly enabledAgents?: ReadonlySet<string>;
   readonly allowedBilling?: readonly BillingMode[];
+  /**
+   * Containment the CALLER has measured, passed through to plan validation.
+   *
+   * Never derived here. Building an engineering layer means qualifying a substrate, which is
+   * expensive and belongs to the caller that already did it — and an AI layer that quietly
+   * measured a boundary for itself would be asserting the very thing it is supposed to be
+   * told.
+   */
+  readonly producerExecution?: OrchestratorDeps['producerExecution'];
 }
 
 export function buildAiLayer(rt: ServaRuntime, opts: AiLayerOptions = {}): AiLayer {
@@ -114,6 +124,7 @@ export function buildAiLayer(rt: ServaRuntime, opts: AiLayerOptions = {}): AiLay
     runtime,
     registry,
     enabledAgents,
+    ...(opts.producerExecution === undefined ? {} : { producerExecution: opts.producerExecution }),
   });
 
   return { engine, registry, runtime, orchestrator, enabledAgents };

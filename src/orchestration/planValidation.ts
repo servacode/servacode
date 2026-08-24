@@ -55,6 +55,35 @@ export interface PlanValidationOptions {
   readonly registry: ContractRegistry;
   readonly enabledAgents: ReadonlySet<string>;
   readonly classification: RequestClassification;
+  /**
+   * Whether write-capable execution can be CONTAINED on this machine right now.
+   *
+   * SPEC: Phase 6 final acceptance sequence §2; 33 PC-5, 19 TR-1.
+   *
+   * `capabilityLevelFor` answers a Phase 3 question: what the intelligence runtime can police
+   * at call time. It cannot police a write, so every write-capable agent is NOT_ENABLED there —
+   * and that was the whole truth until Phase 4 built the thing that CAN police one: a Producer
+   * inside a measured HARD boundary.
+   *
+   * The live cross-phase run is what exposed the gap. The planner produced a correct plan —
+   * fix the off-by-one in `src/total.js`, assigned to SC-AGENT-150 — and validation rejected
+   * it as `CAPABILITY_NOT_ENABLED`, because it was applying a rule about the intelligence
+   * runtime to a step the engineering factory would execute. A correct plan, refused on the
+   * grounds that nobody can contain a writer, by a system whose entire Phase 4 is containing
+   * writers.
+   *
+   * ABSENT MEANS NO. Omitting this keeps the old behaviour exactly, so an unqualified machine
+   * still refuses to queue write-capable work — which is the direction that must never be
+   * loosened by accident.
+   */
+  readonly producerExecution?: {
+    /** True only when a CURRENT measurement found HARD and the boundary is reachable. */
+    readonly available: boolean;
+    /** Which agents that containment actually covers. Membership is not a formality. */
+    readonly producers: ReadonlySet<string>;
+    /** What was measured, for the finding when it is not available. */
+    readonly basis: string;
+  };
 }
 
 /**
@@ -205,14 +234,32 @@ export function validateExecutionPlan(
 
     const level = capabilityLevelFor(contract);
     if (level === CapabilityLevel.NOT_ENABLED) {
-      add({
-        kind: PlanFindingKind.CAPABILITY_NOT_ENABLED,
-        stepId: step.stepId,
-        detail:
-          step.agentId +
-          ' requires write, execute or network capability, which is not enforceable on the current substrate.',
-        specRef: '33 PC-5, 19 TR-1',
-      });
+      /*
+       * A write-capable step is enforceable when — and only when — this machine has a
+       * CURRENT measured HARD boundary and this specific agent is one the factory will run
+       * inside it. Both halves matter: a qualified machine does not make every agent a
+       * Producer, and being a Producer means nothing on a machine that measured SOFT.
+       */
+      const contained =
+        opts.producerExecution?.available === true &&
+        opts.producerExecution.producers.has(step.agentId);
+
+      if (!contained) {
+        add({
+          kind: PlanFindingKind.CAPABILITY_NOT_ENABLED,
+          stepId: step.stepId,
+          detail:
+            step.agentId +
+            ' requires write, execute or network capability, which is not enforceable on the current substrate' +
+            (opts.producerExecution === undefined
+              ? '; no containment was offered to this validation'
+              : opts.producerExecution.available
+                ? '; ' + step.agentId + ' is not among the agents that containment covers'
+                : ': ' + opts.producerExecution.basis) +
+            '.',
+          specRef: '33 PC-5, 19 TR-1',
+        });
+      }
     }
 
     const ceiling = ceilingRank(contract.magnitudeCeiling);

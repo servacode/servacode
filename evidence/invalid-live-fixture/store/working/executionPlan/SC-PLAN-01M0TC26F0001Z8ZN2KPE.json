@@ -1,0 +1,43 @@
+{
+  "id": "SC-PLAN-01M0TC26F0001Z8ZN2KPE",
+  "type": "executionPlan",
+  "revision": 1,
+  "updatedAt": "2026-08-24T17:11:05.440Z",
+  "updatedBy": "RUNTIME",
+  "body": {
+    "requestRef": "SC-REQST-01M0TBYDQF002HZQZPF25",
+    "proposedByRun": "SC-RUN-01M0TC0AR400086G6PRW8",
+    "accepted": true,
+    "findings": [],
+    "planFor": "BUG",
+    "magnitude": "M0",
+    "rationale": "The accepted classification is a BUG at magnitude M0 with a minimal blast radius: a single off-by-one loop bound in src/total.js and an existing two-assertion test suite that objectively defines acceptance. The plan therefore needs exactly one producer step to correct the defect and one separate verifier step to confirm behavior against the baselined acceptance, honoring producer/verifier separation. The classification recommended SC-DEPT-030 (Backend Engineering) and SC-DEPT-051 (QA & Test Engineering); both are used, so no recommended department is omitted under SC-POL-024. This is a proposal only; Serva validates and dispatches.",
+    "steps": [
+      {
+        "stepId": "S1",
+        "agentId": "SC-AGENT-150",
+        "departmentId": "SC-DEPT-030",
+        "purpose": "Correct the off-by-one loop bound in src/total.js so total() sums every element (i < xs.length rather than i < xs.length - 1), making the declared assertions satisfiable.",
+        "scopeBoundary": "Edit only the loop bound / summation logic in src/total.js within the declared affected area. Do not alter test.js, do not change function signature, do not touch unrelated files. Producer role only; performs no self-verification.",
+        "dependsOn": [],
+        "produces": "Corrected total() implementation in src/total.js"
+      },
+      {
+        "stepId": "S2",
+        "agentId": "SC-AGENT-210",
+        "departmentId": "SC-DEPT-051",
+        "purpose": "Decide the test level and 'enough' bar for this M0 fix and verify the corrected implementation against the baselined acceptance, i.e. the existing test.js assertions (sums every element; empty list yields zero).",
+        "scopeBoundary": "Test decisioning and behavioral verification only against baselined acceptance. Must not modify product code (src/total.js). Separate verifier step; must not be merged with the producer step S1.",
+        "dependsOn": [
+          "S1"
+        ],
+        "produces": "Test strategy and verification result (pass/fail against baselined acceptance)"
+      }
+    ],
+    "omissions": [],
+    "ownerDecisionsRequired": [],
+    "unresolved": [
+      "The untrusted request asserts total([]) throws, but current src/total.js returns 0 for an empty array (loop bound -1). The throwing symptom is not reproducible from present project state and may reflect a different/older revision or a misdescription; carried forward as REQUEST_STATE_MISMATCH."
+    ]
+  }
+}

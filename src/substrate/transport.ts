@@ -568,8 +568,19 @@ export const TRANSPORT_BACKOFF_MS: readonly number[] = Object.freeze([250, 1_000
  * `$1` is the nonce and `$@` after the shift is the real command. Nothing is interpolated
  * into this string, ever: the moment a caller's value is concatenated here, the argument
  * safety that `--exec` was chosen for is gone.
+ *
+ * THE FORMAT STRING IS QUOTED, and that is not cosmetic. Written as `printf %s
+`, the shell
+ * strips the backslash before `printf` ever sees it, so the format becomes `%sn`: the nonce is
+ * emitted with a literal `n` appended and NO newline. Every contained command's first line of
+ * stderr then arrived glued to the marker —
+ *
+ *   serva-reach-3b7f88ff937c174abd5e06eenfile:///mnt/d/...
+ *
+ * — which corrupted the diagnostics of the very probes this transport exists to make
+ * trustworthy. A live qualification run is what surfaced it.
  */
-export const GUEST_REACH_SCRIPT = 'printf %s\\n "$1" >&2; shift; exec "$@"';
+export const GUEST_REACH_SCRIPT = "printf '%s\\n' \"$1\" >&2; shift; exec \"$@\"";
 
 export const GUEST_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 

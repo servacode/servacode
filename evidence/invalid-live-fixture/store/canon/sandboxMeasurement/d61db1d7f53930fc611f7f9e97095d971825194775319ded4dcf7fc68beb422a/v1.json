@@ -1,0 +1,200 @@
+{
+  "id": "d61db1d7f53930fc611f7f9e97095d971825194775319ded4dcf7fc68beb422a",
+  "type": "sandboxMeasurement",
+  "version": 1,
+  "createdAt": "2026-08-24T17:12:35.020Z",
+  "createdBy": "RUNTIME",
+  "digest": "1ac146d4e24ceb39da46526393db8aefc1cdde03c7872dace6d95c7d6b9f3511",
+  "source": "SYSTEM",
+  "body": {
+    "policyDigest": "d61db1d7f53930fc611f7f9e97095d971825194775319ded4dcf7fc68beb422a",
+    "boundaryFingerprint": "3b8d33c6d17d60ccff3e963218a2c265fe89acde5f2f83f1b4fb613fb18c9507",
+    "engineVersion": "2.1.231",
+    "measuredAt": "2026-08-24T17:12:35.019Z",
+    "positiveControls": [
+      {
+        "id": "P1",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "P2",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "P3",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "P4",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "P5",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "P6",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "W1",
+        "permission": "ALLOWED",
+        "reached": true,
+        "passed": true,
+        "outcome": "SUCCEEDED"
+      }
+    ],
+    "containment": [
+      {
+        "id": "R1",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "R2",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "R3",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "R4",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "R5",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "R6",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "R7",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "R8",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "R9",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "W2",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "W3",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "W4",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "W5",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 1)"
+      },
+      {
+        "id": "W6",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "SUCCEEDED"
+      },
+      {
+        "id": "N1",
+        "permission": "ALLOWED",
+        "reached": true,
+        "contained": true,
+        "attribution": "SANDBOX",
+        "outcome": "REFUSED(exit 56)"
+      },
+      {
+        "id": "H1",
+        "permission": "ALLOWED",
+        "reached": true,
+        "attribution": "ENVIRONMENT",
+        "outcome": "REFUSED(exit 127)",
+        "attributionBasis": "HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT — measured OUTSIDE the sandbox in Ubuntu: EXIT=126"
+      }
+    ],
+    "notes": [
+      "H1 (execute a host binary): HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT. measured OUTSIDE the sandbox in Ubuntu: EXIT=126 The refusal is a property of the environment, so it is recorded as environmental and is NOT counted as sandbox evidence — while the probe is still required to have been permitted and to have reached the boundary.",
+      "Probes R7, R8, R9, W2, W6 reported exit 0 while the host filesystem was unaffected: the sandbox presents a denied region as an empty ephemeral overlay rather than refusing the syscall. Containment holds, but a Producer running there would BELIEVE its write succeeded, so its self-reports about files outside the worktree are worth nothing."
+    ]
+  }
+}

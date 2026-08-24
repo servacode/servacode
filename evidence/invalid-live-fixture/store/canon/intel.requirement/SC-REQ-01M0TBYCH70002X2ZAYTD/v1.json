@@ -1,0 +1,28 @@
+{
+  "id": "SC-REQ-01M0TBYCH70002X2ZAYTD",
+  "type": "intel.requirement",
+  "version": 1,
+  "createdAt": "2026-08-24T17:09:00.585Z",
+  "createdBy": "RUNTIME",
+  "digest": "88d16efbd6875a63fbe4800ab690f2c5d64c4aacb92761c760bac4fe25c71b63",
+  "source": "SYSTEM",
+  "body": {
+    "id": "SC-REQ-01M0TBYCH70002X2ZAYTD",
+    "version": 1,
+    "createdAt": "2026-08-24T17:09:00.583Z",
+    "meta": {
+      "provenance": {
+        "marking": "SYSTEM",
+        "component": "deterministic-preseed"
+      },
+      "attribution": {
+        "at": "2026-08-24T17:09:00.583Z"
+      }
+    },
+    "statement": "total(xs) returns the sum of every element of xs, and total([]) returns 0.",
+    "kind": "FUNCTIONAL",
+    "priority": "MUST",
+    "rationale": "The ordering flow prices baskets with it; a short sum undercharges and an empty basket must cost nothing rather than throwing.",
+    "tracesTo": []
+  }
+}

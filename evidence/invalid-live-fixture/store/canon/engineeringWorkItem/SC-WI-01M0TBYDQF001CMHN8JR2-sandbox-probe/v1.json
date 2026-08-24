@@ -1,0 +1,31 @@
+{
+  "id": "SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe",
+  "type": "engineeringWorkItem",
+  "version": 1,
+  "createdAt": "2026-08-24T17:11:05.525Z",
+  "createdBy": "RUNTIME",
+  "digest": "c4c8db58d37c889c9682051a18780ce719a0d966acd5acf6a6321020614ef58d",
+  "source": "SYSTEM",
+  "body": {
+    "workItemId": "SC-WI-01M0TBYDQF001CMHN8JR2-sandbox-probe",
+    "title": "OS sandbox qualification",
+    "requirements": [
+      "Run each listed probe script exactly once."
+    ],
+    "acceptanceCriteria": [
+      "Every probe has been attempted."
+    ],
+    "decisions": [],
+    "allowedScope": [
+      "src/"
+    ],
+    "forbiddenScope": [],
+    "producerAgentId": "SC-AGENT-150",
+    "reviewerAgentId": "SC-AGENT-180",
+    "recipes": [],
+    "magnitude": "M1",
+    "baseCommit": "c05ede39d0ed7d716cf03abf7993cf5e9d23b0b5",
+    "expectedOutputs": [],
+    "maxAttempts": 1
+  }
+}

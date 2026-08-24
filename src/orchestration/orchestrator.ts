@@ -1,3 +1,5 @@
+import { ARTIFACT_TYPES } from '../intelligence/repository.js';
+import type { PlanValidationOptions } from './planValidation.js';
 import { RunOutcome } from '../vocab/index.js';
 import { AuditAction, audit } from '../events/audit.js';
 import { getCatalogues } from '../catalogue/index.js';
@@ -54,6 +56,14 @@ export interface OrchestratorDeps {
   readonly runtime: AgentRuntime;
   readonly registry: ContractRegistry;
   readonly enabledAgents: ReadonlySet<string>;
+  /**
+   * Whether write-capable execution can be contained on this machine right now.
+   *
+   * Supplied by a caller that has actually measured the boundary — the engineering layer —
+   * because the orchestrator must not assume one. Absent means no containment was offered,
+   * and plan validation then refuses every write-capable step exactly as it did before.
+   */
+  readonly producerExecution?: PlanValidationOptions['producerExecution'];
 }
 
 export const RoutingStage = {
@@ -284,6 +294,9 @@ export class Orchestrator {
       registry: this.deps.registry,
       enabledAgents: this.deps.enabledAgents,
       classification,
+      ...(this.deps.producerExecution === undefined
+        ? {}
+        : { producerExecution: this.deps.producerExecution }),
     });
 
     const tx2 = this.deps.store.begin();
@@ -375,8 +388,34 @@ export class Orchestrator {
     content: string;
     relevance: number;
   }[] {
+    /*
+     * THE CANONICAL FAMILY NAMES, NOT NAMES THAT LOOK LIKE THEM.
+     *
+     * SPEC: Phase 6 final acceptance sequence §2; 04 §3.2.
+     *
+     * This read `listCanonIds('requirement')`, and no such family exists — requirements are
+     * stored under `intel.requirement`. The lookup always returned zero, so EVERY project was
+     * described to the classifier and the planner as empty, and every request against real
+     * baselined code arrived carrying a strong NEW_PROJECT signal.
+     *
+     * The live cross-phase run is what surfaced it. Given a properly onboarded project with an
+     * accepted requirement and a failing suite, the Orchestrator escalated:
+     *
+     *   PROJECT_STATE v6 is empty (NEW_PROJECT signal) while the filesystem holds tracked code
+     *   and a failing test suite (BUG signal). I will not plan-to-dispatch against an
+     *   unreconciled workspace.
+     *
+     * Correct reasoning about a contradiction Serva invented by looking in the wrong drawer. It
+     * blocked the entire join for any real project, and it is the same shape as the
+     * `projectName` defect: a key that does not match, returning nothing, producing a
+     * plausible answer nobody questions.
+     */
     const workItems = this.deps.store.listWorkingIds('workItem');
-    const requirements = this.deps.store.listCanonIds('requirement');
+    const requirements = this.deps.store.listCanonIds(ARTIFACT_TYPES.REQUIREMENT);
+    const criteria = this.deps.store.listCanonIds(ARTIFACT_TYPES.ACCEPTANCE_CRITERION);
+    const features = this.deps.store.listCanonIds(ARTIFACT_TYPES.FEATURE);
+    const baselined = requirements.length + criteria.length + features.length;
+
     return [
       {
         source: 'store:project-state',
@@ -387,7 +426,9 @@ export class Orchestrator {
           'Store version: ' + String(this.deps.store.storeVersion()),
           'Work items on record: ' + String(workItems.length),
           'Requirements baselined: ' + String(requirements.length),
-          workItems.length === 0 && requirements.length === 0
+          'Acceptance criteria baselined: ' + String(criteria.length),
+          'Features baselined: ' + String(features.length),
+          workItems.length === 0 && baselined === 0
             ? 'No project state exists yet. A request against an empty store is a strong NEW_PROJECT signal (04 §3.2).'
             : 'Project state exists; this is not a NEW_PROJECT unless the request is for a different product.',
         ].join('\n'),

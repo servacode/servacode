@@ -5,6 +5,8 @@ import { Orchestrator } from '../src/orchestration/orchestrator.js';
 import { FakeEngineAdapter } from '../src/engine/fake.js';
 import { PHASE3_ENABLED_AGENTS, PHASE6_ENABLED_AGENTS } from '../src/app/ai.js';
 import { PHASE4_CANDIDATE_PRODUCERS } from '../src/app/engineering.js';
+import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
+import { RequirementSchema } from '../src/intelligence/artifacts/requirements.js';
 import {
   PlanFindingKind,
   findCycle,
@@ -19,7 +21,7 @@ import {
   type RequestClassification,
 } from '../src/orchestration/schemas.js';
 import { EnvelopeStatus, Magnitude, RequestClass, RunOutcome } from '../src/vocab/index.js';
-import { cleanup, freshStore } from './helpers.js';
+import { cleanup, freshStore, freshRuntime } from './helpers.js';
 
 /**
  * ORCHESTRATION: classification, planning, deterministic validation, dispatch queue.
@@ -520,5 +522,143 @@ describe('every department a classifier may recommend has an assignable agent', 
     expect(PHASE4_CANDIDATE_PRODUCERS.has('SC-AGENT-150')).toBe(true);
     /* Two different sets, deliberately: one is a vocabulary, the other is permission. */
     expect(PHASE6_ENABLED_AGENTS).not.toBe(PHASE4_CANDIDATE_PRODUCERS);
+  });
+});
+
+/* ============================ a baselined project is not an empty one */
+
+describe('the project state shown to a planner reflects what the Store holds', () => {
+  it('counts requirements under the family they are actually stored in', () => {
+    /*
+     * SPEC: Phase 6 final acceptance sequence §2; 04 §3.2.
+     *
+     * This read `listCanonIds('requirement')`, and no such family exists — requirements live
+     * under `intel.requirement`. The count was always zero, so every project was described as
+     * empty and every request against real baselined code carried a strong NEW_PROJECT signal.
+     *
+     * The live run surfaced it: given a properly onboarded project with an accepted
+     * requirement and a failing suite, the Orchestrator refused to plan because the store said
+     * NEW_PROJECT and the filesystem said BUG. Correct reasoning about a contradiction Serva
+     * had invented by looking in the wrong drawer.
+     */
+    const { rt } = freshRuntime();
+    try {
+      const at = rt.clock.now();
+      const meta = {
+        provenance: { marking: 'SYSTEM', component: 'test' },
+        attribution: { at },
+      };
+      const requirementId = rt.ids.next('SC-REQ');
+      const tx = rt.store.begin();
+      repository(rt.store, ARTIFACT_TYPES.REQUIREMENT, RequirementSchema).put(tx, {
+        id: requirementId,
+        version: 1,
+        createdAt: at,
+        statement: 'total(xs) sums every element.',
+        kind: 'FUNCTIONAL',
+        priority: 'MUST',
+        rationale: 'the ordering flow depends on it',
+        tracesTo: [],
+        meta,
+      } as never);
+      tx.commit();
+
+      /* The family the orchestrator reads must be the family the repository writes. */
+      expect(rt.store.listCanonIds(ARTIFACT_TYPES.REQUIREMENT)).toHaveLength(1);
+      expect(rt.store.listCanonIds('requirement')).toHaveLength(0);
+    } finally {
+      rt.close();
+    }
+  });
+});
+
+/* ================== write capability is enforceable when something can contain it */
+
+describe('a write-capable step is queued only when this machine can contain one', () => {
+  /* The plan the live planner actually produced: fix the off-by-one, assigned to Backend. */
+  const writePlan: ExecutionPlan = {
+    ...PLAN,
+    planFor: RequestClass.BUG,
+    magnitude: Magnitude.M1,
+    steps: [
+      {
+        stepId: 'S1-fix',
+        agentId: 'SC-AGENT-150',
+        departmentId: 'SC-DEPT-030',
+        purpose: 'Correct the off-by-one loop bound in src/total.js.',
+        scopeBoundary: 'Edit only the loop bound in src/total.js.',
+        dependsOn: [],
+        produces: 'Corrected src/total.js',
+      },
+    ],
+  };
+
+  const base = {
+    registry,
+    enabledAgents: PHASE6_ENABLED_AGENTS,
+    classification: { ...CLASSIFICATION, recommendedDepartments: ['SC-DEPT-030'] },
+  };
+
+  it('is refused when no containment is offered at all', () => {
+    /*
+     * The default, and it must stay the default. `capabilityLevelFor` answers a Phase 3
+     * question — what the intelligence runtime can police at call time — and it cannot police
+     * a write. Absent containment means no.
+     */
+    const v = validateExecutionPlan(writePlan, base);
+    expect(v.findings.map((f) => f.kind)).toContain(PlanFindingKind.CAPABILITY_NOT_ENABLED);
+    expect(
+      v.findings.find((f) => f.kind === PlanFindingKind.CAPABILITY_NOT_ENABLED)?.detail,
+    ).toContain('no containment was offered');
+  });
+
+  it('is refused when the machine did not measure HARD', () => {
+    const v = validateExecutionPlan(writePlan, {
+      ...base,
+      producerExecution: {
+        available: false,
+        producers: new Set(['SC-AGENT-150']),
+        basis: 'the substrate measured SOFT on this machine',
+      },
+    });
+    expect(
+      v.findings.find((f) => f.kind === PlanFindingKind.CAPABILITY_NOT_ENABLED)?.detail,
+    ).toContain('measured SOFT');
+  });
+
+  it('is refused when containment exists but does not cover THIS agent', () => {
+    /* A qualified machine does not make every agent a Producer. */
+    const v = validateExecutionPlan(writePlan, {
+      ...base,
+      producerExecution: {
+        available: true,
+        producers: new Set(['SC-AGENT-160']),
+        basis: 'measured HARD',
+      },
+    });
+    expect(
+      v.findings.find((f) => f.kind === PlanFindingKind.CAPABILITY_NOT_ENABLED)?.detail,
+    ).toContain('not among the agents that containment covers');
+  });
+
+  it('is accepted when this machine measured HARD and covers the agent', () => {
+    /*
+     * The live run found this. The planner produced a correct plan and validation rejected it
+     * as CAPABILITY_NOT_ENABLED, applying a rule about the intelligence runtime to a step the
+     * engineering factory would execute — a correct plan refused on the grounds that nobody
+     * can contain a writer, by a system whose entire Phase 4 is containing writers.
+     */
+    const v = validateExecutionPlan(writePlan, {
+      ...base,
+      producerExecution: {
+        available: true,
+        producers: new Set(['SC-AGENT-150']),
+        basis: 'this machine measured HARD and the boundary is reachable',
+      },
+    });
+    expect(
+      v.findings.filter((f) => f.kind === PlanFindingKind.CAPABILITY_NOT_ENABLED),
+      JSON.stringify(v.findings),
+    ).toEqual([]);
   });
 });
