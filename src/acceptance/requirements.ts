@@ -422,6 +422,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Portability',
     mandatory: true,
+    provenBy: ['tests/migration.workflow.test.ts'],
   },
   {
     id: 'PORTABILITY-FINAL',

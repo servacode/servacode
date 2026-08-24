@@ -3,6 +3,11 @@ import { projectSnapshot } from '../../app/services.js';
 import { machineDoctor, renderDoctor } from '../../portability/doctor.js';
 import { nodeDoctorProbes } from '../../portability/probes.js';
 import { bootstrapPlan, renderBootstrap } from '../../portability/bootstrap.js';
+import { migrationState, renderMigration } from '../../portability/migrationWorkflow.js';
+import { buildEngineeringLayer } from '../../app/engineering.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { verifyBackup } from '../../portability/backup.js';
 import { inspectRestore } from '../../portability/restore.js';
 import {
@@ -210,39 +215,61 @@ export async function cmdRestore(args: ParsedArgs): Promise<number> {
 /**
  * `serva migrate` — the guided move to another computer.
  *
- * A sequence rather than an operation, and it deliberately does not try to be one command
- * that does everything: the middle of it happens on a different machine, and a tool that
- * pretended otherwise would be lying about where the owner has to be standing.
+ * SPEC: Phase 6 closure §10.
+ *
+ * This used to print seven numbered lines and exit zero: instructions, not a workflow. It
+ * said the same thing on the machine being left as on the machine being moved to, which are
+ * the two states the whole exercise is about.
+ *
+ * Now it reports WHERE THE MIGRATION HAS GOT TO, derived from what is observably true — a
+ * bundle that verifies, a project that opens, a machine that has measured itself. There is no
+ * cursor to advance, so an owner who skips a step is told what is missing rather than handed
+ * a workflow that has quietly moved on.
  */
-export function cmdMigrate(args: ParsedArgs): number {
+export async function cmdMigrate(args: ParsedArgs): Promise<number> {
   const rt = tryOpenRuntime(args);
-  const report = machineDoctor({ probes: nodeDoctorProbes() });
-  console.log('Moving Serva to another computer');
-  console.log('');
-  console.log('On THIS machine:');
-  console.log('  1. serva backup --to <path on external storage> --confirm');
-  console.log('  2. serva verify-backup <that path>        (it must say verified)');
-  console.log('');
-  console.log('On the NEW machine:');
-  console.log('  3. install Serva');
-  console.log('  4. serva restore <that path> --to <projects dir> --confirm');
-  console.log('  5. serva machine doctor                   (it will list what is missing)');
-  console.log('  6. sign in to Claude in the guest');
-  console.log('  7. serva engineering qualify              (this machine earns HARD itself)');
-  console.log('');
-  console.log(
-    'Project truth, git history, decisions and evidence move. Machine qualification does',
-  );
-  console.log(
-    'not: HARD describes a computer, and the new one is a different computer until it has',
-  );
-  console.log('been measured.');
+  const bundle = flag(args, 'bundle') ?? args.positionals[0];
+
+  /*
+   * The substrate measurement is obtained only when there is a project to measure for, and
+   * failures are absorbed: a half-built target machine is exactly where this command is most
+   * useful, and one that refused to report until the substrate answered would be useless
+   * there.
+   */
+  let qualification;
   if (rt !== undefined) {
-    console.log('');
-    console.log('This project: ' + rt.root);
+    try {
+      const layer = await buildEngineeringLayer(rt);
+      const fixture = mkdtempSync(join(tmpdir(), 'serva-migrate-'));
+      try {
+        qualification = await layer.substrate.qualify(fixture);
+      } finally {
+        rmSync(fixture, { recursive: true, force: true });
+      }
+    } catch {
+      qualification = undefined;
+    }
   }
-  console.log('This machine: ' + report.summary);
-  return 0;
+
+  const state = migrationState({
+    ...(rt === undefined ? {} : { root: rt.root }),
+    ...(typeof bundle === 'string' ? { bundlePath: bundle } : {}),
+    probes: nodeDoctorProbes(),
+    ...(qualification === undefined ? {} : { qualification }),
+  });
+
+  if (wantsJson(args)) {
+    emitJson(state);
+  } else {
+    console.log(renderMigration(state));
+  }
+
+  /*
+   * Zero only when there is nothing outstanding. A migration command that always exited zero
+   * could not be used in a script, and the owner most likely to script this is the one moving
+   * several machines.
+   */
+  return state.phase === 'COMPLETE' ? 0 : state.phase === 'BLOCKED' ? 2 : 1;
 }
 
 /** `serva library [list|show <id>|forget <id>] --enable` */
