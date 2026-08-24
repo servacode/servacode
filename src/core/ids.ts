@@ -93,6 +93,8 @@ export type IdPrefix =
   | 'SC-PROC'
   | 'SC-SM'
   | 'SC-GLOS'
+  /* Phase 6 owner experience: one governed conversation turn. */
+  | 'SC-TURN'
   | 'SC-FIN'
   | 'SC-RCON'
   | 'SC-AC'

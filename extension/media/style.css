@@ -208,6 +208,128 @@ input[type='text'] {
   font-style: italic;
 }
 
+/* ------------------------------------------------------------------ the conversation */
+
+/*
+ * Logical properties throughout, so an Arabic interface moves the furniture and not only the
+ * words. `margin-inline-start` on a turn's detail indents it towards the reading edge in
+ * both directions; `margin-left` would indent an Arabic transcript away from its own text.
+ */
+
+textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: var(--serva-radius);
+  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+  inline-size: 100%;
+  resize: vertical;
+  /* Owner text may be Arabic, English or both. Never force a direction on it. */
+  unicode-bidi: plaintext;
+}
+
+textarea:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-block-end: 16px;
+}
+
+.ask button {
+  align-self: flex-start;
+}
+
+.ask__hint {
+  margin: 0;
+  opacity: 0.8;
+  font-size: 0.9em;
+}
+
+.ask__error {
+  margin: 0;
+  color: var(--vscode-errorForeground);
+}
+
+.turns {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.turn {
+  border-inline-start: 3px solid var(--vscode-panel-border);
+  padding-inline-start: 10px;
+}
+
+.turn--queued {
+  border-inline-start-color: var(--vscode-charts-green, var(--vscode-panel-border));
+}
+
+.turn--halted {
+  border-inline-start-color: var(--vscode-charts-yellow, var(--vscode-panel-border));
+}
+
+.turn--refused {
+  border-inline-start-color: var(--vscode-errorForeground);
+}
+
+.turn__asked {
+  margin: 0 0 4px;
+  /* The owner's own words. Isolated so a mixed-script request cannot reorder what follows. */
+  unicode-bidi: isolate;
+}
+
+.turn__outcome {
+  margin: 0;
+  font-size: 0.9em;
+  opacity: 0.85;
+}
+
+.turn__queued {
+  margin: 4px 0 0;
+  padding-inline-start: 18px;
+  font-size: 0.9em;
+}
+
+.turn__reason {
+  margin: 4px 0 0;
+  font-size: 0.9em;
+  opacity: 0.9;
+}
+
+/* ------------------------------------------------------------- the VALUE decision box */
+
+.decision__value {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block-start: 8px;
+}
+
+.decision__value button {
+  align-self: flex-start;
+}
+
+.decision__hint {
+  margin: 0;
+  opacity: 0.8;
+  font-size: 0.9em;
+}
+
+.decision__error {
+  margin: 0;
+  color: var(--vscode-errorForeground);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

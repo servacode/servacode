@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { fail } from '../core/errors.js';
 import { answerOwnerDecision } from '../intelligence/app.js';
 import { projectSnapshot } from './services.js';
+import { conversationTranscript, sendOwnerRequest } from './conversation.js';
+import { buildAiLayer } from './ai.js';
 import { assessReleaseReadiness } from '../intelligence/releaseReadiness.js';
 import { coverageSummary, gateCoverage, lifecycleCoverage } from '../coverage/index.js';
 import { createBackup, verifyBackup } from '../portability/backup.js';
@@ -130,6 +132,60 @@ const DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
           '/' +
           String(summary.gates.total),
         data: { summary, stages: lifecycleCoverage(), gates: gateCoverage() },
+      };
+    },
+  } as ActionDefinition<z.ZodTypeAny>,
+
+  {
+    id: 'conversation.read',
+    title: 'Read the conversation with Serva',
+    consequence: ActionConsequence.READ,
+    schema: empty,
+    handler: (ctx) => {
+      const turns = conversationTranscript(ctx.rt);
+      return {
+        ok: true,
+        summary: String(turns.length) + ' turn(s)',
+        data: turns,
+      };
+    },
+  } as ActionDefinition<z.ZodTypeAny>,
+
+  {
+    id: 'conversation.send',
+    title: 'Ask Serva for something',
+    consequence: ActionConsequence.CONSEQUENTIAL,
+    confirmPrompt:
+      'This asks the company to classify and plan your request. It records what you asked verbatim and may queue governed work.',
+    schema: z
+      .object({
+        text: z.string().min(1),
+        /* Join existing work rather than opening new work, when the surface knows which. */
+        workItemId: z.string().min(1).optional(),
+      })
+      .strict(),
+    handler: async (ctx, input) => {
+      /*
+       * The ONLY path from owner text to the engine, and it goes through the orchestrator.
+       * There is deliberately no action here that invokes the adapter with what the owner
+       * typed: that would be a chat box, and a chat box has no departments, no gates and no
+       * canon it is allowed to write.
+       */
+      const layer = buildAiLayer(ctx.rt);
+      const turn = await sendOwnerRequest(ctx.rt, input.text, {
+        orchestrator: layer.orchestrator,
+        ...(input.workItemId === undefined ? {} : { workItemId: input.workItemId }),
+      });
+      return {
+        ok: turn.outcome !== 'REFUSED',
+        summary:
+          turn.outcome === 'QUEUED'
+            ? 'Queued ' + String(turn.queued.length) + ' department(s).'
+            : turn.outcome === 'HALTED'
+              ? 'Serva stopped at ' + String(turn.stage) + '.'
+              : 'Serva could not begin.',
+        ...(turn.haltReason === undefined ? {} : { refusal: turn.haltReason }),
+        data: turn,
       };
     },
   } as ActionDefinition<z.ZodTypeAny>,

@@ -4,6 +4,7 @@ import { ProjectHealth } from '../app/services.js';
 import { MachineQualificationState } from '../portability/machine.js';
 import type { MessageKey } from './i18n.js';
 import type { ProjectSnapshot } from '../app/services.js';
+import type { ConversationTurn } from '../app/conversation.js';
 
 /**
  * THE CONTROL CENTER, RENDERED.
@@ -134,6 +135,14 @@ export function statusBarText(snapshot: ProjectSnapshot, language: Language): st
 export interface RenderOptions {
   readonly snapshot: ProjectSnapshot;
   readonly language: Language;
+  /**
+   * The governed conversation, oldest first.
+   *
+   * Optional so a caller that only wants the state view is not forced to read it, and so the
+   * section renders empty rather than absent when there is nothing to show — an owner who
+   * cannot see where to ask has no way to learn that they may.
+   */
+  readonly conversation?: readonly ConversationTurn[];
   readonly nonce: string;
   readonly cspSource: string;
   readonly styleUri: string;
@@ -169,6 +178,76 @@ export function renderControlCenter(o: RenderOptions): string {
         '</li>',
     )
     .join('');
+
+  /*
+   * THE CONVERSATION.
+   *
+   * SPEC: Phase 6 closure §5.
+   *
+   * Every turn shows what the owner asked, verbatim, and what the COMPANY did with it: the
+   * class it was given, the departments queued, or the stage Serva stopped at and why.
+   *
+   * There is no field here carrying a sentence an agent wrote for the owner to read. That
+   * absence is the design: a reply written by a model, shown in a transcript, is a chat
+   * surface whatever the code around it is called — and a chat surface has no departments,
+   * no gates and no canon it is allowed to write.
+   */
+  const turns = o.conversation ?? [];
+  const conversation =
+    turns.length === 0
+      ? '<p class="empty">' + T('conversation.empty') + '</p>'
+      : '<ol class="turns">' +
+        turns
+          .map(
+            (turn) =>
+              '<li class="turn turn--' +
+              escapeHtml(turn.outcome.toLowerCase()) +
+              '">' +
+              '<p class="turn__asked">' +
+              text(turn.text, language) +
+              '</p>' +
+              '<p class="turn__outcome">' +
+              escapeHtml(
+                turn.outcome === 'QUEUED'
+                  ? t(language, 'conversation.queued')
+                  : turn.outcome === 'HALTED'
+                    ? t(language, 'conversation.halted')
+                    : t(language, 'conversation.refused'),
+              ) +
+              (turn.classification === undefined ? '' : ' · ' + escapeHtml(turn.classification)) +
+              '</p>' +
+              (turn.queued.length === 0
+                ? ''
+                : '<ul class="turn__queued">' +
+                  turn.queued.map((d) => '<li>' + text(d, language) + '</li>').join('') +
+                  '</ul>') +
+              (turn.haltReason === undefined
+                ? ''
+                : '<p class="turn__reason">' + text(turn.haltReason, language) + '</p>') +
+              '</li>',
+          )
+          .join('') +
+        '</ol>';
+
+  const ask =
+    '<div class="ask">' +
+    '<label for="ask-input">' +
+    T('conversation.prompt') +
+    '</label>' +
+    '<textarea id="ask-input" data-ask rows="3" ' +
+    'placeholder="' +
+    T('conversation.placeholder') +
+    '" aria-describedby="ask-hint"></textarea>' +
+    '<button type="button" data-ask-submit>' +
+    T('conversation.send') +
+    '</button>' +
+    '<p class="ask__hint" id="ask-hint">' +
+    T('conversation.governed') +
+    '</p>' +
+    '<p class="ask__error" data-ask-error role="alert" hidden>' +
+    T('conversation.empty.refusal') +
+    '</p>' +
+    '</div>';
 
   const ownerActions =
     snapshot.ownerActions.length === 0
@@ -346,6 +425,12 @@ export function renderControlCenter(o: RenderOptions): string {
       '</dd>',
     '<dt>' + T('overview.nextAction') + '</dt><dd>' + text(snapshot.nextAction, language) + '</dd>',
     '</dl>',
+    '</section>',
+
+    '<section aria-labelledby="ask-h">',
+    '<h2 id="ask-h">' + T('nav.conversation') + '</h2>',
+    ask,
+    conversation,
     '</section>',
 
     '<section aria-labelledby="decisions-h">',

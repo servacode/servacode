@@ -4,6 +4,7 @@ import { ServaRuntime } from '../../src/app/runtime.js';
 import { invokeAction, ACTIONS, ActionConsequence } from '../../src/app/actions.js';
 import { ProjectHealth, isServaProject, projectSnapshot } from '../../src/app/services.js';
 import { NewProjectField, createProject, newProjectRefusal } from '../../src/app/create.js';
+import { conversationTranscript } from '../../src/app/conversation.js';
 import { parseWebviewMessage, webviewMayInvoke } from '../../src/extension/protocol.js';
 import { Language, t } from '../../src/extension/i18n.js';
 import { renderControlCenter, statusBarText } from '../../src/extension/render.js';
@@ -169,6 +170,12 @@ function renderPanel(context: vscode.ExtensionContext): void {
     renderControlCenter({
       snapshot: current,
       language: language(),
+      /*
+       * Read from the Store on every render rather than held between renders. Two windows on
+       * the same project must agree about what was asked, and a cached transcript is how they
+       * come to disagree.
+       */
+      conversation: conversationTranscript(runtime ?? (open() as ServaRuntime)),
       nonce,
       cspSource: panel.webview.cspSource,
       styleUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'style.css')).toString(),

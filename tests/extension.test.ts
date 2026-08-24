@@ -382,8 +382,21 @@ describe('the extension manifest is deliberate about authority', () => {
     /*
      * `*` activation would open the Store in every window the owner has. Serva activates
      * when a folder actually contains a store marker, and does nothing otherwise.
+     *
+     * `Serva: New Project` is the one exception, and it has to be: a folder with no project
+     * in it is exactly where somebody needs that command, so an extension that only wakes for
+     * existing projects could never create the first one. It is still narrow — it wakes for
+     * one named command rather than for every window.
      */
-    expect(manifest['activationEvents']).toEqual(['workspaceContains:.serva/SCHEMA_VERSION']);
+    const events = manifest['activationEvents'] as string[];
+    expect(events).toContain('workspaceContains:.serva/SCHEMA_VERSION');
+    expect(events).not.toContain('*');
+    for (const event of events) {
+      const narrow =
+        event === 'workspaceContains:.serva/SCHEMA_VERSION' ||
+        event === 'onCommand:serva.newProject';
+      expect(narrow, event + ' widens activation').toBe(true);
+    }
   });
 
   it('refuses to run in an untrusted workspace, with the reason', () => {

@@ -45,6 +45,26 @@
     }
 
     /*
+     * Asking the company for something. The text goes to `conversation.send`, which routes
+     * it through classification, planning and Serva's own deterministic check of that plan.
+     * There is no action here that hands what the owner typed to a model session, and the
+     * allow-list the host enforces does not contain one.
+     */
+    if (target.hasAttribute('data-ask-submit')) {
+      const box = document.querySelector('[data-ask]');
+      const error = document.querySelector('[data-ask-error]');
+      const asked = box === null ? '' : String(box.value).trim();
+      if (asked === '') {
+        if (error !== null) error.hidden = false;
+        if (box !== null) box.focus();
+        return;
+      }
+      if (error !== null) error.hidden = true;
+      invoke('conversation.send', { text: asked }, false);
+      return;
+    }
+
+    /*
      * A VALUE question. The owner types an answer and presses record; nothing here stands
      * for a value on their behalf, and an empty box is refused in the panel rather than
      * sent as an empty answer — `answerOwnerDecision` would refuse it anyway, but the owner

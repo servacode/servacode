@@ -285,6 +285,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Owner Experience',
     mandatory: true,
+    provenBy: ['tests/conversation.test.ts', 'tests/vscode/conversation.host.test.ts'],
   },
   {
     id: 'UX-RECONCILIATION',

@@ -121,8 +121,17 @@ export class Orchestrator {
    * own answer for a missing one: a classifier that failed leaves the request
    * classified by nobody, which is a state the owner can see and act on.
    */
-  async route(text: string, workItemId: string): Promise<RoutingResult> {
-    const request = this.recordRequest(text, workItemId, 'OWNER_CLI');
+  async route(
+    text: string,
+    workItemId: string,
+    /*
+     * Where the request came from. Recorded rather than inferred, because an owner auditing
+     * their own project should be able to see which surface they were sitting in front of
+     * when they asked for something.
+     */
+    source: RequestRecord['source'] = 'OWNER_CLI',
+  ): Promise<RoutingResult> {
+    const request = this.recordRequest(text, workItemId, source);
 
     const classificationRun = await this.deps.runtime.run({
       agentId: CLASSIFIER_AGENT,
