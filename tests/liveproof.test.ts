@@ -47,11 +47,38 @@ function project(): ServaRuntime {
 }
 
 /** A terminal AgentRun record, exactly as the projection reads one. */
-function seedRun(store: Store, runId: string, agentId: string, outcome = 'COMPLETED'): void {
+function seedRun(
+  store: Store,
+  runId: string,
+  agentId: string,
+  outcome = 'COMPLETED',
+  claimAssessments: readonly unknown[] = [],
+): void {
   const tx = store.begin();
-  tx.putCanon('agentRunRecord', runId, { runId, agentId, outcome, workItemId: 'SC-WI-000900' });
+  tx.putCanon('agentRunRecord', runId, {
+    runId,
+    agentId,
+    outcome,
+    workItemId: 'SC-WI-000900',
+    claimAssessments,
+    evidenceRefs: [],
+  });
   tx.commit();
 }
+
+/**
+ * A claim the runtime contradicted, in the flattened shape the terminal record persists.
+ *
+ * `AgentRuntime` builds these as `{ claim, verification }` and the record flattens them, and
+ * a first version of the verifier read only the nested form — so every real contradicted
+ * claim arrived as kind `OTHER` and the material-kind check never fired. Both shapes are read
+ * now, and the flat one is used here because it is what a real store holds.
+ */
+const contradicted = (kind: string, statement = 'the agent said so') => ({
+  kind,
+  statement,
+  verification: 'CONTRADICTED',
+});
 
 function seedChangeSet(store: Store, over: Record<string, unknown> = {}): { changeSetId: string } {
   const changeSetId = String(over['changeSetId'] ?? 'SC-CS-000002');
@@ -96,9 +123,14 @@ function seedReview(store: Store, over: Record<string, unknown> = {}): void {
   tx.commit();
 }
 
-function seedEvidence(store: Store, changeSetId = 'SC-CS-000002', id = 'SC-EEV-000001'): void {
+function seedEvidence(
+  store: Store,
+  changeSetId = 'SC-CS-000002',
+  id = 'SC-EEV-000001',
+  over: Record<string, unknown> = {},
+): void {
   const tx = store.begin();
-  tx.putCanon('engineeringEvidence', id, {
+  const body: Record<string, unknown> = {
     id,
     runtimeComponentId: 'SC-RTC-012',
     evidenceClass: 'EXECUTION',
@@ -112,7 +144,10 @@ function seedEvidence(store: Store, changeSetId = 'SC-CS-000002', id = 'SC-EEV-0
     detail: 'SC-RECIPE-UNIT-TEST -> SUCCEEDED (exit 0)',
     capturedAt: '2026-08-24T00:00:00.000Z',
     capturedBy: 'RUNTIME',
-  });
+    ...over,
+  };
+  for (const [k, v] of Object.entries(body)) if (v === undefined) delete body[k];
+  tx.putCanon('engineeringEvidence', id, body);
   tx.commit();
 }
 
@@ -394,29 +429,6 @@ describe('every way of inventing a live PASS is refused', () => {
     }
   });
 
-  it('a Producer that misreported its own work is REPORTED, not hidden', () => {
-    /*
-     * The first real live run ended exactly this way. Acceptance never rested on the
-     * Producer's word — deterministic checks measured the code and an independent reviewer
-     * judged it — so this resolves. What must never happen is it resolving SILENTLY.
-     */
-    const rt = project();
-    try {
-      seedRun(rt.store, 'SC-RUN-000004', PRODUCER, 'EVIDENCE_VIOLATION');
-      seedRun(rt.store, 'SC-RUN-000005', REVIEWER);
-      seedChangeSet(rt.store);
-      seedEvidence(rt.store);
-      seedReview(rt.store);
-      seedAccepted(rt.store);
-
-      const result = resolve(rt);
-      expect(result.resolved, JSON.stringify(result.refusals)).toBe(true);
-      expect(result.chain?.producerOutcome).toBe('EVIDENCE_VIOLATION');
-    } finally {
-      rt.close();
-    }
-  });
-
   it('reports every refusal, not only the first', () => {
     /*
      * An auditor looking at a failed live acceptance needs the whole picture. Stopping at the
@@ -522,6 +534,144 @@ describe('the Serva chain needs an owner request that actually caused the work',
       const result = resolveServa(rt);
       expect(result.resolved).toBe(false);
       expect(JSON.stringify(result.refusals)).toContain('no work followed it');
+    } finally {
+      rt.close();
+    }
+  });
+});
+
+/* ================================ producer claim integrity vs engineering validity */
+
+describe('an evidence violation may be accepted only when it is contained', () => {
+  /*
+   * SPEC: Phase 6 live Producer evidence-violation semantics.
+   *
+   * The first real live run ended this way: the Producer asserted it had attempted to run the
+   * test suite, Serva's verifier contradicted that against the event log, and the change was
+   * accepted anyway — on measured evidence and an independent review. That is the thesis of
+   * the product, and it is also exactly the shape a dishonest acceptance would take, so the
+   * difference between the two has to be checkable.
+   */
+
+  it('is PROVEN when the violation is quarantined and the acceptance is independently measured', () => {
+    const rt = project();
+    try {
+      seedRun(rt.store, 'SC-RUN-000004', PRODUCER, 'EVIDENCE_VIOLATION', [
+        contradicted('COMMAND_RUN', 'claimed to have run the suite; the event log says otherwise'),
+      ]);
+      seedRun(rt.store, 'SC-RUN-000005', REVIEWER);
+      seedChangeSet(rt.store);
+      /* Measured by a runtime component, with no reference to the Producer's run. */
+      seedEvidence(rt.store);
+      seedReview(rt.store);
+      seedAccepted(rt.store);
+
+      const result = resolve(rt);
+      expect(result.resolved, JSON.stringify(result.refusals)).toBe(true);
+      expect(result.chain?.producerOutcome).toBe('EVIDENCE_VIOLATION');
+      expect(result.chain?.containment.contained).toBe(true);
+      expect(result.chain?.containment.contradictedClaims[0]?.kind).toBe('COMMAND_RUN');
+      expect(result.chain?.containment.creditedFromProducer).toEqual([]);
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('is REFUSED when a contradicted claim was credited as acceptance evidence', () => {
+    /* The one thing an evidence violation makes unusable: the Producer's own account. */
+    const rt = project();
+    try {
+      seedRun(rt.store, 'SC-RUN-000004', PRODUCER, 'EVIDENCE_VIOLATION', [
+        contradicted('COMMAND_RUN'),
+      ]);
+      seedRun(rt.store, 'SC-RUN-000005', REVIEWER);
+      seedChangeSet(rt.store);
+      seedEvidence(rt.store);
+      /* Evidence traceable to the Producer's own run. */
+      seedEvidence(rt.store, 'SC-CS-000002', 'SC-EEV-000002', {
+        runRef: 'SC-RUN-000004',
+        basis: 'JUDGED',
+        evidenceClass: 'JUDGMENT',
+        runtimeComponentId: undefined,
+      });
+      seedReview(rt.store);
+      seedAccepted(rt.store);
+
+      const result = resolve(rt);
+      expect(result.resolved).toBe(false);
+      expect(result.refusals.map((r) => r.check)).toContain('PRODUCER_CONTAINMENT');
+      expect(JSON.stringify(result.refusals)).toContain('credits the Producer run');
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('is REFUSED when a contradicted material claim is covered by no independent measurement', () => {
+    /*
+     * A Producer wrong about a file it wrote is harmless when something else checked the
+     * files, and a hole when nothing did. Here the only measurement is the test recipe, and
+     * the contradicted claim is about the filesystem.
+     */
+    const rt = project();
+    try {
+      seedRun(rt.store, 'SC-RUN-000004', PRODUCER, 'EVIDENCE_VIOLATION', [
+        contradicted('FILE_WRITTEN', 'claimed to have written a file nobody observed'),
+      ]);
+      seedRun(rt.store, 'SC-RUN-000005', REVIEWER);
+      seedChangeSet(rt.store);
+      seedEvidence(rt.store, 'SC-CS-000002', 'SC-EEV-000001', {
+        runtimeComponentId: 'SC-RTC-012',
+      });
+      seedReview(rt.store);
+      seedAccepted(rt.store);
+
+      const result = resolve(rt);
+      expect(result.resolved).toBe(false);
+      expect(JSON.stringify(result.refusals)).toContain(
+        'not covered by any independent measurement',
+      );
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('is REFUSED when the violation itself was never durably recorded', () => {
+    /* An unexamined violation is not a contained one. */
+    const rt = project();
+    try {
+      seedRun(rt.store, 'SC-RUN-000004', PRODUCER, 'EVIDENCE_VIOLATION', []);
+      seedRun(rt.store, 'SC-RUN-000005', REVIEWER);
+      seedChangeSet(rt.store);
+      seedEvidence(rt.store);
+      seedReview(rt.store);
+      seedAccepted(rt.store);
+
+      const result = resolve(rt);
+      expect(result.resolved).toBe(false);
+      expect(JSON.stringify(result.refusals)).toContain('not durably recorded');
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('a clean Producer is still checked for having certified itself', () => {
+    /*
+     * The containment analysis runs for every chain, not only a violating one. A check that
+     * only fired when something already looked wrong would never catch the case where nothing
+     * looked wrong.
+     */
+    const rt = project();
+    try {
+      seedRun(rt.store, 'SC-RUN-000004', PRODUCER);
+      seedRun(rt.store, 'SC-RUN-000005', REVIEWER);
+      seedChangeSet(rt.store);
+      seedEvidence(rt.store, 'SC-CS-000002', 'SC-EEV-000001', { runRef: 'SC-RUN-000004' });
+      seedReview(rt.store);
+      seedAccepted(rt.store);
+
+      const result = resolve(rt);
+      expect(result.resolved).toBe(false);
+      expect(JSON.stringify(result.refusals)).toContain('credits the Producer run');
     } finally {
       rt.close();
     }

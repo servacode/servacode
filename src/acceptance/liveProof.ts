@@ -90,6 +90,13 @@ export interface LiveEngineeringChain {
    * evidence and an independent review, not on the agent's account of itself.
    */
   readonly producerOutcome: string;
+  /**
+   * The analysis of the Producer's claim integrity.
+   *
+   * Present whatever the outcome, so a reader can see that a violation happened AND that it
+   * was contained. Recording only the clean case would make the honest one invisible.
+   */
+  readonly containment: ProducerContainment;
   readonly reviewerRunId: string;
   readonly reviewerAgentId: string;
   readonly changeSetId: string;
@@ -138,6 +145,171 @@ export function gitCommitExists(repoRoot: string, commit: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * PRODUCER CLAIM INTEGRITY IS A DIFFERENT QUESTION FROM CHANGE ENGINEERING VALIDITY.
+ *
+ * SPEC: Phase 6 live Producer evidence-violation semantics.
+ *
+ * The first real live run ended `EVIDENCE_VIOLATION`: the Producer asserted it had attempted
+ * to run the test suite, Serva's own verifier CONTRADICTED that against the run's event log,
+ * and the change was still accepted. Nothing was wrong with the acceptance — the code was
+ * measured by runtime components and judged by an independent reviewer, and the Producer's
+ * account of itself was never part of it.
+ *
+ * That is the thesis of this whole product, so LIVE-ENGINEERING may rest on such a run. But
+ * only when the violation is demonstrably CONTAINED, which is a claim with content:
+ *
+ *   the violation is DURABLY RECORDED, so nobody has to take this analysis on trust;
+ *   NOT ONE contradicted claim is credited as acceptance evidence;
+ *   the acceptance rests on independently MEASURED evidence;
+ *   nothing the Producer got wrong leaves a material effect unmeasured.
+ *
+ * The last one is the subtle one and the reason this is a function rather than a flag. A
+ * contradicted claim about having read a file is noise; a contradicted claim about having
+ * WRITTEN one is an assertion about the filesystem, and if nothing independently measured the
+ * filesystem then something the Producer said happened has not been checked by anyone.
+ */
+export const MATERIAL_CLAIM_KINDS: ReadonlySet<string> = new Set([
+  'FILE_WRITTEN',
+  'COMMAND_RUN',
+  'TEST_RESULT',
+  'TOOL_EXECUTION',
+]);
+
+/**
+ * Which runtime component independently answers a material claim of each kind.
+ *
+ * A table rather than a rule over the claim text: the recurring lesson in this codebase is
+ * that anything routing on how something described itself eventually misses a case, and the
+ * cost here would be crediting a Producer's word for an effect nobody measured.
+ */
+const COVERING_COMPONENTS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  FILE_WRITTEN: ['SC-RTC-005'],
+  COMMAND_RUN: ['SC-RTC-012'],
+  TEST_RESULT: ['SC-RTC-012'],
+  TOOL_EXECUTION: ['SC-RTC-005', 'SC-RTC-012'],
+});
+
+export interface ProducerContainment {
+  readonly contained: boolean;
+  readonly producerOutcome: string;
+  /** Every claim the runtime contradicted, kept verbatim. */
+  readonly contradictedClaims: readonly { readonly kind: string; readonly statement: string }[];
+  /** Acceptance evidence that would credit the Producer's own account. Must be empty. */
+  readonly creditedFromProducer: readonly string[];
+  readonly measuredEvidence: readonly string[];
+  readonly reasons: readonly string[];
+}
+
+/**
+ * Is a Producer's evidence violation contained?
+ *
+ * Returns the analysis whatever the answer, because a live proof must record the outcome
+ * honestly rather than only when it is convenient — an `EVIDENCE_VIOLATION` that was contained
+ * and one that was not must be distinguishable in the evidence, not merely in a verdict.
+ */
+export function assessProducerContainment(
+  store: Store,
+  producerRunId: string,
+  changeSetId: string,
+): ProducerContainment {
+  const reasons: string[] = [];
+  const record = terminalRun(store, producerRunId) as
+    { outcome?: string; claimAssessments?: unknown; evidenceRefs?: unknown } | undefined;
+  const outcome = record?.outcome ?? 'UNKNOWN';
+
+  /*
+   * THE CLAIM IS RECORDED FLAT, AND ALSO NESTED.
+   *
+   * `AgentRuntime` builds assessments as `{ claim, verification, reason }`, and the terminal
+   * record persists them flattened to `{ kind, statement, verification }`. A first version of
+   * this read only the nested shape, so every real contradicted claim arrived as kind `OTHER`
+   * with an empty statement — and the material-kind check below therefore never fired on a
+   * single one of them.
+   *
+   * That is the failure mode this codebase keeps meeting: a check that reads the wrong field
+   * does not error, it just quietly agrees with you. Both shapes are read, and the fallback is
+   * `OTHER` only when neither carries a kind.
+   */
+  const assessments = Array.isArray(record?.claimAssessments)
+    ? (record.claimAssessments as {
+        verification?: string;
+        kind?: string;
+        statement?: string;
+        claim?: { kind?: string; statement?: string };
+      }[])
+    : [];
+  const contradicted = assessments
+    .filter((a) => a.verification === 'CONTRADICTED')
+    .map((a) => ({
+      kind: String(a.kind ?? a.claim?.kind ?? 'OTHER'),
+      statement: String(a.statement ?? a.claim?.statement ?? ''),
+    }));
+
+  /*
+   * A run terminated for an evidence violation whose contradicted claims were not recorded
+   * leaves nothing to analyse. Refusing here is the difference between a contained violation
+   * and an unexamined one.
+   */
+  if (outcome === 'EVIDENCE_VIOLATION' && contradicted.length === 0) {
+    reasons.push(
+      'the run ended EVIDENCE_VIOLATION and records no contradicted claim, so the violation is not durably recorded',
+    );
+  }
+
+  const evidence = listEvidence(store).filter((e) => e.changeSetId === changeSetId);
+
+  /*
+   * Evidence traceable to the Producer's own run. Any at all is the Producer certifying
+   * itself, which is exactly what an evidence violation makes unusable.
+   */
+  const creditedFromProducer = evidence
+    .filter((e) => e.runRef === producerRunId || e.basis === 'JUDGED')
+    .filter((e) => e.runRef === producerRunId)
+    .map((e) => e.id);
+  if (creditedFromProducer.length > 0) {
+    reasons.push(
+      'acceptance evidence credits the Producer run: ' + creditedFromProducer.join(', '),
+    );
+  }
+
+  const measured = evidence.filter((e) => e.basis === 'MEASURED' || e.basis === 'DERIVED');
+  if (measured.length === 0) {
+    reasons.push('no independently measured evidence supports this change');
+  }
+
+  /*
+   * Every contradicted claim of a MATERIAL kind must be answered by a component that measured
+   * that dimension for itself. A Producer wrong about a file is harmless when something else
+   * checked the files; it is a hole when nothing did.
+   */
+  const componentsPresent = new Set(
+    measured.map((e) => e.runtimeComponentId).filter((c): c is string => c !== undefined),
+  );
+  for (const claim of contradicted) {
+    if (!MATERIAL_CLAIM_KINDS.has(claim.kind)) continue;
+    const covering = COVERING_COMPONENTS[claim.kind] ?? [];
+    if (!covering.some((c) => componentsPresent.has(c))) {
+      reasons.push(
+        'a contradicted ' +
+          claim.kind +
+          ' claim is not covered by any independent measurement (expected one of ' +
+          covering.join(', ') +
+          ')',
+      );
+    }
+  }
+
+  return {
+    contained: reasons.length === 0,
+    producerOutcome: outcome,
+    contradictedClaims: contradicted,
+    creditedFromProducer,
+    measuredEvidence: measured.map((e) => e.id),
+    reasons,
+  };
 }
 
 /**
@@ -360,6 +532,22 @@ export function resolveLiveEngineering(
     refuse('ACCEPTED_COMMIT', acceptedCommit.slice(0, 12) + ' is not a commit in this repository');
   }
 
+  /*
+   * CLAIM INTEGRITY, ASSESSED SEPARATELY FROM ENGINEERING VALIDITY.
+   *
+   * Run for every chain rather than only for a violating one: a clean Producer still has to
+   * be shown not to have certified itself, and a check that only ran when something looked
+   * wrong would never have caught the case where nothing looked wrong.
+   */
+  const containment =
+    producerRunId === undefined
+      ? undefined
+      : assessProducerContainment(input.store, producerRunId, changeSet.changeSetId);
+
+  if (containment !== undefined && !containment.contained) {
+    for (const reason of containment.reasons) refuse('PRODUCER_CONTAINMENT', reason);
+  }
+
   if (refusals.length > 0) return { resolved: false, refusals };
 
   return {
@@ -368,11 +556,8 @@ export function resolveLiveEngineering(
       workItemId: changeSet.workItemId,
       producerRunId: String(producerRunId),
       producerAgentId,
-      producerOutcome: String(
-        producerRunId === undefined
-          ? 'UNKNOWN'
-          : (terminalRun(input.store, producerRunId)?.outcome ?? 'UNKNOWN'),
-      ),
+      producerOutcome: containment?.producerOutcome ?? 'UNKNOWN',
+      containment: containment as ProducerContainment,
       reviewerRunId: String(review?.runRef),
       reviewerAgentId: String(review?.reviewerAgentId),
       changeSetId: changeSet.changeSetId,
