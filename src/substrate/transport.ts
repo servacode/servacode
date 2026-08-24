@@ -580,7 +580,7 @@ export const TRANSPORT_BACKOFF_MS: readonly number[] = Object.freeze([250, 1_000
  * — which corrupted the diagnostics of the very probes this transport exists to make
  * trustworthy. A live qualification run is what surfaced it.
  */
-export const GUEST_REACH_SCRIPT = "printf '%s\\n' \"$1\" >&2; shift; exec \"$@\"";
+export const GUEST_REACH_SCRIPT = 'printf \'%s\\n\' "$1" >&2; shift; exec "$@"';
 
 export const GUEST_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
