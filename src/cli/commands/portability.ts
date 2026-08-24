@@ -4,6 +4,13 @@ import { machineDoctor, renderDoctor } from '../../portability/doctor.js';
 import { nodeDoctorProbes } from '../../portability/probes.js';
 import { bootstrapPlan, renderBootstrap } from '../../portability/bootstrap.js';
 import { migrationState, renderMigration } from '../../portability/migrationWorkflow.js';
+import {
+  installation,
+  performSwitch,
+  planSwitch,
+  removeVersion,
+  renderInstallation,
+} from '../../portability/install.js';
 import { buildEngineeringLayer } from '../../app/engineering.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -270,6 +277,88 @@ export async function cmdMigrate(args: ParsedArgs): Promise<number> {
    * several machines.
    */
   return state.phase === 'COMPLETE' ? 0 : state.phase === 'BLOCKED' ? 2 : 1;
+}
+
+/**
+ * `serva install [status | use <version> | remove <version>]`
+ *
+ * SPEC: Phase 6 closure §11.
+ *
+ * Serva does not download anything, and there is no code path here that could. What this
+ * manages is which INSTALLED version runs — a pointer move, which is why going back costs
+ * exactly what going forward did.
+ */
+export function cmdInstall(args: ParsedArgs): number {
+  const sub = args.positionals[0] ?? 'status';
+  const root = flag(args, 'install-root') ?? defaultInstallRoot();
+  const state = installation(root);
+
+  if (sub === 'status') {
+    if (wantsJson(args)) emitJson(state);
+    else console.log(renderInstallation(state));
+    return state.problems.length === 0 ? 0 : 1;
+  }
+
+  if (sub === 'use' || sub === 'remove') {
+    const version = args.positionals[1];
+    if (version === undefined) {
+      console.error('Usage: serva install ' + sub + ' <version>');
+      return 2;
+    }
+
+    /*
+     * The projects this machine knows about, so a rollback that would strand one is refused
+     * BEFORE the pointer moves. An installer that discovered this afterwards would already
+     * have broken the thing it was meant to protect.
+     */
+    const rt = tryOpenRuntime(args);
+    const projectRoots = rt === undefined ? [] : [rt.root];
+
+    if (sub === 'remove') {
+      if (!confirmed(args)) {
+        console.log('serva install remove ' + version + ' would delete that version from disk.');
+        console.log('It is the one operation here that cannot be undone by moving a pointer.');
+        console.log('Re-run with --confirm to do it.');
+        return 0;
+      }
+      const plan = removeVersion(state, version);
+      if (wantsJson(args)) emitJson(plan);
+      else console.log(plan.reason);
+      return plan.outcome === 'REFUSED' ? 1 : 0;
+    }
+
+    const preview = planSwitch(state, version, projectRoots);
+    if (preview.outcome !== 'READY' || !confirmed(args)) {
+      if (wantsJson(args)) {
+        emitJson(preview);
+      } else {
+        console.log(preview.reason);
+        for (const step of preview.steps) console.log('  - ' + step);
+        if (preview.outcome === 'READY') console.log('Re-run with --confirm to do it.');
+      }
+      return preview.outcome === 'REFUSED' ? 1 : 0;
+    }
+
+    const plan = performSwitch(state, version, projectRoots);
+    if (wantsJson(args)) emitJson(plan);
+    else console.log(plan.reason);
+    return plan.outcome === 'REFUSED' ? 1 : 0;
+  }
+
+  console.error('Usage: serva install status | use <version> | remove <version>');
+  return 2;
+}
+
+/**
+ * Where Serva keeps its own versions when nobody says otherwise.
+ *
+ * Under the owner's own data directory rather than a shared system location: this is a
+ * single-owner product, and an installation somewhere requiring administrator rights would
+ * make every update an escalation.
+ */
+function defaultInstallRoot(): string {
+  const home = process.env['USERPROFILE'] ?? process.env['HOME'] ?? process.cwd();
+  return join(home, '.serva-code');
 }
 
 /** `serva library [list|show <id>|forget <id>] --enable` */

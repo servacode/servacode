@@ -500,6 +500,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Distribution',
     mandatory: true,
+    provenBy: ['tests/install.test.ts'],
   },
   {
     id: 'P6-DOCS',
