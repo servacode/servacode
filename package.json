@@ -34,7 +34,8 @@
     "test:intelligence-live": "vitest run --config vitest.intelligence.config.ts",
     "build:extension": "tsc -p extension/tsconfig.json && node scripts/copy-assets.mjs",
     "test:vscode": "node scripts/run-vscode-tests.mjs",
-    "test:serva-live": "vitest run --config vitest.serva.config.ts"
+    "test:serva-live": "vitest run --config vitest.serva.config.ts",
+    "test:serva-chain": "vitest run --config vitest.servachain.config.ts"
   },
   "dependencies": {
     "zod": "^3.23.8"

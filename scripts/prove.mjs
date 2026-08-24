@@ -265,6 +265,73 @@ console.log(
 );
 for (const line of refused) console.log('  refused: ' + line);
 
+/* ------------------------------------------------- the verification record, if there is one */
+
+/*
+ * OFFLINE-VERIFICATION is not proved by a test passing; it is proved by the VERIFICATION
+ * COMMANDS having run and passed at this exact tree. That is a different kind of fact, so it
+ * has its own resolver and its own minting path rather than a `provenBy` binding that would
+ * quietly mean something else.
+ */
+const { resolveVerificationRecord, RECORD_PATH } = await import(
+  '../dist/acceptance/verificationRecord.js'
+);
+const verification = resolveVerificationRecord({
+  root,
+  repository,
+  required: ['npm run verify', 'npm run test:vscode'],
+});
+
+const offlinePath = join(proofDir, 'OFFLINE-VERIFICATION.json');
+if (verification.resolved) {
+  const recordFile = join(root, ...RECORD_PATH.split('/'));
+  writeFileSync(
+    offlinePath,
+    JSON.stringify(
+      {
+        requirementId: 'OFFLINE-VERIFICATION',
+        verificationType: VerificationType.DETERMINISTIC,
+        status: ProofStatus.PASS,
+        implementationCommit: repository.commit,
+        treeDigest: repository.tree,
+        producedAt,
+        producer: { kind: 'TOOL', id: 'scripts/prove.mjs' },
+        scope: 'Every verification command ran and passed at this exact commit and tree.',
+        evidence: [
+          { kind: 'FILE', id: RECORD_PATH, digest: digest(recordFile), note: 'the run record' },
+          ...(verification.record?.commands ?? [])
+            .filter((c) => c.reportPath !== undefined && c.reportDigest !== undefined)
+            .map((c) => ({
+              kind: 'FILE',
+              id: c.reportPath,
+              digest: c.reportDigest,
+              note: c.command + ': ' + String(c.testsPassed) + ' passed',
+            })),
+          { kind: 'COMMIT', id: repository.commit },
+        ],
+        notes: (verification.record?.commands ?? []).map(
+          (c) =>
+            c.command +
+            ' exited ' +
+            String(c.exitCode) +
+            (c.testsPassed === undefined
+              ? ''
+              : ' with ' + String(c.testsPassed) + ' passing, ' + String(c.testsFailed) + ' failing'),
+        ),
+      },
+      null,
+      2,
+    ) + '
+',
+    'utf8',
+  );
+  minted += 1;
+  console.log('prove: minted OFFLINE-VERIFICATION from the recorded verification run');
+} else {
+  rmSync(offlinePath, { force: true });
+  console.log('prove: OFFLINE-VERIFICATION stays NOT_VERIFIED — ' + verification.refusals[0]);
+}
+
 const unbound = REQUIREMENTS.filter(
   (r) =>
     r.expects === VerificationType.DETERMINISTIC &&

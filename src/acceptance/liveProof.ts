@@ -638,6 +638,25 @@ export function resolveLiveServa(input: LiveServaInput): LiveResolution<LiveServ
     }
   }
 
+  /*
+   * THE LINK THAT MAKES THIS ONE CHAIN.
+   *
+   * Without it, a real owner request and a real engineering run could be presented side by
+   * side as though one caused the other. The turn records the work item its request opened and
+   * the ChangeSet records the one it was built for; if they differ, these are two things that
+   * happened, not a chain.
+   */
+  if (engineering.chain !== undefined && turn['workItemId'] !== engineering.chain.workItemId) {
+    refusals.push({
+      check: 'SAME_EXECUTION',
+      detail:
+        'the request opened work item ' +
+        String(turn['workItemId']) +
+        ' and the change was built for ' +
+        engineering.chain.workItemId,
+    });
+  }
+
   if (String(turn['outcome']) === 'REFUSED') {
     refusals.push({
       check: 'OWNER_REQUEST',

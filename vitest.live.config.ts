@@ -17,6 +17,7 @@ export default defineConfig({
       'tests/live/engineering.live.test.ts',
       'tests/live/intelligence.live.test.ts',
       'tests/live/serva.live.test.ts',
+      'tests/live/servachain.live.test.ts',
     ],
     environment: 'node',
     reporters: ['default'],

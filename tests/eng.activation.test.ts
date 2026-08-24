@@ -141,6 +141,65 @@ describe('an evidence claim says what it expects to have happened', () => {
     expect(a?.verification).toBe('UNVERIFIED');
   });
 
+  it('a truthful denial whose reference names two files is UNVERIFIED, not a fabrication', () => {
+    /*
+     * A live run was terminated EVIDENCE_VIOLATION for exactly this. The classifier said
+     * "Attempted to open src/total.js and test.js with the Read tool" and BOTH reads had
+     * genuinely been denied — but the reference named the pair, no single observed subject
+     * matched it, and the code fell through to a contradiction whose message read:
+     *
+     *   the claim states Read denied, but the runtime observed denied, denied
+     *
+     * An outcome disagreement between two things that agreed. The agent reported a refusal
+     * honestly and was called a fabricator for it, and the whole upstream lifecycle halted.
+     *
+     * A contradiction requires observing something DIFFERENT, not merely failing to bind a
+     * reference.
+     */
+    const [a] = verifyEvidenceClaims(
+      [
+        {
+          kind: 'FILE_READ',
+          statement: 'Attempted to open src/total.js and test.js with the Read tool.',
+          tool: 'Read',
+          reference: 'src/total.js and test.js',
+          expectedOutcome: 'DENIED',
+        },
+      ],
+      [
+        call('Read', ToolCallOutcome.DENIED, 'src/total.js'),
+        call('Read', ToolCallOutcome.DENIED, 'test.js'),
+      ],
+      ['Read'],
+    );
+    expect(a?.verification).toBe('UNVERIFIED');
+    expect(a?.reason).toContain('which is what the claim states');
+  });
+
+  it('and the fabrication check is not softened by that', () => {
+    /*
+     * The same unbindable reference, but the runtime observed the calls SUCCEEDING. The
+     * outcome genuinely disagrees, so this is still a contradiction.
+     */
+    const [a] = verifyEvidenceClaims(
+      [
+        {
+          kind: 'FILE_READ',
+          statement: 'Attempted to open src/total.js and test.js; both were denied.',
+          tool: 'Read',
+          reference: 'src/total.js and test.js',
+          expectedOutcome: 'DENIED',
+        },
+      ],
+      [
+        call('Read', ToolCallOutcome.SUCCEEDED, 'src/total.js'),
+        call('Read', ToolCallOutcome.SUCCEEDED, 'test.js'),
+      ],
+      ['Read'],
+    );
+    expect(a?.verification).toBe('CONTRADICTED');
+  });
+
   it('claiming a denial when the call SUCCEEDED is CONTRADICTED', () => {
     const [a] = verifyEvidenceClaims(
       [

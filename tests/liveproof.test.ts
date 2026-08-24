@@ -462,6 +462,7 @@ describe('the Serva chain needs an owner request that actually caused the work',
       text: 'Add order tracking',
       askedAt: '2026-08-24T00:00:00.000Z',
       requestId: 'SC-REQST-000001',
+      workItemId: 'SC-WI-000900',
       outcome: 'QUEUED',
       stage: 'QUEUED',
       classification: 'FEATURE',
@@ -520,6 +521,24 @@ describe('the Serva chain needs an owner request that actually caused the work',
       const result = resolveServa(rt);
       expect(result.resolved).toBe(false);
       expect(result.refusals.map((r) => r.check)).toContain('OWNER_REQUEST');
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('refuses when the request and the change belong to different work items', () => {
+    /*
+     * A real request and a real engineering run, side by side, presented as though one caused
+     * the other. Without this they would assemble into a chain that never happened.
+     */
+    const rt = project();
+    try {
+      honestChain(rt);
+      seedRun(rt.store, 'SC-RUN-000001', 'SC-AGENT-010');
+      seedTurn(rt.store, { workItemId: 'SC-WI-SOMETHING-ELSE' });
+      const result = resolveServa(rt);
+      expect(result.resolved).toBe(false);
+      expect(result.refusals.map((r) => r.check)).toContain('SAME_EXECUTION');
     } finally {
       rt.close();
     }

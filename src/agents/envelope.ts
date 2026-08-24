@@ -363,6 +363,48 @@ export function verifyEvidenceClaims(
             ' outcome is recorded rather than corroborated',
         };
       }
+
+      /*
+       * THE OUTCOME AGREES; THE SUBJECT COULD NOT BE BOUND.
+       *
+       * A live run was terminated EVIDENCE_VIOLATION for a claim that said "Attempted to open
+       * src/total.js and test.js with the Read tool", where BOTH reads were genuinely denied.
+       * The claim named two files in one reference, no single observed subject matched the
+       * pair, and the code fell through to a contradiction whose message read:
+       *
+       *   the claim states Read denied, but the runtime observed denied, denied
+       *
+       * — reporting an outcome disagreement between two things that agreed. The agent had
+       * reported a refusal honestly and was called a fabricator for it.
+       *
+       * This is the second instance of the failure the comment above already describes, and
+       * the principle is the same: a contradiction requires observing something DIFFERENT, not
+       * merely failing to bind a reference. When the wanted outcome is present on the right
+       * tool and only the subject cannot be matched, the claim is recorded rather than
+       * corroborated — which is what UNVERIFIED means and what the surrounding code already
+       * does for every other unbindable reference.
+       *
+       * The fabrication check is not softened: a claim of an outcome the runtime never
+       * recorded for that tool is still CONTRADICTED, immediately below.
+       */
+      const sameOutcome = ofTool.filter((c) => c.outcome === want);
+      if (sameOutcome.length > 0) {
+        return {
+          claim,
+          verification: ClaimVerification.UNVERIFIED,
+          reason:
+            'the runtime observed ' +
+            named +
+            ' ' +
+            String(want).toLowerCase() +
+            ' ' +
+            String(sameOutcome.length) +
+            ' time(s), which is what the claim states, but none of them names ' +
+            String(subject) +
+            '; the claim is recorded rather than corroborated',
+        };
+      }
+
       return {
         claim,
         verification: ClaimVerification.CONTRADICTED,
