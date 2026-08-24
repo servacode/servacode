@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AcceptanceState, acceptanceStatus } from '../src/acceptance/status.js';
+import { AcceptanceState, acceptanceStatus, defaultRunResolver } from '../src/acceptance/status.js';
 import {
   PROOF_DIR,
   ProofStatus,
@@ -10,6 +10,7 @@ import {
   resolveProof,
 } from '../src/acceptance/proof.js';
 import { REQUIREMENTS } from '../src/acceptance/requirements.js';
+import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { AcceptanceProof, RepositoryIdentity } from '../src/acceptance/proof.js';
 
@@ -472,5 +473,89 @@ describe('the requirement catalogue is complete and the current tree does not sa
     for (const entry of status.notProven) {
       expect(entry).toMatch(/\((NOT_VERIFIED|FAIL): .+\)/);
     }
+  });
+});
+
+/* ============================ the resolver reads the store the store actually writes */
+
+describe('defaultRunResolver resolves a run the Store really wrote', () => {
+  /*
+   * SPEC: Phase 6 closure §1.
+   *
+   * Two defects, both found by the canonical matrix refusing LIVE proofs whose chains the
+   * live verifier had already resolved:
+   *
+   *   it read a `HEAD` file naming the current version — the Store has never written one, and
+   *   `grep -rn "'HEAD'" src/store/store.ts` returns nothing;
+   *
+   *   it joined `root` with `ref.storePath` unconditionally, so an ABSOLUTE store path became
+   *   `D:\SEVACODE\D:SEVACODEout…`. A live fixture lives outside the repository by design, so
+   *   every live proof was unresolvable.
+   *
+   * Neither had a test. Both made a real governed run look like it had never happened, which is
+   * the one direction this whole model must never fail in.
+   */
+  it('resolves a versioned record through an absolute store path', () => {
+    const root = tempRoot();
+    roots.push(root);
+    const rt = ServaRuntime.init('RahalGo', 'Stop losing phone orders', { root });
+    try {
+      const tx = rt.store.begin();
+      tx.putCanon('agentRunRecord', 'SC-RUN-000042', {
+        runId: 'SC-RUN-000042',
+        agentId: 'SC-AGENT-220',
+        outcome: 'COMPLETED',
+      });
+      tx.commit();
+    } finally {
+      rt.close();
+    }
+
+    /* An absolute path, as every live fixture records. */
+    const resolved = defaultRunResolver(process.cwd())({
+      runId: 'SC-RUN-000042',
+      storePath: root,
+    });
+
+    expect(resolved, 'the run the Store just wrote did not resolve').toBeDefined();
+    expect(resolved?.outcome).toBe('COMPLETED');
+    expect(resolved?.agentId).toBe('SC-AGENT-220');
+  });
+
+  it('still resolves a store path relative to the package root', () => {
+    /* The original supported shape must keep working. */
+    const root = tempRoot();
+    roots.push(root);
+    const rt = ServaRuntime.init('RahalGo', 'idea', { root });
+    try {
+      const tx = rt.store.begin();
+      tx.putCanon('agentRunRecord', 'SC-RUN-000043', {
+        runId: 'SC-RUN-000043',
+        agentId: 'SC-AGENT-200',
+        outcome: 'COMPLETED',
+      });
+      tx.commit();
+    } finally {
+      rt.close();
+    }
+    const resolved = defaultRunResolver(root)({
+      runId: 'SC-RUN-000043',
+      storePath: '.',
+    });
+    expect(resolved?.outcome).toBe('COMPLETED');
+  });
+
+  it('a run that does not exist still resolves to nothing', () => {
+    /* The fix must not make absence resolvable. */
+    const root = tempRoot();
+    roots.push(root);
+    const rt = ServaRuntime.init('RahalGo', 'idea', { root });
+    rt.close();
+    expect(
+      defaultRunResolver(process.cwd())({
+        runId: 'SC-RUN-NEVER',
+        storePath: root,
+      }),
+    ).toBeUndefined();
   });
 });

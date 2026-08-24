@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { SERVA_VERSION } from '../portability/version.js';
 import { ACCEPTANCE_LINES, REQUIREMENTS, requirementsFor } from './requirements.js';
 import { ProofStatus, resolveProof } from './proof.js';
@@ -115,17 +115,51 @@ export function repositoryIdentity(root: string): RepositoryIdentity | undefined
  */
 export function defaultRunResolver(root: string): RunResolver {
   return (ref) => {
-    const dir = join(root, ref.storePath, 'canon', 'agentRunRecord', ref.runId);
-    if (!existsSync(dir)) return undefined;
-    try {
-      const head = readFileSync(join(dir, 'HEAD'), 'utf8').trim();
-      const envelope = JSON.parse(readFileSync(join(dir, head + '.json'), 'utf8')) as {
-        body?: { agentId?: string; outcome?: string };
-      };
-      return envelope.body;
-    } catch {
-      return undefined;
+    /*
+     * READ THE STORE THE WAY THE STORE WRITES IT.
+     *
+     * Two defects lived here, and both made a REAL governed run look like it had never
+     * happened — the one direction this model must never fail in. The canonical matrix
+     * refused LIVE proofs whose chains the live verifier had already resolved, which is how
+     * they surfaced.
+     *
+     *   It read a `HEAD` file naming the current version. The Store has never written one:
+     *   `grep -rn "'HEAD'" src/store/store.ts` returns nothing. Records are `v1.json`,
+     *   `v2.json`, … so every lookup threw and every run resolved to `undefined`.
+     *
+     *   It joined `root` with `ref.storePath` unconditionally. A live fixture lives outside
+     *   the repository by design, so an absolute path became `D:\SEVACODE\D:SEVACODEout…`.
+     *
+     * Neither had a test. Both are now covered, including the case that must still fail: a
+     * run that genuinely does not exist still resolves to nothing.
+     */
+    const base = isAbsolute(ref.storePath) ? ref.storePath : join(root, ref.storePath);
+
+    /*
+     * A store path may name the project root or the `.serva` directory inside it. Both are
+     * written by real tooling, so both are accepted rather than one being declared correct.
+     */
+    for (const dir of [
+      join(base, 'canon', 'agentRunRecord', ref.runId),
+      join(base, '.serva', 'canon', 'agentRunRecord', ref.runId),
+    ]) {
+      if (!existsSync(dir)) continue;
+      try {
+        /* Highest version wins: it is the current state of an append-only record. */
+        const latest = readdirSync(dir)
+          .filter((f) => /^v\d+\.json$/.test(f))
+          .sort((a, b) => Number.parseInt(b.slice(1), 10) - Number.parseInt(a.slice(1), 10))[0];
+        if (latest === undefined) continue;
+        const envelope = JSON.parse(readFileSync(join(dir, latest), 'utf8')) as {
+          body?: { agentId?: string; outcome?: string };
+        };
+        if (envelope.body !== undefined) return envelope.body;
+      } catch {
+        /* An unreadable record is an unresolved run, never a resolved one. */
+        return undefined;
+      }
     }
+    return undefined;
   };
 }
 
