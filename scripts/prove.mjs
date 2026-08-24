@@ -273,9 +273,8 @@ for (const line of refused) console.log('  refused: ' + line);
  * has its own resolver and its own minting path rather than a `provenBy` binding that would
  * quietly mean something else.
  */
-const { resolveVerificationRecord, RECORD_PATH } = await import(
-  '../dist/acceptance/verificationRecord.js'
-);
+const { resolveVerificationRecord, RECORD_PATH } =
+  await import('../dist/acceptance/verificationRecord.js');
 const verification = resolveVerificationRecord({
   root,
   repository,
@@ -316,13 +315,16 @@ if (verification.resolved) {
             String(c.exitCode) +
             (c.testsPassed === undefined
               ? ''
-              : ' with ' + String(c.testsPassed) + ' passing, ' + String(c.testsFailed) + ' failing'),
+              : ' with ' +
+                String(c.testsPassed) +
+                ' passing, ' +
+                String(c.testsFailed) +
+                ' failing'),
         ),
       },
       null,
       2,
-    ) + '
-',
+    ) + '\n',
     'utf8',
   );
   minted += 1;
