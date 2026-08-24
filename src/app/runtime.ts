@@ -10,9 +10,22 @@ import { AuditAction, audit } from '../events/audit.js';
 import { recoverTerminalSnapshots } from '../events/agentRun.js';
 import { getCatalogues } from '../catalogue/index.js';
 import { ProjectSchema, parseOrThrow, type Project } from '../domain/schemas.js';
+import { SERVA_VERSION } from '../portability/version.js';
 
-/** Serva Code implementation version. Distinct from the R4 specification baseline. */
-export const SERVA_VERSION = '0.2.0';
+/**
+ * The product version, re-exported from the ONE place that defines it.
+ *
+ * SPEC: Phase 6 final acceptance sequence §5.
+ *
+ * This file used to declare `'0.2.0'` of its own while `portability/version.ts` declared
+ * `'1.0.0'`. Two constants with the same name, and this was the one the CLI banner printed and
+ * the one `ServaRuntime.init` stamped into every Project record — so every project ever
+ * created recorded that it was made by a version of Serva that had not existed for months.
+ *
+ * The version identity test read the manifests and missed it entirely, because both manifests
+ * were right. Re-exporting rather than restating is what makes a second one impossible.
+ */
+export { SERVA_VERSION };
 export const SPEC_BASELINE = 'R4';
 
 /**

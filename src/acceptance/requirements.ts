@@ -428,9 +428,24 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     id: 'PORTABILITY-FINAL',
     requirement:
       'A real backup and restore was performed on this machine, with inventory equivalence and no machine-bound authority carried',
-    expects: VerificationType.HUMAN,
+    /*
+     * STRENGTHENED FROM HUMAN.
+     *
+     * This was going to be proved by a person following a written walkthrough, which is the
+     * weakest thing that could have satisfied it — and an earlier iteration of this product
+     * passed a portability requirement because three phrases appeared in a markdown file.
+     *
+     * The walk is now PERFORMED on real files by `walkPortability`: a real project with an
+     * answered owner decision and git history, a verified backup, the original moved away, a
+     * restore into a fresh path, then inventory, git identity, canonical Store, owner
+     * decisions, a credential-shape scan, and proof that the previous machine's HARD
+     * qualification did not travel. A deterministic proof is strictly stronger than a human
+     * one, so the requirement says so.
+     */
+    expects: VerificationType.DETERMINISTIC,
     line: 'Portability',
     mandatory: true,
+    provenBy: ['tests/portability.final.test.ts'],
   },
 
   /* -------------------------------------------------------------------- recovery */
@@ -505,10 +520,17 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
   {
     id: 'P6-DOCS',
     requirement: 'Owner documentation covers getting started through recovery',
-    expects: VerificationType.HUMAN,
+    /*
+     * STRENGTHENED FROM HUMAN, for the reason the closure gives: this must not pass merely
+     * because eleven markdown files exist. The documents are checked against the product —
+     * every CLI command, every extension command id and the version they quote have to be
+     * real — which a person reading them would not reliably do and a test does every run.
+     */
+    expects: VerificationType.DETERMINISTIC,
     line: 'Distribution',
     mandatory: true,
     implementation: 'docs/owner/',
+    provenBy: ['tests/docs.test.ts'],
   },
 
   /* ------------------------------------------------------------- the three gates */

@@ -1,42 +1,69 @@
 # Working with Serva
 
-## The status
+You have a company, not a chatbot. This is what that means day to day.
 
-The status bar shows the truth about the project, derived from what is stored — never from
-the fact that a panel loaded.
+## Asking for something
 
-| It says | It means |
-|---|---|
-| **Active** | Running, nothing waiting |
-| **Your decision needed** | Stopped on something only you can answer |
-| **Blocked** | A gate refused, or a department could not proceed |
-| **Engineering** | Code is being written under the sandbox |
-| **Machine not qualified** | This computer has not been measured, so engineering cannot run |
-| **Changed outside Serva** | Files changed that Serva did not change |
-| **Recovery required** | Something ended in a state Serva cannot establish |
-
-## From a terminal
+Open the Control Center (`Serva: Open Control Center`) and type what you want under **Ask
+Serva**, in your own words. Or from a terminal:
 
 ```
-serva overview          what the status bar shows
-serva status            the lifecycle in detail
-serva release           release readiness, condition by condition
-serva actions           every action the interface can perform
+serva route "add order tracking so a customer can see where their food is"
 ```
 
-The CLI and the VS Code panel call the same code. There is one company underneath, and a
-state change made from a panel is the same change made from a terminal.
+Serva records exactly what you typed, classifies it, asks for a plan, checks that plan itself,
+and queues the departments that will do the work. What comes back is what the *company* did —
+the class your request was given, the departments queued, or the point at which Serva stopped
+and why.
 
-## If you edit code yourself
+You are not talking to a model. Nothing you type is handed to an unrestricted session, and
+there is no reply written for you to read. If that sounds like a limitation, it is the same
+limitation that makes the rest of this trustworthy: everything Serva tells you is derived from
+something recorded, and you can go and look at it.
 
-You can. It is your computer and your repository. Serva notices, marks those changes as
-**ungoverned**, and offers you the choice: review the difference, bring it in as a change
-request, or discard it. It will not adopt your work silently and it will not delete it.
+## Seeing where things are
 
-## Asking why
+```
+serva status                       what state the project is in, and the next action
+serva intelligence status          where the company has got to, and what is stopping it
+serva intelligence readiness       every blocker, derived rather than declared
+```
 
-Every decision is recorded with its reason, its evidence, the alternatives considered and
-what would make Serva reconsider. Open one in the Control Center to see all of it.
+The Control Center shows the same things, plus the lifecycle stage by stage.
 
-What you will not see is a model's internal reasoning. That is not evidence, and Serva does
-not keep it.
+## When Serva stops
+
+Serva stops rather than guessing. There are three reasons, and they read differently:
+
+**A question only you can answer.** See [Owner decisions](owner-decisions.md).
+
+**Something is not verified.** No evidence means not verified — never "probably fine". The
+blocker names what is missing.
+
+**The machine cannot do it.** Write-capable engineering needs a measured boundary on *this*
+computer. `serva machine bootstrap` says what is missing and who has to fix it.
+
+## Following the work
+
+```
+serva runs                 every governed run in this project
+serva run <SC-RUN-...>     one run's event log
+serva context <SC-RUN-...> exactly what that run was shown
+```
+
+That last one matters more than it looks. An agent's answer is only as good as what it was
+given, and Serva keeps the exact context so you can check.
+
+## What Serva will not do
+
+It will not answer an owner decision for you. It will not mark its own work verified. It will
+not run write-capable engineering on an unqualified machine. It will not carry a qualification
+from one computer to another. None of these are settings.
+
+## Where your work lives
+
+Everything is in your project folder, under `.serva`. It is yours, it is on your disk, and
+nothing leaves the machine except the requests Serva makes to the engine on your behalf.
+
+See also: [Getting started](getting-started.md) · [Engineering](engineering.md) ·
+[Backups](backups.md)
