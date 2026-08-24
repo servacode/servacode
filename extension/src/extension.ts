@@ -540,7 +540,8 @@ export function activate(context: vscode.ExtensionContext): void {
             { rt },
             {
               id: 'backup.create',
-              input: { projectId: 'PRJ-1', name: 'project', destination },
+              /* The identity is the Store's. This caller says where, not what. */
+              input: { destination },
               confirmed: true,
             },
           );
@@ -549,20 +550,55 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }),
     vscode.commands.registerCommand('serva.restoreBackup', async () => {
+      /*
+       * NO PROJECT IS THE NORMAL CASE HERE.
+       *
+       * SPEC: Phase 6 closure §7.
+       *
+       * This used to open the Store first and give up when there was none, which meant
+       * restore was unreachable in exactly the situation it exists for: a fresh machine, an
+       * empty folder, and a backup on a drive. The one state where an owner most needs their
+       * work back was the one state the command refused to start in.
+       *
+       * `restore.inspect` and `restore.perform` declare `needsProject: false`, so the action
+       * layer — with its schemas, its consequence declaration and its confirmation rule —
+       * still stands between the dialog and the disk.
+       */
       const rt = open();
-      if (rt === undefined) return;
       const picked = await vscode.window.showOpenDialog({
         canSelectFolders: true,
         canSelectFiles: false,
         openLabel: 'Inspect this backup',
+        title: 'Which backup should Serva restore?',
       });
       const bundlePath = picked?.[0]?.fsPath;
       if (bundlePath === undefined) return;
 
-      const inspection = await invokeAction(
-        { rt },
-        { id: 'restore.inspect', input: { bundlePath, destinationRoot: rt.root } },
-      );
+      /*
+       * Where it lands. An open project restores over itself; with no project open the owner
+       * picks the folder, because guessing would mean writing a whole project tree somewhere
+       * nobody chose.
+       */
+      let destinationRoot = rt?.root;
+      if (destinationRoot === undefined) {
+        const into = await vscode.window.showOpenDialog({
+          canSelectFolders: true,
+          canSelectFiles: false,
+          openLabel: 'Restore into this folder',
+          title: 'Where should the project be restored?',
+          ...(vscode.workspace.workspaceFolders?.[0] === undefined
+            ? {}
+            : { defaultUri: vscode.workspace.workspaceFolders[0].uri }),
+        });
+        destinationRoot = into?.[0]?.fsPath;
+        if (destinationRoot === undefined) return;
+      }
+
+      const context = rt === undefined ? {} : { rt };
+      const inspection = await invokeAction(context, {
+        id: 'restore.inspect',
+        input: { bundlePath, destinationRoot },
+      });
       /*
        * INSPECT, SHOW, THEN ASK. The owner sees what would happen — including what will
        * NOT come back — before anything is written.
@@ -573,15 +609,38 @@ export function activate(context: vscode.ExtensionContext): void {
         'Restore',
       );
       if (proceed !== 'Restore') return;
-      const result = await invokeAction(
-        { rt },
-        {
-          id: 'restore.perform',
-          input: { bundlePath, destinationRoot: rt.root },
-          confirmed: true,
-        },
-      );
+      const result = await invokeAction(context, {
+        id: 'restore.perform',
+        input: { bundlePath, destinationRoot },
+        confirmed: true,
+      });
       void vscode.window.showInformationMessage('Serva: ' + (result.refusal ?? result.summary));
+
+      /*
+       * A restore into a folder this window is not looking at produces a project nobody can
+       * see. Offering to open it is the difference between "restored" and "restored, and
+       * here it is".
+       *
+       * The path comes from the RESULT, not from what the owner picked. Each project lands in
+       * `<chosen folder>/<project id>`, so offering to open the chosen folder would open the
+       * parent of the project and show an owner a directory listing instead of their company.
+       */
+      const landed = (result.data as { restored?: { destination?: string }[] } | undefined)
+        ?.restored?.[0]?.destination;
+      if (result.ok && rt === undefined && landed !== undefined) {
+        const openIt = await vscode.window.showInformationMessage(
+          'Serva: the project was restored into ' + landed + '.',
+          t(language(), 'newProject.openFolder'),
+          t(language(), 'newProject.stayHere'),
+        );
+        if (openIt === t(language(), 'newProject.openFolder')) {
+          await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(landed), {
+            forceNewWindow: false,
+          });
+          return;
+        }
+      }
+      runtime = undefined;
       refreshAll();
     }),
     vscode.workspace.onDidChangeConfiguration((e) => {

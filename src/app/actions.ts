@@ -54,7 +54,19 @@ export const ActionConsequence = {
 export type ActionConsequence = (typeof ActionConsequence)[keyof typeof ActionConsequence];
 
 export interface ActionContext {
-  readonly rt: ServaRuntime;
+  /**
+   * The open project.
+   *
+   * Optional, because a few actions genuinely have nothing to read it from. Restoring a
+   * backup onto a fresh machine happens in an EMPTY folder: there is no project yet, and
+   * that is the entire situation restore exists for. Requiring a runtime here meant the
+   * extension bailed out before the dialog opened, so the one machine state where restore
+   * matters most was the one where it could not be reached.
+   *
+   * Every action that needs it declares `needsProject` and is refused politely without one,
+   * so the optionality never reaches a handler as an undefined surprise.
+   */
+  readonly rt?: ServaRuntime;
   /**
    * The person, for actions that record who decided.
    *
@@ -76,10 +88,21 @@ export interface ActionDefinition<S extends z.ZodTypeAny = z.ZodTypeAny> {
   readonly id: string;
   readonly title: string;
   readonly consequence: ActionConsequence;
+  /**
+   * Whether this action reads or writes an open project. Defaults to true.
+   *
+   * Declared rather than inferred from whether the handler happens to touch `ctx.rt`: an
+   * action that stops using the runtime during a refactor would otherwise silently become
+   * available in a folder with no project in it.
+   */
+  readonly needsProject?: boolean;
   /** Shown before a consequential action runs. Required for anything but READ. */
   readonly confirmPrompt?: string;
   readonly schema: S;
-  handler(ctx: ActionContext, input: z.output<S>): Promise<ActionResult> | ActionResult;
+  handler(
+    ctx: ActionContext & { readonly rt: ServaRuntime },
+    input: z.output<S>,
+  ): Promise<ActionResult> | ActionResult;
 }
 
 const empty = z.object({}).strict();
@@ -270,18 +293,27 @@ const DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
     title: 'Create a verified backup',
     consequence: ActionConsequence.CONSEQUENTIAL,
     confirmPrompt: 'This writes a full copy of the project to the destination you chose.',
-    schema: z
-      .object({
-        projectId: z.string().min(1),
-        name: z.string().min(1),
-        destination: z.string().min(1),
-      })
-      .strict(),
+    /*
+     * THE CALLER SAYS WHERE, NOT WHAT.
+     *
+     * SPEC: Phase 6 closure §7.
+     *
+     * This action used to accept `projectId` and `name` from whoever invoked it, and the
+     * extension passed the literals `PRJ-1` and `project`. Every backup made from the panel
+     * was therefore filed under an identity belonging to no project — and the failure was
+     * silent, because a manifest with a plausible id in it looks exactly like a correct one
+     * until somebody tries to restore onto a machine holding two of them.
+     *
+     * A caller cannot get the identity wrong if it is not asked for it. It is read from the
+     * Store, which is the only thing that knows.
+     */
+    schema: z.object({ destination: z.string().min(1) }).strict(),
     handler: (ctx, input) => {
+      const project = ctx.rt.requireProject();
       const result = createBackup(
         { clock: ctx.rt.clock },
         {
-          projects: [{ projectId: input.projectId, name: input.name, root: ctx.rt.root }],
+          projects: [{ projectId: project.id, name: project.name, root: ctx.rt.root }],
           destination: input.destination,
         },
       );
@@ -293,6 +325,7 @@ const DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
     id: 'backup.verify',
     title: 'Verify a backup',
     consequence: ActionConsequence.READ,
+    needsProject: false,
     schema: z.object({ bundlePath: z.string().min(1) }).strict(),
     handler: (_ctx, input) => {
       const result = verifyBackup(input.bundlePath);
@@ -304,6 +337,7 @@ const DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
     id: 'restore.inspect',
     title: 'Inspect a backup before restoring',
     consequence: ActionConsequence.READ,
+    needsProject: false,
     schema: z
       .object({ bundlePath: z.string().min(1), destinationRoot: z.string().min(1) })
       .strict(),
@@ -317,6 +351,7 @@ const DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
     id: 'restore.perform',
     title: 'Restore a backup',
     consequence: ActionConsequence.DESTRUCTIVE,
+    needsProject: false,
     confirmPrompt:
       'Restoring writes a whole project tree. Anything already at the destination is moved aside, and this machine will still need to be qualified before engineering can run.',
     schema: z
@@ -421,6 +456,17 @@ export async function invokeAction(
     };
   }
 
+  if (definition.needsProject !== false && ctx.rt === undefined) {
+    return {
+      ok: false,
+      summary: definition.title + ' needs an open project',
+      refusal:
+        'There is no Serva project here, and ' +
+        definition.id +
+        ' reads one. Open a folder that holds a project, or restore a backup into this one.',
+    };
+  }
+
   if (definition.consequence !== ActionConsequence.READ && request.confirmed !== true) {
     return {
       ok: false,
@@ -432,7 +478,10 @@ export async function invokeAction(
   }
 
   try {
-    return await definition.handler(ctx, parsed.data);
+    return await definition.handler(
+      ctx as ActionContext & { readonly rt: ServaRuntime },
+      parsed.data,
+    );
   } catch (e) {
     /*
      * A governed refusal — an agent answering an owner decision, a restore over another

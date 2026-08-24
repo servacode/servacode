@@ -87,11 +87,12 @@ export async function cmdBackup(args: ParsedArgs): Promise<number> {
     { rt },
     {
       id: 'backup.create',
-      input: {
-        projectId: 'PRJ-' + rt.root.split(/[\\/]/).pop(),
-        name: rt.root.split(/[\\/]/).pop() ?? 'project',
-        destination,
-      },
+      /*
+       * The identity comes from the Store, and this caller is not asked for it. It used to
+       * derive an id from the FOLDER NAME, which meant renaming a directory renamed the
+       * project as far as every backup made afterwards was concerned.
+       */
+      input: { destination },
       confirmed: true,
     },
   );

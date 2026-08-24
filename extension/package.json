@@ -16,7 +16,8 @@
   "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:.serva/SCHEMA_VERSION",
-    "onCommand:serva.newProject"
+    "onCommand:serva.newProject",
+    "onCommand:serva.restoreBackup"
   ],
   "capabilities": {
     "untrustedWorkspaces": {

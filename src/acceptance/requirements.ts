@@ -376,6 +376,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Portability',
     mandatory: true,
+    provenBy: ['tests/portability.identity.test.ts'],
   },
   {
     id: 'P6-RESTORE',
@@ -393,6 +394,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Portability',
     mandatory: true,
+    provenBy: ['tests/portability.identity.test.ts', 'tests/vscode/restoreFresh.host.test.ts'],
   },
   {
     id: 'P6-ARCHIVE-SAFETY',
