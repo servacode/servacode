@@ -283,9 +283,9 @@ class StubTransport implements ExecTransport {
       args = args.slice(sep + 2);
     }
 
-    const script = args.find((a) => a.endsWith('.js'));
+    const script = args.find((a) => a.endsWith('.cjs'));
     if (exe === 'node' && script !== undefined) {
-      const id = /(Q-[A-K])\.js$/.exec(script)?.[1];
+      const id = /(Q-[A-K])\.cjs$/.exec(script)?.[1];
       const code = id === undefined ? 1 : (this.programs[id] ?? 1);
       return blank(code);
     }
