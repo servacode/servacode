@@ -3,7 +3,8 @@ import { ContractRegistry } from '../src/agents/registry.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
 import { Orchestrator } from '../src/orchestration/orchestrator.js';
 import { FakeEngineAdapter } from '../src/engine/fake.js';
-import { PHASE3_ENABLED_AGENTS } from '../src/app/ai.js';
+import { PHASE3_ENABLED_AGENTS, PHASE6_ENABLED_AGENTS } from '../src/app/ai.js';
+import { PHASE4_CANDIDATE_PRODUCERS } from '../src/app/engineering.js';
 import {
   PlanFindingKind,
   findCycle,
@@ -471,5 +472,53 @@ describe('owner request to dispatch queue', () => {
     expect(r.stage).toBe('HALTED');
     expect(r.classification?.requestClass).toBe(RequestClass.FEATURE);
     expect(r.planRun?.outcome).toBe(RunOutcome.INVALID_OUTPUT);
+  });
+});
+
+/* ================================ the planner can name the agents it is asked to assign */
+
+describe('every department a classifier may recommend has an assignable agent', () => {
+  it('the enabled set covers the engineering departments a code request reaches', () => {
+    /*
+     * SPEC: Phase 6 final acceptance sequence §2; 19 CX-4.
+     *
+     * Found by the live cross-phase run. An owner asked for a defect fix, the classifier
+     * correctly recommended Backend, QA and Code Review, and the Orchestrator escalated with
+     * "No canonical agents exist for recommended departments" — because it had been shown
+     * five intelligence agents frozen at Phase 3.
+     *
+     * The agents existed. The catalogue in the bundle did not contain them, which is the same
+     * failure as withholding the DEPARTMENT list and is the reason that list is injected.
+     */
+    const registry = ContractRegistry.shared();
+    const enabledDepartments = new Set(
+      [...PHASE6_ENABLED_AGENTS].map((id) => registry.get(id).department),
+    );
+
+    for (const department of ['SC-DEPT-030', 'SC-DEPT-050', 'SC-DEPT-051']) {
+      expect(
+        enabledDepartments.has(department),
+        department + ' has no assignable agent, so a plan naming it cannot be written',
+      ).toBe(true);
+    }
+  });
+
+  it('every enabled agent is a real contract', () => {
+    const registry = ContractRegistry.shared();
+    for (const id of PHASE6_ENABLED_AGENTS) {
+      expect(() => registry.get(id), id + ' is enabled but not in the registry').not.toThrow();
+    }
+  });
+
+  it('being assignable grants no execution authority', () => {
+    /*
+     * The reason extending this set is safe. A Producer runs only when `enabledProducers`
+     * includes it AND the substrate measured HARD AND the boundary is reachable. This set
+     * governs what a planner may WRITE DOWN; three separate gates govern what may run.
+     */
+    expect(PHASE6_ENABLED_AGENTS.has('SC-AGENT-150')).toBe(true);
+    expect(PHASE4_CANDIDATE_PRODUCERS.has('SC-AGENT-150')).toBe(true);
+    /* Two different sets, deliberately: one is a vocabulary, the other is permission. */
+    expect(PHASE6_ENABLED_AGENTS).not.toBe(PHASE4_CANDIDATE_PRODUCERS);
   });
 });

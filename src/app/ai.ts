@@ -35,6 +35,42 @@ export const PHASE3_ENABLED_AGENTS: ReadonlySet<string> = new Set([
   'SC-AGENT-030', // Discovery Analyst   - ANALYST/RECOMMEND, problem-space findings
 ]);
 
+/**
+ * WHO THE PLANNER MAY ASSIGN WORK TO.
+ *
+ * SPEC: Phase 6 final acceptance sequence §2; 19 CX-4.
+ *
+ * The live cross-phase run found this. An owner asked for a defect to be fixed, the classifier
+ * correctly recommended Backend, QA and Code Review, and the Orchestrator escalated:
+ *
+ *   No canonical agents exist for recommended departments SC-DEPT-030 (Backend),
+ *   SC-DEPT-051 (QA), SC-DEPT-050 (Code Review).
+ *
+ * Those departments have agents — SC-AGENT-150, the QA verifiers, SC-AGENT-200. What the
+ * planner was SHOWN was `PHASE3_ENABLED_AGENTS`, five intelligence agents frozen at the phase
+ * that introduced them. It was asked to assign engineering work and handed a catalogue with no
+ * engineer in it, so it escalated — correctly, for a gap Serva created by withholding the list.
+ *
+ * That is the identical failure the comment beside the DEPARTMENT catalogue already describes,
+ * one stage later: an answer that must use canonical identifiers, without the identifiers in
+ * the bundle.
+ *
+ * ASSIGNABLE IS NOT EXECUTABLE, and this is the reason the fix is safe. Naming an agent in a
+ * plan grants nothing: a Producer still runs only when `enabledProducers` includes it AND the
+ * substrate measured HARD AND the boundary is currently reachable. This set governs what the
+ * planner may WRITE DOWN; three separate gates govern what may actually run.
+ */
+export const PHASE6_ENABLED_AGENTS: ReadonlySet<string> = new Set([
+  ...PHASE3_ENABLED_AGENTS,
+  /* The engineering departments a request about existing code will reach. */
+  'SC-AGENT-150', // Backend Engineer     - SC-DEPT-030
+  'SC-AGENT-160', // Frontend Engineer    - SC-DEPT-031
+  'SC-AGENT-180', // Database Engineer    - SC-DEPT-033
+  'SC-AGENT-200', // Code Reviewer        - SC-DEPT-050
+  'SC-AGENT-210', // QA                   - SC-DEPT-051
+  'SC-AGENT-220', // Security Tester      - SC-DEPT-052
+]);
+
 export interface AiLayer {
   readonly engine: EngineAdapter;
   readonly registry: ContractRegistry;
@@ -53,7 +89,7 @@ export interface AiLayerOptions {
 
 export function buildAiLayer(rt: ServaRuntime, opts: AiLayerOptions = {}): AiLayer {
   const registry = opts.registry ?? ContractRegistry.shared();
-  const enabledAgents = opts.enabledAgents ?? PHASE3_ENABLED_AGENTS;
+  const enabledAgents = opts.enabledAgents ?? PHASE6_ENABLED_AGENTS;
   const engine =
     opts.engine ??
     new ClaudeCliEngineAdapter({

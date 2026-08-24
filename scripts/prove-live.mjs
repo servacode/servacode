@@ -149,26 +149,117 @@ mint(
     'measured it, an independent Reviewer accepted it, and Serva integrated it.',
 );
 
-/*
- * LIVE-SERVA needs the front of the chain too: an owner request that CAUSED this work. The
- * engineering suite drives a work item directly rather than through a conversation, so this is
- * minted only when a conversation turn resolves in the same store.
- */
-const rt2 = ServaRuntime.open({ root: candidate.storeRoot });
-let hasOwnerRequest = false;
-try {
-  hasOwnerRequest = rt2.store.listWorkingIds('conversationTurn').length > 0;
-} finally {
-  rt2.close();
-}
+/* --------------------------------------------------------------------- LIVE-SERVA */
 
-if (hasOwnerRequest) {
-  mint('LIVE-SERVA', 'An owner request produced governed work end to end on this machine.');
-} else {
+/*
+ * The cross-phase join, from its own live run.
+ *
+ * Deliberately NOT derived from the engineering candidate above. LIVE-ENGINEERING proves the
+ * factory; LIVE-SERVA proves that an owner asking for something is what caused the factory to
+ * run, and reusing one run for both would assert the join by assuming it.
+ */
+const SERVA_CANDIDATE = 'evidence/acceptance-run/live-serva.json';
+const servaPath = join(root, ...SERVA_CANDIDATE.split('/'));
+
+if (!existsSync(servaPath)) {
   console.log(
-    'prove-live: LIVE-SERVA not minted — this run drove a work item directly, so no owner\n' +
-      '            request caused it. That chain is proved by `npm run test:serva-live`.',
+    'prove-live: LIVE-SERVA not minted — no cross-phase run recorded at ' + SERVA_CANDIDATE,
   );
+} else {
+  const serva = JSON.parse(readFileSync(servaPath, 'utf8'));
+
+  if (serva.state === 'OWNER_ACTION_REQUIRED') {
+    console.log('prove-live: LIVE-SERVA is OWNER_ACTION_REQUIRED and cannot be minted.');
+    console.log('  decision: ' + String(serva.pendingDecision?.id));
+    console.log('  ' + String(serva.pendingDecision?.question));
+    console.log('  Answer it as yourself, then resume; nothing here may answer it for you.');
+  } else if (serva.state !== 'ACCEPTED') {
+    console.log('prove-live: the cross-phase run ended ' + String(serva.state) + ', not ACCEPTED.');
+  } else {
+    const { resolveServaChain } = await import('../dist/acceptance/servaChain.js');
+    const rt2 = ServaRuntime.open({ root: serva.storeRoot });
+    let chainResult;
+    try {
+      chainResult = resolveServaChain({
+        store: rt2.store,
+        companyStore: rt2.store,
+        repoRoot: serva.repoRoot,
+        machineFingerprint: serva.boundaryFingerprint,
+        recordedFingerprint: serva.boundaryFingerprint,
+        qualification,
+        preseeded: serva.preseeded ?? [],
+      });
+    } finally {
+      rt2.close();
+    }
+
+    if (chainResult.outcome !== 'PROVEN') {
+      console.log('prove-live: the cross-phase chain is ' + chainResult.outcome + '.');
+      for (const r of chainResult.refusals) console.log('  ' + r.check + ': ' + r.detail);
+      for (const d of chainResult.pendingOwnerDecisions) {
+        console.log('  OWNER DECISION ' + d.id + ': ' + d.question);
+      }
+    } else {
+      /*
+       * The classes are kept apart in the proof itself, not merely in a report. A pre-seeded
+       * requirement is real truth about the project and is not evidence that anything ran
+       * live, and this is the one document where blurring the two would matter most.
+       */
+      const grouped = {};
+      for (const ref of chainResult.refs) {
+        (grouped[ref.origin] ??= []).push(
+          ref.kind + ' ' + ref.id + (ref.detail ? ' — ' + ref.detail : ''),
+        );
+      }
+
+      const servaProof = {
+        requirementId: 'LIVE-SERVA',
+        verificationType: VerificationType.LIVE,
+        status: ProofStatus.PASS,
+        implementationCommit: repository.commit,
+        treeDigest: repository.tree,
+        producedAt,
+        producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+        scope:
+          "One owner request, in the owner's own words, reached an authoritative integration " +
+          'commit through governed classification, planning, a Producer under a measured HARD ' +
+          'boundary, deterministic checks, an independent Reviewer and the Engineering Gate.',
+        evidence: [
+          { kind: 'FILE', id: SERVA_CANDIDATE, digest: digest(servaPath), note: 'the run record' },
+          ...chainResult.refs
+            .filter((r) => r.kind === 'AGENT_RUN')
+            .map((r) => ({ kind: 'AGENT_RUN', id: r.id, note: r.detail ?? '' })),
+          { kind: 'COMMIT', id: String(chainResult.acceptedCommit) },
+          { kind: 'MACHINE', id: String(serva.boundaryFingerprint) },
+        ],
+        machineFingerprint: String(serva.boundaryFingerprint),
+        liveRunRef: {
+          runId: String(serva.ownerRequest?.runIds?.[0] ?? ''),
+          agentId: 'SC-AGENT-003',
+          storePath: serva.storeRoot,
+        },
+        notes: [
+          'Work item ' +
+            String(chainResult.workItemId) +
+            ', request ' +
+            String(chainResult.turnId) +
+            '.',
+          'Evidence by origin — pre-seeded truth is NOT live evidence:',
+          ...Object.entries(grouped).flatMap(([origin, items]) => [
+            '  ' + origin + ':',
+            ...items.map((i) => '    ' + i),
+          ]),
+        ],
+      };
+
+      const servaProofPath = join(root, ...PROOF_DIR.split('/'), 'LIVE-SERVA.json');
+      mkdirSync(dirname(servaProofPath), { recursive: true });
+      writeFileSync(servaProofPath, JSON.stringify(servaProof, null, 2) + '\n', 'utf8');
+      console.log(
+        'prove-live: minted LIVE-SERVA (work item ' + String(chainResult.workItemId) + ')',
+      );
+    }
+  }
 }
 
 console.log(

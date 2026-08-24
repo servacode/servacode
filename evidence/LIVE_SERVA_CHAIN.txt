@@ -5,20 +5,19 @@
 
 [1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/SEVACODE[39m
 
-[90mstdout[2m | tests/live/servachain.live.test.ts[2m > [22m[2mServa 1.0 — an owner request becomes an accepted commit[2m > [22m[2mroutes a real request and builds what it asked for, or refuses honestly
-[22m[39mowner request: HALTED — work item SC-WI-000001
+[90mstdout[2m | tests/live/servachain.live.test.ts[2m > [22m[2mServa 1.0 — one owner request, across the governed join[2m > [22m[2mreaches an accepted commit, or stops for the owner
+[22m[39mowner request: HALTED — work item SC-WI-01M0T0J2JT001WVBXFDP9
 SERVA CODE — the request halted at HALTED
   Planning did not complete: ESCALATED
 
 [90mstdout[2m | tests/live/servachain.live.test.ts
-[22m[39mlive fixtures preserved at:
-  C:\Users\adzor\AppData\Local\Temp\serva-test-AtGOes
+[22m[39mpreserved: D:\SEVACODE\out\live-join-fixture
 
- [32m✓[39m tests/live/servachain.live.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 330623[2mms[22m[39m
-   [33m[2m✓[22m[39m Serva 1.0 — an owner request becomes an accepted commit[2m > [22mroutes a real request and builds what it asked for, or refuses honestly [33m292682[2mms[22m[39m
+ [32m✓[39m tests/live/servachain.live.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 312412[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva 1.0 — one owner request, across the governed join[2m > [22mreaches an accepted commit, or stops for the owner [33m275500[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
 [2m      Tests [22m [1m[32m1 passed[39m[22m[90m (1)[39m
-[2m   Start at [22m 14:30:57
-[2m   Duration [22m 331.67s[2m (transform 507ms, setup 0ms, collect 819ms, tests 330.62s, environment 0ms, prepare 74ms)[22m
+[2m   Start at [22m 16:49:22
+[2m   Duration [22m 313.59s[2m (transform 533ms, setup 0ms, collect 858ms, tests 312.41s, environment 0ms, prepare 107ms)[22m
 
