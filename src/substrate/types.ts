@@ -1,3 +1,5 @@
+import { GuestReach } from './transport.js';
+import type { TransportAttempt } from './transport.js';
 import { EnforcementClass } from '../vocab/index.js';
 import type { ExecutionBoundary } from './boundary.js';
 
@@ -91,6 +93,52 @@ export interface SubstrateProbe {
 }
 
 /** One adversarial test and what it proved. */
+/**
+ * WHY A TEST DID NOT RUN.
+ *
+ * SPEC: Phase 6 qualification transport invariant §2.
+ *
+ * `NOT_RUN` used to be one thing, and it hid the distinction that matters most. A probe
+ * blocked because the sandbox launcher is genuinely absent is a fact about this machine; a
+ * probe that never reached the guest is a fact about nothing at all, and the second was being
+ * folded into the first and then counted as a failure.
+ */
+export const NotRunReason = {
+  /** The guest was never reached. Nothing was measured and nothing may be concluded. */
+  TRANSPORT_FAILURE: 'TRANSPORT_FAILURE',
+  /** The guest was reached and refused to run it — a measured fact about this machine. */
+  SUBSTRATE_REFUSED: 'SUBSTRATE_REFUSED',
+  /** A prerequisite of the test itself was not met. */
+  PREREQUISITE_MISSING: 'PREREQUISITE_MISSING',
+} as const;
+export type NotRunReason = (typeof NotRunReason)[keyof typeof NotRunReason];
+
+/**
+ * WAS THIS MEASUREMENT ATTEMPT COMPLETED?
+ *
+ * Deliberately separate from the RESULT of the measurement. "The boundary is weak" and "the
+ * boundary could not be examined" are different sentences, and overloading NONE to carry both
+ * is what let a WSL outage read as a containment finding.
+ */
+export const QualificationAttempt = {
+  /** Every blocking probe reached the guest and produced a result. */
+  MEASURED: 'MEASURED',
+  /** At least one blocking probe never reached the guest. Nothing may be concluded. */
+  NOT_MEASURED: 'NOT_MEASURED',
+  /** Probes ran but disagreed or could not be completed for a non-transport reason. */
+  INCONCLUSIVE: 'INCONCLUSIVE',
+} as const;
+export type QualificationAttempt = (typeof QualificationAttempt)[keyof typeof QualificationAttempt];
+
+/** CAN COMMANDS REACH THE EXECUTION ENVIRONMENT RIGHT NOW? */
+export const ExecutionAvailability = {
+  AVAILABLE: 'AVAILABLE',
+  UNREACHABLE: 'UNREACHABLE',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+export type ExecutionAvailability =
+  (typeof ExecutionAvailability)[keyof typeof ExecutionAvailability];
+
 export interface QualificationResult {
   readonly id: string;
   readonly title: string;
@@ -101,6 +149,18 @@ export interface QualificationResult {
   /** Blocking tests gate HARD; a non-blocking one only informs. */
   readonly blocking: boolean;
   readonly at: string;
+  /**
+   * Whether the probe REACHED the execution environment.
+   *
+   * Recorded on every result, passing or not, because the question an owner and an auditor
+   * both need answered first is "did this actually run there?" — and an outcome without it
+   * is a claim rather than evidence.
+   */
+  readonly reachedGuest: GuestReach;
+  /** Present only for NOT_RUN, and the reason a caller routes on. */
+  readonly notRunReason?: NotRunReason;
+  /** Every transport attempt behind this result, kept whether it worked or not. */
+  readonly transportAttempts?: readonly TransportAttempt[];
 }
 
 export interface SubstrateCapabilities {
@@ -118,6 +178,16 @@ export interface SubstrateQualification {
   readonly capabilities: SubstrateCapabilities;
   readonly tests: readonly QualificationResult[];
   readonly enforcementClass: EnforcementClass;
+  /**
+   * Whether this attempt measured anything at all.
+   *
+   * `enforcementClass` is only a statement ABOUT THIS MACHINE when this is MEASURED. When it
+   * is NOT_MEASURED the class is NONE for authority purposes and means "nothing was proved",
+   * which is why no owner-facing surface may print the class without this beside it.
+   */
+  readonly attempt: QualificationAttempt;
+  /** Whether the execution environment could be reached during this attempt. */
+  readonly availability: ExecutionAvailability;
   /** Present whenever the class is not HARD. Names the first blocking reason. */
   readonly blockedBy?: string;
   readonly qualifiedAt: string;
@@ -133,6 +203,17 @@ export interface SubstrateQualification {
    * caller finds that out before running a Producer on the strength of it.
    */
   readonly fingerprint: string;
+  /**
+   * Whether every component of the fingerprint was actually measured.
+   *
+   * A digest built partly from `UNKNOWN` still hashes to something, and that something
+   * changes the moment the missing probe starts answering — which reads as "the machine
+   * changed" to anything comparing digests. When this is false the fingerprint identifies
+   * nothing and comparisons involving it are UNKNOWN.
+   */
+  readonly fingerprintComplete?: boolean;
+  /** Which components could not be measured. Named, so a reader can see what is missing. */
+  readonly fingerprintUnmeasured?: readonly string[];
   /**
    * WHICH boundary this qualification measured.
    *
@@ -190,6 +271,16 @@ export interface ExecuteResult {
   /** True when the substrate itself refused, as opposed to the command failing. */
   readonly refusedBySubstrate: boolean;
   readonly refusalReason?: string;
+  /**
+   * Whether the command reached the execution environment.
+   *
+   * Travels with every result so a caller never has to infer it from an exit code. An exit
+   * code from a command that never started is not a fact about containment, and treating it
+   * as one is what made engineering authority nondeterministic on a Windows host.
+   */
+  readonly reach: GuestReach;
+  /** Every transport attempt behind this result, kept whether it worked or not. */
+  readonly transportAttempts?: readonly TransportAttempt[];
 }
 
 export interface ExecutionSubstrate {
@@ -210,6 +301,44 @@ export interface ExecutionSubstrate {
  * Every caller that is about to grant write or execute capability asks this first.
  */
 export function engineeringAuthorityRefusal(q: SubstrateQualification): string | undefined {
+  /*
+   * NOT MEASURED IS NOT A CLASS, AND IT GRANTS NOTHING.
+   *
+   * SPEC: Phase 6 qualification transport invariant §1, §5.
+   *
+   * Checked before the class, and phrased as what it is. An attempt that never reached the
+   * execution environment says nothing about this machine — so authority is refused, but the
+   * refusal must not read as a containment finding. An owner told "your substrate is NONE"
+   * goes looking for a broken sandbox; an owner told "the guest could not be reached" goes
+   * and looks at WSL, which is where the problem actually is.
+   */
+  if (q.attempt !== QualificationAttempt.MEASURED) {
+    return (
+      'This machine was not measured (' +
+      q.attempt +
+      '), so no engineering authority can rest on it. ' +
+      (q.blockedBy ?? 'No qualifying evidence was produced.')
+    );
+  }
+
+  /*
+   * MEASURED HARD IS STILL NOT ENOUGH IF THE PATH IS GONE.
+   *
+   * A qualification is a statement about a boundary that existed when it was measured.
+   * Producer dispatch also needs that boundary to be reachable NOW, and preserving a HARD
+   * measurement across an outage — which §4 requires — would otherwise quietly authorise a
+   * Producer against a guest nobody can currently talk to.
+   */
+  if (q.availability === ExecutionAvailability.UNREACHABLE) {
+    return (
+      'The execution environment is currently unreachable, so a Producer cannot be dispatched ' +
+      'even though this machine measured ' +
+      q.enforcementClass +
+      '. ' +
+      (q.blockedBy ?? '')
+    ).trim();
+  }
+
   if (q.enforcementClass !== EnforcementClass.HARD) {
     return (
       'Execution substrate is ' +
@@ -234,21 +363,60 @@ export function engineeringAuthorityRefusal(q: SubstrateQualification): string |
 /**
  * Derive the class from the tests, rather than letting an implementation assert one.
  *
- * A substrate cannot talk its way to HARD: every blocking test must have PASSED, and a
- * test that could not be run counts against it exactly as a failure does. "We could not
- * check whether it escapes" and "it escapes" are the same fact for this decision.
+ * A substrate cannot talk its way to HARD: every blocking test must have PASSED, and a test
+ * that could not be run never counts towards it.
+ *
+ * For AUTHORITY, "we could not check whether it escapes" and "it escapes" are the same fact:
+ * neither grants anything. For REPORTING they are not remotely the same, and conflating them
+ * is what let an intermittent WSL transport print `Q-A FAILED: the permitted write was
+ * REFUSED` about a command that never ran. That is why the return carries `attempt` beside
+ * the class: the class answers what may be granted, and the attempt answers whether anything
+ * was learned.
  */
 export function deriveEnforcementClass(
   tests: readonly QualificationResult[],
   capabilities: SubstrateCapabilities,
-): { enforcementClass: EnforcementClass; blockedBy?: string } {
+): {
+  enforcementClass: EnforcementClass;
+  attempt: QualificationAttempt;
+  availability: ExecutionAvailability;
+  blockedBy?: string;
+} {
   const blocking = tests.filter((t) => t.blocking);
   if (blocking.length === 0) {
     return {
       enforcementClass: EnforcementClass.NONE,
+      attempt: QualificationAttempt.NOT_MEASURED,
+      availability: ExecutionAvailability.UNKNOWN,
       blockedBy: 'No blocking qualification test was run, so nothing was proved.',
     };
   }
+
+  /*
+   * TRANSPORT FIRST, AND NOTHING ELSE MATTERS UNTIL IT PASSES.
+   *
+   * A blocking probe that never reached the guest means this attempt measured nothing. The
+   * enforcement class returned alongside it is NONE — which is the only safe authority
+   * answer, since nothing may be granted on the strength of an absent measurement — but the
+   * ATTEMPT says NOT_MEASURED, and every caller that reports to a person must read that
+   * rather than the class. A machine whose WSL was busy is not a machine without a boundary.
+   */
+  const unreached = blocking.filter(
+    (t) => t.outcome === 'NOT_RUN' && t.notRunReason === NotRunReason.TRANSPORT_FAILURE,
+  );
+  if (unreached.length > 0) {
+    const first = unreached[0]!;
+    return {
+      enforcementClass: EnforcementClass.NONE,
+      attempt: QualificationAttempt.NOT_MEASURED,
+      availability: ExecutionAvailability.UNREACHABLE,
+      blockedBy:
+        first.id +
+        ' never reached the execution environment, so this machine was not measured: ' +
+        first.detail,
+    };
+  }
+
   const notPassed = blocking.filter((t) => t.outcome !== 'PASSED');
   if (notPassed.length > 0) {
     const first = notPassed[0]!;
@@ -257,6 +425,12 @@ export function deriveEnforcementClass(
         capabilities.filesystemEnforcement === EnforcementState.ENFORCED
           ? EnforcementClass.SOFT
           : EnforcementClass.NONE,
+      /*
+       * Reached, and did not pass. That IS a measurement, and it is not retried: a genuine
+       * containment failure that gets re-run until it agrees with you is not a check.
+       */
+      attempt: QualificationAttempt.MEASURED,
+      availability: ExecutionAvailability.AVAILABLE,
       blockedBy: first.id + ' ' + first.outcome + ': ' + first.detail,
     };
   }
@@ -270,8 +444,14 @@ export function deriveEnforcementClass(
   if (weak !== undefined) {
     return {
       enforcementClass: EnforcementClass.SOFT,
+      attempt: QualificationAttempt.MEASURED,
+      availability: ExecutionAvailability.AVAILABLE,
       blockedBy: weak[0] + ' enforcement is ' + weak[1],
     };
   }
-  return { enforcementClass: EnforcementClass.HARD };
+  return {
+    enforcementClass: EnforcementClass.HARD,
+    attempt: QualificationAttempt.MEASURED,
+    availability: ExecutionAvailability.AVAILABLE,
+  };
 }

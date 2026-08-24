@@ -1,0 +1,86 @@
+SERVA CODE — QUALIFICATION TRANSPORT INVARIANT, LIVE EVIDENCE
+
+Machine: this Windows host, WSL2 Ubuntu 26.04, BEFORE any missing prerequisite is
+installed. No guest authentication or sandbox package was added to produce this.
+
+Command: serva engineering status, run 8 times in immediate succession on one project.
+
+BEFORE the fix, three consecutive runs of the same command on this unchanged machine
+reported HARD, then NONE, then NONE. Two of those carried a MEASURED containment
+finding - 'Q-A FAILED: the permitted write was REFUSED' - about a command that never
+ran. wsl.exe returns exit 4294967295 with no output when the transport fails, the host
+process starts, and spawnFailed is therefore false.
+
+Captured at 2026-08-24T08:01:08Z
+
+--- run 1 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+--- run 2 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:01:11.165Z (fingerprint UNKNOWN)
+--- run 3 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:01:22.250Z (fingerprint UNKNOWN)
+--- run 4 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:01:32.650Z (fingerprint UNKNOWN)
+--- run 5 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:01:42.743Z (fingerprint UNKNOWN)
+--- run 6 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:01:52.843Z (fingerprint UNKNOWN)
+--- run 7 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:02:03.344Z (fingerprint UNKNOWN)
+--- run 8 ---
+  Engineering Governance: ACTIVE
+  Recipe boundary:        HARD
+  Producer qualification: HARD
+  Measurement attempt:    MEASURED
+  Guest availability:     AVAILABLE
+  Producer authority:     AVAILABLE
+  Reason:                 Measured HARD on this machine, and the execution environment is reachable.
+  Last measured:          HARD at 2026-08-24T08:02:13.741Z (fingerprint UNKNOWN)

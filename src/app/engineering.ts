@@ -1,3 +1,4 @@
+import type { Store } from '../store/store.js';
 import { EnforcementClass } from '../vocab/index.js';
 import { selectExecutionSubstrate } from '../substrate/host.js';
 import {
@@ -69,6 +70,14 @@ export interface EngineeringLayer {
   readonly substrate: ExecutionSubstrate;
   /** Why this substrate was chosen for this machine. */
   readonly substrateBasis: string;
+  /**
+   * Where the last valid qualification is kept.
+   *
+   * Optional because `serva engineering status` is legitimately run outside a project, and a
+   * status command that threw there would be worse than one that reports "never measured".
+   * Absent means no measurement is preserved, which grants nothing.
+   */
+  readonly store?: Store;
   readonly git: GitService;
   readonly workspaces: EngineeringWorkspaceManager;
   readonly recipes: RecipeRegistry;
@@ -119,6 +128,7 @@ export async function buildEngineeringLayer(
   return {
     substrate,
     substrateBasis: basis,
+    store: rt.store,
     git,
     workspaces,
     recipes: opts.recipes ?? new RecipeRegistry(),
@@ -126,10 +136,47 @@ export async function buildEngineeringLayer(
   };
 }
 
+import {
+  FingerprintComparison,
+  ProducerAuthority,
+  lastValidQualification,
+  producerAuthority,
+  recordQualification,
+} from '../substrate/qualificationRecord.js';
+import { ExecutionAvailability, QualificationAttempt } from '../substrate/types.js';
+import type { QualificationRecord } from '../substrate/qualificationRecord.js';
+
 export interface EngineeringStatusView {
   readonly system: 'SERVA CODE';
   readonly governance: EngineeringGovernance;
-  readonly executionSubstrate: EnforcementClass;
+  /**
+   * The boundary that contains a RECIPE, as measured this attempt.
+   *
+   * SPEC: Phase 6 qualification transport invariant §7.
+   *
+   * Renamed from `executionSubstrate`, which was one string carrying four different facts —
+   * the recipe boundary, the Producer boundary, whether the guest could be reached, and
+   * whether a measurement happened at all. An owner reading `NONE` could not tell whether
+   * their sandbox was broken or their WSL was busy, and on this machine it was usually the
+   * second. Each of those facts now has its own field, and none of them is inferred from
+   * another.
+   *
+   * Meaningful only when `qualificationAttempt` is MEASURED.
+   */
+  readonly recipeBoundary: EnforcementClass;
+  /** What the last COMPLETED measurement of this machine found, whatever this attempt did. */
+  readonly producerQualification: EnforcementClass | 'NOT_MEASURED';
+  /** Whether this attempt measured anything. */
+  readonly qualificationAttempt: QualificationAttempt;
+  /** Whether commands can reach the execution environment right now. */
+  readonly guestAvailability: ExecutionAvailability;
+  /** Whether a Producer may actually be dispatched, and why not when it may not. */
+  readonly producerAuthority: ProducerAuthority;
+  readonly producerAuthorityReason: string;
+  /** How the preserved measurement compares to this machine, or UNKNOWN when unmeasurable. */
+  readonly fingerprintComparison: FingerprintComparison;
+  /** The last attempt that actually measured something, preserved across outages. */
+  readonly lastValidQualification?: QualificationRecord;
   readonly substrateId: string;
   readonly hostPlatform: string;
   readonly guestPlatform?: string;
@@ -195,15 +242,44 @@ export async function engineeringStatus(
     enabled.push(id);
   }
 
+  /*
+   * The preserved measurement, and what it authorises RIGHT NOW.
+   *
+   * `store` is optional so a caller with no project — `serva engineering status` outside one
+   * — still gets an honest answer rather than an exception. Without it there is no preserved
+   * record, which reads as "this machine has never been measured": true from the point of
+   * view of a caller that cannot see the record, and it grants nothing.
+   */
+  const preserved = layer.store === undefined ? undefined : lastValidQualification(layer.store);
+  if (layer.store !== undefined) recordQualification(layer.store, qualification);
+  const authority = producerAuthority(preserved, qualification);
+
   const view: EngineeringStatusView = {
     system: 'SERVA CODE',
     governance:
       refusal === undefined
         ? EngineeringGovernance.ACTIVE
-        : qualification.enforcementClass === EnforcementClass.SOFT
-          ? EngineeringGovernance.DEGRADED
-          : EngineeringGovernance.BLOCKED,
-    executionSubstrate: qualification.enforcementClass,
+        : qualification.attempt !== QualificationAttempt.MEASURED
+          ? /*
+             * Not measured is not DEGRADED and not BLOCKED-by-boundary. It is the absence of
+             * a measurement, and the governance state must not imply Serva learned something
+             * about containment that it did not.
+             */
+            EngineeringGovernance.BLOCKED
+          : qualification.enforcementClass === EnforcementClass.SOFT
+            ? EngineeringGovernance.DEGRADED
+            : EngineeringGovernance.BLOCKED,
+    recipeBoundary: qualification.enforcementClass,
+    producerQualification:
+      qualification.attempt === QualificationAttempt.MEASURED
+        ? qualification.enforcementClass
+        : (preserved?.enforcementClass ?? 'NOT_MEASURED'),
+    qualificationAttempt: qualification.attempt,
+    guestAvailability: qualification.availability,
+    producerAuthority: authority.authority,
+    producerAuthorityReason: authority.reason,
+    fingerprintComparison: authority.fingerprint,
+    ...(preserved === undefined ? {} : { lastValidQualification: preserved }),
     substrateId: qualification.probe.substrateId,
     hostPlatform: qualification.probe.hostPlatform,
     ...(qualification.probe.guestPlatform === undefined

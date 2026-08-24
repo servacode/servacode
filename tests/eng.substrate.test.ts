@@ -9,6 +9,8 @@ import {
   type QualificationResult,
   type SubstrateCapabilities,
   type SubstrateQualification,
+  ExecutionAvailability,
+  QualificationAttempt,
 } from '../src/substrate/types.js';
 import { BLOCKING_CASE_IDS, QUALIFICATION_CASES } from '../src/substrate/qualification.js';
 import { compareVersions, selectExecutionSubstrate } from '../src/substrate/host.js';
@@ -34,6 +36,7 @@ import {
   type ExecTransport,
   type TransportCommand,
   type TransportResult,
+  GuestReach,
 } from '../src/substrate/transport.js';
 import {
   SimulatedExecutionSubstrate,
@@ -84,6 +87,8 @@ const passed = (id: string): QualificationResult => ({
   detail: 'ok',
   blocking: true,
   at: 'T',
+  /* A PASS from a probe that never reached the guest would be a contradiction. */
+  reachedGuest: GuestReach.REACHED,
 });
 
 /* ============================================= the class is derived, not declared */
@@ -171,6 +176,14 @@ describe('engineering authority requires HARD', () => {
       capabilities: ENFORCED,
       tests: BLOCKING_CASE_IDS.map(passed),
       enforcementClass: EnforcementClass.HARD,
+      /*
+       * A measured attempt against a reachable environment, so these cases are about the
+       * CLASS rather than about transport. The unmeasured and unreachable paths are covered
+       * separately, and folding them in here would let a fixture that forgot to say pass by
+       * accident.
+       */
+      attempt: QualificationAttempt.MEASURED,
+      availability: ExecutionAvailability.AVAILABLE,
       qualifiedAt: 'T',
       engineVersion: '1',
       ...over,
@@ -282,7 +295,9 @@ class StubTransport implements ExecTransport {
     }
 
     const hit = this.answers[[exe, ...args].join(' ')];
-    if (hit === undefined) return { ...blank(1), spawnFailed: true };
+    if (hit === undefined) {
+      return { ...blank(1), spawnFailed: true, reach: GuestReach.NOT_REACHED };
+    }
     return blank(hit.code, hit.stdout ?? '');
   }
 }
@@ -295,6 +310,14 @@ function blank(code: number | null, stdout = ''): TransportResult {
     timedOut: false,
     truncated: { stdout: false, stderr: false },
     spawnFailed: false,
+    /*
+     * This fixture stands in for a transport that DID run the command; every case here is
+     * about what the command then did. A fixture claiming REACHED is therefore honest, and a
+     * fixture that left it UNKNOWN would make every test below assert against a state the
+     * real transport treats as unmeasured.
+     */
+    reach: GuestReach.REACHED,
+    attempts: [],
   };
 }
 

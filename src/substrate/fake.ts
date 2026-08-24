@@ -1,3 +1,4 @@
+import { GuestReach } from './transport.js';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -128,6 +129,7 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
           outcome: 'FAILED' as const,
           detail: 'SIMULATED: forced failure for this fixture. Nothing was contained.',
           blocking: c.blocking,
+          reachedGuest: GuestReach.REACHED,
           at,
         };
       }
@@ -139,6 +141,7 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
           outcome: 'NOT_RUN' as const,
           detail: 'SIMULATED: no boundary exists to test.',
           blocking: c.blocking,
+          reachedGuest: GuestReach.REACHED,
           at,
         };
       }
@@ -154,6 +157,7 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
           detail:
             "A harness-level boundary governs the model's own tool calls and cannot constrain this.",
           blocking: c.blocking,
+          reachedGuest: GuestReach.REACHED,
           at,
         };
       }
@@ -167,6 +171,7 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
           fixtureDir +
           '). No process was contained and nothing was measured.',
         blocking: c.blocking,
+        reachedGuest: GuestReach.REACHED,
         at,
       };
     });
@@ -223,6 +228,8 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
         stderr: '',
         timedOut: false,
         truncated: { stdout: false, stderr: false },
+        /* Refused here, so nothing was sent anywhere. */
+        reach: GuestReach.NOT_REACHED,
         startedAt,
         endedAt: this.opts.clock.now(),
         durationMs: 0,
@@ -352,6 +359,7 @@ async function runChild(
         stderr: stderr + '\n' + e.message,
         timedOut,
         truncated: { stdout: outTrunc, stderr: errTrunc },
+        reach: GuestReach.NOT_REACHED,
       });
     });
     child.on('close', (code) => {
@@ -364,6 +372,8 @@ async function runChild(
         stderr,
         timedOut,
         truncated: { stdout: outTrunc, stderr: errTrunc },
+        /* The fake runs locally: a process that started is a command that ran. */
+        reach: GuestReach.REACHED,
       });
     });
   });

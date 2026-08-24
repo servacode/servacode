@@ -2,7 +2,10 @@ import { EnforcementClass } from '../vocab/index.js';
 import { canonicalJson, digestOf } from '../core/hash.js';
 import {
   EnforcementState,
+  ExecutionAvailability,
   IsolationMethod,
+  NotRunReason,
+  QualificationAttempt,
   type ExecuteRequest,
   type ExecuteResult,
   type ExecutionSubstrate,
@@ -25,6 +28,7 @@ import {
   listWslDistributions,
   selectWslDistribution,
   type WslDistribution,
+  GuestReach,
 } from './transport.js';
 import type { Clock } from '../core/clock.js';
 
@@ -298,9 +302,22 @@ export class UnqualifiableSubstrate implements ExecutionSubstrate {
         outcome: 'NOT_RUN' as const,
         detail: 'Not attempted: ' + reason,
         blocking: c.blocking,
+        /*
+         * A native Windows host has no boundary to reach, and this is not a transport
+         * failure: it is a measured fact about the platform, and no retry could change it.
+         */
+        reachedGuest: GuestReach.NOT_REACHED,
+        notRunReason: NotRunReason.PREREQUISITE_MISSING,
         at,
       })),
       enforcementClass: EnforcementClass.NONE,
+      /*
+       * MEASURED, and the measurement is that a native Windows host has no boundary. This is
+       * a settled fact about the platform rather than a failed attempt to look — so it must
+       * never be reported as "could not measure", and no retry could change it.
+       */
+      attempt: QualificationAttempt.MEASURED,
+      availability: ExecutionAvailability.UNKNOWN,
       blockedBy: reason,
       qualifiedAt: at,
       engineVersion: this.opts.engineVersion,
@@ -329,6 +346,8 @@ export class UnqualifiableSubstrate implements ExecutionSubstrate {
       stderr: '',
       timedOut: false,
       truncated: { stdout: false, stderr: false },
+      /* Nothing is ever sent anywhere: this substrate refuses by construction. */
+      reach: GuestReach.NOT_REACHED,
       startedAt,
       endedAt: this.opts.clock.now(),
       durationMs: 0,

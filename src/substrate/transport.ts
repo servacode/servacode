@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
 
 /**
@@ -37,6 +38,42 @@ export interface TransportCommand {
   readonly maxOutputBytes: number;
 }
 
+/**
+ * DID THE COMMAND ACTUALLY RUN WHERE IT WAS SENT?
+ *
+ * SPEC: Phase 6 qualification transport invariant §1, §2.
+ *
+ * This is the distinction whose absence made engineering authority a coin flip. On this
+ * machine, `wsl.exe` intermittently returns exit 4294967295 with no output: the host process
+ * started, so `spawnFailed` is false, and the guest command never ran. Qualification read
+ * that as a MEASURED result — `Q-A FAILED: the permitted write was REFUSED` — and concluded
+ * the boundary was broken. Repeated runs of the same command on the same unchanged machine
+ * alternated HARD, SOFT and NONE.
+ *
+ * A transport failure is not a measurement, and the only way to tell them apart is to make
+ * the guest SAY it started. `REACHED` is never inferred from an exit code.
+ */
+export const GuestReach = {
+  /** The guest demonstrably began executing the command. Its exit code means something. */
+  REACHED: 'REACHED',
+  /** It demonstrably did not. Nothing about the guest was measured. */
+  NOT_REACHED: 'NOT_REACHED',
+  /** No proof was requested. A caller must not treat this as either of the above. */
+  UNKNOWN: 'UNKNOWN',
+} as const;
+export type GuestReach = (typeof GuestReach)[keyof typeof GuestReach];
+
+/** One attempt at reaching the guest, kept whether it worked or not. */
+export interface TransportAttempt {
+  readonly attempt: number;
+  readonly reach: GuestReach;
+  readonly exitCode: number | null;
+  readonly spawnFailed: boolean;
+  readonly timedOut: boolean;
+  /** Why this attempt is being retried, or why it is not. */
+  readonly detail: string;
+}
+
 export interface TransportResult {
   readonly exitCode: number | null;
   readonly stdout: string;
@@ -45,6 +82,21 @@ export interface TransportResult {
   readonly truncated: { stdout: boolean; stderr: boolean };
   /** The process could not be started at all, as opposed to running and failing. */
   readonly spawnFailed: boolean;
+  /**
+   * Whether the GUEST began executing the command.
+   *
+   * Separate from `exitCode` on purpose: an exit code is only evidence about a command that
+   * ran, and this is the field that says whether one did.
+   */
+  readonly reach: GuestReach;
+  /**
+   * Every attempt made, in order.
+   *
+   * Retries are kept rather than collapsed, because "succeeded on the third try" and
+   * "succeeded immediately" describe different machines and an owner debugging an unstable
+   * guest needs to see which one they have.
+   */
+  readonly attempts: readonly TransportAttempt[];
 }
 
 export interface ExecTransport {
@@ -131,6 +183,9 @@ function runProcess(
         timedOut,
         truncated: { stdout: outTrunc, stderr: errTrunc },
         spawnFailed: true,
+        /* Nothing was started, so nothing about the guest was observed. */
+        reach: GuestReach.NOT_REACHED,
+        attempts: [],
       });
     });
     child.on('close', (code) => {
@@ -144,6 +199,13 @@ function runProcess(
         timedOut,
         truncated: { stdout: outTrunc, stderr: errTrunc },
         spawnFailed: false,
+        /*
+         * `runProcess` starts a HOST process and knows nothing about a guest. Callers that
+         * need the distinction ask for it explicitly; a default of REACHED here would be the
+         * original defect written down as a constant.
+         */
+        reach: GuestReach.UNKNOWN,
+        attempts: [],
       });
     });
   });
@@ -166,12 +228,34 @@ export class LocalPosixTransport implements ExecTransport {
   }
 
   async run(command: TransportCommand): Promise<TransportResult> {
-    return runProcess(command.executable, command.args, {
+    const raw = await runProcess(command.executable, command.args, {
       cwd: command.cwd,
       env: command.env,
       timeoutMs: command.timeoutMs,
       maxOutputBytes: command.maxOutputBytes,
     });
+    /*
+     * There is no guest here: the execution environment IS this machine, so a process that
+     * started is a command that ran. No sentinel is needed and none is added — the marker
+     * exists to cross a boundary, and inventing one to cross nothing would only make a local
+     * result look like it had been proved by something it had not.
+     */
+    return {
+      ...raw,
+      reach: raw.spawnFailed ? GuestReach.NOT_REACHED : GuestReach.REACHED,
+      attempts: [
+        {
+          attempt: 1,
+          reach: raw.spawnFailed ? GuestReach.NOT_REACHED : GuestReach.REACHED,
+          exitCode: raw.exitCode,
+          spawnFailed: raw.spawnFailed,
+          timedOut: raw.timedOut,
+          detail: raw.spawnFailed
+            ? 'the process could not be started on this machine'
+            : 'ran on this machine',
+        },
+      ],
+    };
   }
 
   async fingerprint(): Promise<Record<string, string>> {
@@ -335,28 +419,98 @@ export class WslTransport implements ExecTransport {
     return out;
   }
 
+  /**
+   * Run in the guest, and PROVE the guest ran it.
+   *
+   * SPEC: Phase 6 qualification transport invariant §2, §3.
+   *
+   * The guest emits a per-call nonce on stderr before it execs anything. Finding that nonce
+   * is the only evidence accepted that the command started; its absence means the guest was
+   * never reached, whatever exit code Windows reported. That distinction is the whole point:
+   * `wsl.exe` on this machine intermittently exits 4294967295 with no output, and
+   * qualification was reading that as a measured containment failure.
+   *
+   * The script is a FIXED string and every variable part travels as a separate argv entry.
+   * `sh -c 'script' name a b c` binds `$1`, `$2`, `$3` without re-parsing them, so this keeps
+   * the property `--exec` was chosen for — nothing an argument contains can become syntax.
+   *
+   * Retries cover ONLY unreached attempts. A command that reached the guest and failed is a
+   * measurement, and retrying a measurement until it agrees with you is how a boundary check
+   * becomes a formality.
+   */
   async run(command: TransportCommand): Promise<TransportResult> {
     await this.warm();
     const envArgs: string[] = ['-i'];
     for (const [k, v] of Object.entries(command.env)) envArgs.push(k + '=' + v);
 
-    return runProcess(
-      'wsl.exe',
-      [
-        '-d',
-        this.distro,
-        '--cd',
-        command.cwd,
-        // `--exec`, never `--`: see the class comment. `--` would re-parse this in a
-        // shell and turn a JSON argument into syntax.
-        '--exec',
-        'env',
-        ...envArgs,
-        command.executable,
-        ...command.args,
-      ],
-      { timeoutMs: command.timeoutMs, maxOutputBytes: command.maxOutputBytes },
-    );
+    const attempts: TransportAttempt[] = [];
+    let last: TransportResult | undefined;
+
+    for (let attempt = 1; attempt <= TRANSPORT_ATTEMPTS; attempt += 1) {
+      const nonce = 'serva-reach-' + randomBytes(12).toString('hex');
+      const raw = await runProcess(
+        'wsl.exe',
+        [
+          '-d',
+          this.distro,
+          '--cd',
+          command.cwd,
+          '--exec',
+          '/bin/sh',
+          '-c',
+          GUEST_REACH_SCRIPT,
+          'serva',
+          nonce,
+          'env',
+          ...envArgs,
+          command.executable,
+          ...command.args,
+        ],
+        { timeoutMs: command.timeoutMs, maxOutputBytes: command.maxOutputBytes },
+      );
+
+      const reached = raw.stderr.includes(nonce);
+      /* The marker is Serva's, not the command's, so it never reaches a caller. */
+      const stderr = raw.stderr
+        .split(/\r?\n/)
+        .filter((line) => line.trim() !== nonce)
+        .join('\n');
+
+      last = {
+        ...raw,
+        stderr,
+        reach: reached ? GuestReach.REACHED : GuestReach.NOT_REACHED,
+        attempts: [],
+      };
+
+      attempts.push({
+        attempt,
+        reach: last.reach,
+        exitCode: raw.exitCode,
+        spawnFailed: raw.spawnFailed,
+        timedOut: raw.timedOut,
+        detail: reached
+          ? 'the guest started the command'
+          : 'the guest never started the command' +
+            (raw.spawnFailed ? '; wsl.exe could not be spawned' : '') +
+            (raw.timedOut ? '; timed out' : '') +
+            '; wsl.exe exit ' +
+            String(raw.exitCode),
+      });
+
+      if (reached) break;
+
+      /*
+       * A deterministic, bounded back-off. Long enough for a distribution that is still
+       * settling, short enough that an owner is not left watching a prompt — and fixed
+       * rather than random so two runs of the same command take the same shape.
+       */
+      if (attempt < TRANSPORT_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, TRANSPORT_BACKOFF_MS[attempt - 1] ?? 1_000));
+      }
+    }
+
+    return { ...(last as TransportResult), attempts };
   }
 
   /** One simple command per fact; see WSL_REQUIRED_BINARIES for why never a script. */
@@ -395,6 +549,27 @@ export async function listWslDistributions(): Promise<WslDistribution[]> {
 
 /** A program name safe to name in a resolver. Matches the recipe schema's rule. */
 const SAFE_BINARY = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/;
+
+/**
+ * How many times a transport failure is retried before Serva stops guessing.
+ *
+ * Three, and no configuration knob. A number an owner could raise would eventually be raised
+ * until an unreachable guest looked reachable, and the honest answer after three failures is
+ * NOT_MEASURED rather than a fourth attempt.
+ */
+export const TRANSPORT_ATTEMPTS = 3;
+
+/** Fixed, so two runs of the same command take the same shape. */
+export const TRANSPORT_BACKOFF_MS: readonly number[] = Object.freeze([250, 1_000]);
+
+/**
+ * The guest-side preamble.
+ *
+ * `$1` is the nonce and `$@` after the shift is the real command. Nothing is interpolated
+ * into this string, ever: the moment a caller's value is concatenated here, the argument
+ * safety that `--exec` was chosen for is gone.
+ */
+export const GUEST_REACH_SCRIPT = 'printf %s\\n "$1" >&2; shift; exec "$@"';
 
 export const GUEST_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 

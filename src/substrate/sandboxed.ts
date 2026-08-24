@@ -1,10 +1,15 @@
+import { GuestReach } from './transport.js';
+import type { TransportAttempt } from './transport.js';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { canonicalJson, digestOf } from '../core/hash.js';
 import { EnforcementClass } from '../vocab/index.js';
 import {
   EnforcementState,
+  ExecutionAvailability,
   IsolationMethod,
+  NotRunReason,
+  QualificationAttempt,
   deriveEnforcementClass,
   type ExecuteRequest,
   type ExecuteResult,
@@ -494,6 +499,12 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       durationMs: Date.now() - began,
       refusedBySubstrate: true,
       refusalReason: reason,
+      /*
+       * Serva refused before anything left this machine. Nothing reached the guest, and the
+       * reason is Serva's own policy rather than a transport failure — so this must not be
+       * retried and must not be reported as "could not measure".
+       */
+      reach: GuestReach.NOT_REACHED,
     });
 
     const detection = await this.opts.launcher.detect(this.opts.transport);
@@ -579,6 +590,14 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       maxOutputBytes: request.maxOutputBytes,
     };
 
+    /*
+     * ONE logical invocation, whatever the transport does internally.
+     *
+     * `WslTransport.run` retries an attempt that never reached the guest, and that retry is
+     * deliberately invisible here: Q-K counts invocations to prove Serva does not re-run a
+     * REFUSED command outside its boundary, and a transport reconnecting before the command
+     * ever ran is a different thing entirely. The distinction is exactly `reach`.
+     */
     this.transportCalls += 1;
     const r = await t.run(this.opts.launcher.wrap(command, spec));
 
@@ -598,6 +617,8 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       endedAt: this.opts.clock.now(),
       durationMs: Date.now() - began,
       refusedBySubstrate: false,
+      reach: r.reach,
+      transportAttempts: r.attempts,
     };
   }
 
@@ -606,7 +627,8 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
   async qualify(fixtureDir: string): Promise<SubstrateQualification> {
     const probe = await this.probe();
     const at = this.opts.clock.now();
-    const fingerprint = await this.fingerprint(probe);
+    const identity = await this.fingerprintOf(probe);
+    const fingerprint = identity.digest;
     const missing = probe.prerequisites.filter((p) => !p.satisfied);
 
     if (missing.length > 0) {
@@ -624,19 +646,39 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
           detail: 'Not attempted: ' + reason,
           blocking: c.blocking,
           at,
+          reachedGuest: GuestReach.NOT_REACHED,
+          /*
+           * A MEASURED reason, not a transport one. Serva looked, and a prerequisite this
+           * machine needs is genuinely absent — so this is a fact about the machine and must
+           * not be retried or reported as "could not measure".
+           */
+          notRunReason: NotRunReason.PREREQUISITE_MISSING,
         })),
         enforcementClass: EnforcementClass.NONE,
+        attempt: QualificationAttempt.MEASURED,
+        availability: ExecutionAvailability.UNKNOWN,
         blockedBy: reason,
         qualifiedAt: at,
         engineVersion: this.opts.engineVersion,
         fingerprint,
+        fingerprintComplete: identity.complete,
+        fingerprintUnmeasured: identity.unmeasured,
         boundary: this.boundaryOf(probe),
       };
     }
 
     const layout = this.materialiseFixture(fixtureDir);
     const results = new Map<string, QualificationResult>();
-    const record = (id: string, outcome: QualificationResult['outcome'], detail: string): void => {
+    const record = (
+      id: string,
+      outcome: QualificationResult['outcome'],
+      detail: string,
+      evidence: {
+        readonly reachedGuest?: GuestReach;
+        readonly notRunReason?: NotRunReason;
+        readonly transportAttempts?: readonly TransportAttempt[];
+      } = {},
+    ): void => {
       const c = QUALIFICATION_CASES.find((x) => x.id === id)!;
       results.set(id, {
         id,
@@ -646,6 +688,17 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
         detail,
         blocking: c.blocking,
         at: this.opts.clock.now(),
+        /*
+         * Defaults to UNKNOWN rather than REACHED. A caller that forgets to say gets the
+         * answer that grants nothing, which is the only safe direction for this field: an
+         * unproved REACHED is exactly the assumption that made a WSL outage look like a
+         * containment failure.
+         */
+        reachedGuest: evidence.reachedGuest ?? GuestReach.UNKNOWN,
+        ...(evidence.notRunReason === undefined ? {} : { notRunReason: evidence.notRunReason }),
+        ...(evidence.transportAttempts === undefined
+          ? {}
+          : { transportAttempts: evidence.transportAttempts }),
       });
     };
 
@@ -673,7 +726,44 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       if (result.refusedBySubstrate) {
         // A refusal is not a proof of containment for the negative cases: nothing ran,
         // so nothing was demonstrated.
-        record(program.id, 'NOT_RUN', 'Substrate refused to execute: ' + result.refusalReason);
+        record(program.id, 'NOT_RUN', 'Substrate refused to execute: ' + result.refusalReason, {
+          reachedGuest: GuestReach.NOT_REACHED,
+          notRunReason: NotRunReason.SUBSTRATE_REFUSED,
+          ...(result.transportAttempts === undefined
+            ? {}
+            : { transportAttempts: result.transportAttempts }),
+        });
+        continue;
+      }
+
+      /*
+       * THE COMMAND NEVER REACHED THE GUEST.
+       *
+       * This is the case that made qualification nondeterministic. `wsl.exe` returns exit
+       * 4294967295 with no output when the transport fails, and without `reach` the line
+       * below read that as `Q-A FAILED: the permitted write was REFUSED` — a measured
+       * containment finding, from a command that never ran. The same machine then reported
+       * HARD, SOFT and NONE on three consecutive runs.
+       *
+       * The transport has already retried; arriving here means it failed every time.
+       */
+      if (result.reach !== GuestReach.REACHED) {
+        record(
+          program.id,
+          'NOT_RUN',
+          'The command never reached the execution environment after ' +
+            String(result.transportAttempts?.length ?? 0) +
+            ' attempt(s), so nothing about this machine was measured: ' +
+            (result.transportAttempts?.[result.transportAttempts.length - 1]?.detail ??
+              'no attempt was recorded'),
+          {
+            reachedGuest: result.reach,
+            notRunReason: NotRunReason.TRANSPORT_FAILURE,
+            ...(result.transportAttempts === undefined
+              ? {}
+              : { transportAttempts: result.transportAttempts }),
+          },
+        );
         continue;
       }
 
@@ -709,6 +799,9 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
           detail: 'No program is defined for this case, so nothing was proved.',
           blocking: c.blocking,
           at,
+          reachedGuest: GuestReach.NOT_REACHED,
+          /* Serva's own gap. Retrying it would never help, so it is not a transport failure. */
+          notRunReason: NotRunReason.PREREQUISITE_MISSING,
         },
     );
 
@@ -722,6 +815,8 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       qualifiedAt: at,
       engineVersion: this.opts.engineVersion,
       fingerprint,
+      fingerprintComplete: identity.complete,
+      fingerprintUnmeasured: identity.unmeasured,
       boundary: this.boundaryOf(probe),
     };
   }
@@ -862,22 +957,56 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
    * exists, which is why `qualificationIsStale` compares this rather than a timestamp.
    */
   async fingerprint(probe?: SubstrateProbe): Promise<string> {
+    return (await this.fingerprintOf(probe)).digest;
+  }
+
+  /**
+   * The fingerprint, AND whether every part of it was actually measured.
+   *
+   * SPEC: Phase 6 qualification transport invariant §6.
+   *
+   * The live evidence caught this one run after the transport fix landed. Six consecutive
+   * qualifications agreed, and then two reported `fingerprint DIFFERS` on a machine nobody
+   * had touched — because `engineVersion` reads `UNKNOWN` when its probe does not answer and
+   * a real version when it does, and an UNKNOWN was going into the digest as though it were
+   * a measurement. The digest changed, and Serva told the owner their machine had changed.
+   *
+   * Which is the same defect as the transport one, one level down: a value nobody measured
+   * being treated as a value somebody measured. So the unmeasured parts are NAMED, and a
+   * comparison involving any of them is UNKNOWN rather than DIFFERS.
+   */
+  async fingerprintOf(
+    probe?: SubstrateProbe,
+  ): Promise<{ digest: string; complete: boolean; unmeasured: readonly string[] }> {
     const p = probe ?? (await this.probe());
-    return digestOf(
-      canonicalJson({
-        substrateId: this.id,
-        engineVersion: this.opts.engineVersion,
-        launcher: this.opts.launcher.id,
-        sandboxVersion: p.sandboxVersion ?? 'none',
-        transport: p.observations['transport'] ?? this.opts.transport.id,
-        kernel: p.observations['transport:kernel'] ?? 'unknown',
-        guestOs: p.observations['transport:guestOs'] ?? 'unknown',
-        boundaryId: this.opts.boundaryId,
-        purpose: this.opts.purpose,
-        engineLocation: this.engineLocation ?? 'none',
-        profileDigest: this.opts.profileDigest ?? 'none',
-      }),
+    const parts = {
+      substrateId: this.id,
+      engineVersion: this.opts.engineVersion,
+      launcher: this.opts.launcher.id,
+      sandboxVersion: p.sandboxVersion ?? 'none',
+      transport: p.observations['transport'] ?? this.opts.transport.id,
+      kernel: p.observations['transport:kernel'] ?? 'unknown',
+      guestOs: p.observations['transport:guestOs'] ?? 'unknown',
+      boundaryId: this.opts.boundaryId,
+      purpose: this.opts.purpose,
+      engineLocation: this.engineLocation ?? 'none',
+      profileDigest: this.opts.profileDigest ?? 'none',
+    };
+
+    /*
+     * Only the parts that describe the MACHINE, and only the sentinel values that mean "the
+     * probe did not answer". `'none'` is excluded deliberately: a substrate with no sandbox
+     * version genuinely has none, and that is a measurement.
+     */
+    const unmeasured = (['engineVersion', 'kernel', 'guestOs'] as const).filter((k) =>
+      /^unknown$/i.test(String(parts[k])),
     );
+
+    return {
+      digest: digestOf(canonicalJson(parts)),
+      complete: unmeasured.length === 0,
+      unmeasured,
+    };
   }
 
   async explain(): Promise<string> {

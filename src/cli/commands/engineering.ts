@@ -38,7 +38,28 @@ export async function cmdEngineering(args: ParsedArgs): Promise<number> {
 
       console.log('SERVA CODE');
       console.log('  Engineering Governance: ' + view.governance);
-      console.log('  Execution Substrate:    ' + view.executionSubstrate);
+      /*
+       * Four facts, four lines. One string called "Execution Substrate" used to carry all of
+       * them, so an owner reading NONE could not tell a broken sandbox from a busy WSL — and
+       * on a Windows host it was almost always the second.
+       */
+      console.log('  Recipe boundary:        ' + view.recipeBoundary);
+      console.log('  Producer qualification: ' + view.producerQualification);
+      console.log('  Measurement attempt:    ' + view.qualificationAttempt);
+      console.log('  Guest availability:     ' + view.guestAvailability);
+      console.log('  Producer authority:     ' + view.producerAuthority);
+      console.log('  Reason:                 ' + view.producerAuthorityReason);
+      if (view.lastValidQualification !== undefined) {
+        console.log(
+          '  Last measured:          ' +
+            view.lastValidQualification.enforcementClass +
+            ' at ' +
+            view.lastValidQualification.measuredAt +
+            ' (fingerprint ' +
+            view.fingerprintComparison +
+            ')',
+        );
+      }
       console.log('  Host:                   ' + view.hostPlatform);
       if (view.guestPlatform !== undefined)
         console.log('  Guest:                  ' + view.guestPlatform);

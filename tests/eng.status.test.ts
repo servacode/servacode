@@ -48,7 +48,7 @@ describe('the status leads with the authority state', () => {
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.ACTIVE);
-    expect(view.executionSubstrate).toBe(EnforcementClass.HARD);
+    expect(view.recipeBoundary).toBe(EnforcementClass.HARD);
     expect(view.blockedBy).toBeUndefined();
     /*
      * This is the assertion that caught a real defect: the check here used to be Phase
@@ -71,7 +71,7 @@ describe('the status leads with the authority state', () => {
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.DEGRADED);
-    expect(view.executionSubstrate).toBe(EnforcementClass.SOFT);
+    expect(view.recipeBoundary).toBe(EnforcementClass.SOFT);
     expect(view.blockedBy).toMatch(/requires HARD/);
     expect(view.enabledProducers).toEqual([]);
     // Every disabled Producer names the substrate, not the agent: the machine is what
@@ -85,7 +85,7 @@ describe('the status leads with the authority state', () => {
     rt.close();
 
     expect(view.governance).toBe(EngineeringGovernance.BLOCKED);
-    expect(view.executionSubstrate).toBe(EnforcementClass.NONE);
+    expect(view.recipeBoundary).toBe(EnforcementClass.NONE);
     expect(view.enabledProducers).toEqual([]);
   });
 

@@ -479,6 +479,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Machine Readiness',
     mandatory: true,
+    provenBy: ['tests/substrate.transport.test.ts', 'tests/eng.status.test.ts'],
   },
 
   /* ---------------------------------------------------------------- distribution */

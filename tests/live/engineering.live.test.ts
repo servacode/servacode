@@ -198,7 +198,7 @@ describe('PHASE 4 — live boundaries', () => {
     const { view } = await engineeringStatus(layer);
     rt.close();
     expect(view.simulated).toBe(false);
-    expect(view.executionSubstrate).toBe(recipeQualification?.enforcementClass);
+    expect(view.recipeBoundary).toBe(recipeQualification?.enforcementClass);
   }, 120_000);
 });
 
