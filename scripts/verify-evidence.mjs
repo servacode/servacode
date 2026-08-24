@@ -30,7 +30,7 @@ function git(args) {
 }
 
 const commit = git('rev-parse HEAD');
-const tree = git('rev-parse HEAD^{tree}');
+const tree = git('rev-parse "HEAD^{tree}"');
 if (commit === undefined || tree === undefined) {
   console.error('verify-evidence: no git identity, so nothing would bind this record to a tree.');
   process.exit(1);
