@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { EnforcementClass } from '../vocab/index.js';
 import { QualificationAttempt } from '../substrate/types.js';
 
+import { readAudit } from '../events/audit.js';
 import { listChangeSets, readChangeSet } from '../engineering/changeset.js';
 import { listReviews } from '../engineering/review.js';
 import { listEvidence } from '../engineering/execution.js';
@@ -53,6 +54,25 @@ function terminalRun(
   }
 }
 
+/**
+ * Outcomes that mean no work exists to accept.
+ *
+ * Named as a set rather than "anything but COMPLETED", because the interesting case sits
+ * between the two: a run can produce a real, checkable change AND misreport what it did.
+ */
+const PRODUCED_NOTHING: ReadonlySet<string> = new Set([
+  'FAILED',
+  'REFUSED',
+  'BLOCKED',
+  'INVALID_OUTPUT',
+  'SCOPE_VIOLATION',
+]);
+
+/** A trace record's payload, without asserting a shape the stream does not guarantee. */
+function payloadOf(entry: { readonly payload?: unknown }): Record<string, unknown> {
+  return (entry.payload ?? {}) as Record<string, unknown>;
+}
+
 export interface LiveRefusal {
   readonly check: string;
   readonly detail: string;
@@ -62,6 +82,14 @@ export interface LiveEngineeringChain {
   readonly workItemId: string;
   readonly producerRunId: string;
   readonly producerAgentId: string;
+  /**
+   * How the Producer's run ended.
+   *
+   * Carried so a reader cannot miss it. `EVIDENCE_VIOLATION` here means the agent
+   * misrepresented its own work and Serva caught it; the change was accepted on measured
+   * evidence and an independent review, not on the agent's account of itself.
+   */
+  readonly producerOutcome: string;
   readonly reviewerRunId: string;
   readonly reviewerAgentId: string;
   readonly changeSetId: string;
@@ -188,9 +216,24 @@ export function resolveLiveEngineering(
     const run = terminalRun(input.store, producerRunId);
     if (run === undefined || run.outcome === undefined) {
       refuse('PRODUCER_RUN', producerRunId + ' does not resolve to a run in this store');
-    } else if (run.outcome !== 'COMPLETED') {
+    } else if (PRODUCED_NOTHING.has(run.outcome)) {
       refuse('PRODUCER_RUN', producerRunId + ' ended ' + run.outcome + ', so it produced nothing');
     }
+    /*
+     * EVIDENCE_VIOLATION IS NOT A REASON TO REFUSE, AND IT IS ALWAYS REPORTED.
+     *
+     * The first real live run ended exactly this way: the Producer made a claim Serva's own
+     * verifier CONTRADICTED, the run was terminated `EVIDENCE_VIOLATION`, and the change was
+     * still accepted — because acceptance never rested on the Producer's word. Deterministic
+     * checks measured the code and an independent reviewer judged it.
+     *
+     * That is this product's central thesis working rather than a hole in it, so demanding
+     * COMPLETED here would refuse the strongest demonstration available: governance catching
+     * an agent misrepresenting its own work and proceeding on measured evidence instead.
+     *
+     * What must never happen is this passing SILENTLY, so the outcome travels on the chain and
+     * the report prints it.
+     */
     /*
      * The run's OWN actor, not the one the ChangeSet claims. A ChangeSet is written by Serva
      * from what it observed, but binding the two here is what stops a real run being pasted
@@ -270,18 +313,47 @@ export function resolveLiveEngineering(
 
   /* ------------------------------------------------------------ the accepted commit */
 
-  const acceptedCommit = input.hints?.acceptedCommit ?? changeSet.headCommit;
-  if (acceptedCommit !== changeSet.headCommit) {
-    /*
-     * A commit somebody typed in. The ChangeSet records what the Producer actually produced,
-     * so a different commit here is a hand-written claim about work that was never done.
-     */
+  /*
+   * THE ACCEPTANCE IS IN THE TRACE, NOT IN THE WORKTREE HEAD.
+   *
+   * An earlier draft required the accepted commit to EQUAL `changeSet.headCommit`, and the
+   * first real live run refused because of it. That draft was wrong: the ChangeSet head is
+   * what the Producer built in its worktree, and the accepted commit is the INTEGRATION
+   * commit Serva creates afterwards by staging exactly the verified change onto the branch.
+   * Two different commits, both legitimate, and only one of them is the acceptance.
+   *
+   * The binding that actually exists is the `CHANGE_ACCEPTED` audit entry, which Serva writes
+   * to T-TRACE — a stream no agent can write and no caller can forge — naming the ChangeSet,
+   * the commit, the gate result and the evidence together. So the commit is resolved FROM the
+   * trace rather than compared to a record, and a hand-written commit has nothing to appear in.
+   */
+  const accepted = readAudit(input.store).filter(
+    (e) => e.type === 'CHANGE_ACCEPTED' && payloadOf(e)['subject'] === changeSet.changeSetId,
+  );
+  const tracedCommit = accepted
+    .map((e) => String((payloadOf(e)['detail'] as Record<string, unknown>)?.['commit'] ?? ''))
+    .find((c) => c !== '');
+
+  if (tracedCommit === undefined) {
+    refuse(
+      'ACCEPTED_COMMIT',
+      'no CHANGE_ACCEPTED entry in the trace names ChangeSet ' +
+        changeSet.changeSetId +
+        ', so nothing was ever accepted',
+    );
+  }
+
+  const acceptedCommit = tracedCommit ?? '';
+  const claimed = input.hints?.acceptedCommit;
+  if (claimed !== undefined && tracedCommit !== undefined && claimed !== tracedCommit) {
+    /* A commit somebody typed in, next to the one Serva actually integrated. */
     refuse(
       'ACCEPTED_COMMIT',
       'the named commit ' +
-        acceptedCommit.slice(0, 12) +
-        ' is not the ChangeSet head ' +
-        changeSet.headCommit.slice(0, 12),
+        claimed.slice(0, 12) +
+        ' is not the one the trace records as accepted (' +
+        tracedCommit.slice(0, 12) +
+        ')',
     );
   }
   if (acceptedCommit === '' || !commitExists(input.repoRoot, acceptedCommit)) {
@@ -296,6 +368,11 @@ export function resolveLiveEngineering(
       workItemId: changeSet.workItemId,
       producerRunId: String(producerRunId),
       producerAgentId,
+      producerOutcome: String(
+        producerRunId === undefined
+          ? 'UNKNOWN'
+          : (terminalRun(input.store, producerRunId)?.outcome ?? 'UNKNOWN'),
+      ),
       reviewerRunId: String(review?.runRef),
       reviewerAgentId: String(review?.reviewerAgentId),
       changeSetId: changeSet.changeSetId,

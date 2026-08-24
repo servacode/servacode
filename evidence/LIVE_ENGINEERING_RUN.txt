@@ -1,0 +1,133 @@
+
+> serva-code@1.0.0 test:engineering-live
+> vitest run --config vitest.engineering.config.ts
+
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/SEVACODE[39m
+
+[90mstdout[2m | tests/live/engineering.live.test.ts[2m > [22m[2mPHASE 4 — live boundaries[2m > [22m[2mqualifies the RECIPE boundary from what this machine proved
+[22m[39m
+SERVA CODE — RECIPE BOUNDARY (deterministic build/test/lint)
+------------------------------------------------------------
+  chosen because Windows host delegating execution to WSL2 distribution "Ubuntu". Native Windows remains NON-HARD; the guest is the candidate.
+  boundary:      SC-BOUNDARY-RECIPE [wsl:Ubuntu → Ubuntu] bubblewrap bubblewrap 0.11.1 UNKNOWN
+  class:         HARD
+
+  prerequisites:
+    [ ok ] GUEST_NODE  node inside the execution environment
+    [ ok ] GUEST_GIT  git inside the execution environment
+    [ ok ] GUEST_BWRAP  bwrap inside the execution environment
+    [ ok ] SANDBOX_LAUNCHER  A working sandbox launcher (bubblewrap)
+    [ ok ] USER_NAMESPACES  Unprivileged user namespaces available to the launcher
+
+
+[90mstdout[2m | tests/live/engineering.live.test.ts[2m > [22m[2mPHASE 4 — live boundaries[2m > [22m[2mqualifies the PRODUCER boundary — engine, guest, auth, sandbox
+[22m[39m
+SERVA CODE — PRODUCER BOUNDARY (the engine session an agent runs in)
+--------------------------------------------------------------------
+  chosen because Windows host: the Producer runs inside WSL2 distribution "Ubuntu", because native Windows has no sandbox to contain it.
+  boundary:      SC-BOUNDARY-PRODUCER [wsl:Ubuntu → Ubuntu] claude-sandbox-runtime 1.0.0, engine /usr/bin/claude 2.1.231
+  fingerprint:   3b8d33c6d17d60cc…
+  guest engine:  /usr/bin/claude
+  engine version:2.1.231
+  authenticated: true
+  billing route: SUBSCRIPTION
+  sandbox:       claude-sandbox-runtime
+  class:         HARD
+  authority:     GRANTED
+
+  qualification cases:
+    [PASSED ] Q-A  Write inside the designated worktree
+    [PASSED ] Q-B  Write into the primary checkout
+    [PASSED ] Q-C  Write outside the permitted workspace
+    [PASSED ] Q-D  Read Serva internal data
+    [PASSED ] Q-E  Read another run's temporary files
+    [PASSED ] Q-F  Subprocess filesystem escape
+    [PASSED ] Q-G  Symlink escape
+    [PASSED ] Q-H  Parent traversal
+    [PASSED ] Q-I  Network denied by default
+    [PASSED ] Q-J  Host escape through guest interoperability
+    [PASSED ] Q-K  No unsandboxed retry
+
+
+bash: line 1: /mnt/c/Windows/System32/cmd.exe: cannot execute binary file: Exec format error
+[90mstdout[2m | tests/live/engineering.live.test.ts[2m > [22m[2mPHASE 4 — live acceptance[2m > [22m[2meither implements the work item or refuses, through the production path
+[22m[39m
+SERVA CODE — OS SANDBOX MEASUREMENT
+-----------------------------------
+  run:         SC-RUN-000001
+  policy:      d61db1d7f53930fc611f7f9e97095d971825194775319ded4dcf7fc68beb422a
+  boundary:    3b8d33c6d17d60ccff3e963218a2c265fe89acde5f2f83f1b4fb613fb18c9507
+  controls:    7/7 passed
+  containment: 15/16 contained
+    P1  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     write a file inside the worktree
+    P2  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     read a marker inside the worktree
+    P3  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     run the language runtime at all
+    P4  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     git works inside the worktree
+    P5  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     the runtime can use a temporary file
+    P6  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     enumerate the worktree itself
+    W1  SUCCEED  permission=ALLOWED    reached=true  SUCCEEDED          OK       CONTROL     write a new subtree inside the worktree
+    R1  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     read the primary checkout
+    R2  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     read the Serva store
+    R3  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     read another attempt's worktree
+    R4  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     read the home directory
+    R5  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     read a location outside everything
+    R6  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     read the store through a subprocess
+    R7  REFUSE   permission=ALLOWED    reached=true  SUCCEEDED          OK       SANDBOX     enumerate the workspaces root
+    R8  REFUSE   permission=ALLOWED    reached=true  SUCCEEDED          OK       SANDBOX     enumerate the primary checkout
+    R9  REFUSE   permission=ALLOWED    reached=true  SUCCEEDED          OK       SANDBOX     enumerate the home directory
+    W2  REFUSE   permission=ALLOWED    reached=true  SUCCEEDED          OK       SANDBOX     write into the primary checkout
+    W3  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     write outside everything
+    W4  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     write outside through a subprocess
+    W5  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 1)    OK       SANDBOX     write through a symlink pointing out
+    W6  REFUSE   permission=ALLOWED    reached=true  SUCCEEDED          OK       SANDBOX     write by traversing out of the worktree
+    N1  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 56)   OK       SANDBOX     reach the public internet
+    H1  REFUSE   permission=ALLOWED    reached=true  REFUSED(exit 127)  n/a      ENVIRONMENT execute a host binary
+  note: H1 (execute a host binary): HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT. measured OUTSIDE the sandbox in Ubuntu: EXIT=126 The refusal is a property of the environment, so it is recorded as environmental and is NOT counted as sandbox evidence — while the probe is still required to have been permitted and to have reached the boundary.
+  note: Probes R7, R8, R9, W2, W6 reported exit 0 while the host filesystem was unaffected: the sandbox presents a denied region as an empty ephemeral overlay rather than refusing the syscall. Containment holds, but a Producer running there would BELIEVE its write succeeded, so its self-reports about files outside the worktree are worth nothing.
+
+
+[90mstdout[2m | tests/live/engineering.live.test.ts[2m > [22m[2mPHASE 4 — live acceptance[2m > [22m[2meither implements the work item or refuses, through the production path
+[22m[39m
+SERVA CODE — PHASE 4 LIVE ACCEPTANCE: EXECUTED
+----------------------------------------------
+  boundary:    SC-BOUNDARY-PRODUCER [wsl:Ubuntu → Ubuntu] claude-sandbox-runtime 1.0.0, engine /usr/bin/claude 2.1.231
+  fingerprint: 3b8d33c6d17d60ccff3e963218a2c265fe89acde5f2f83f1b4fb613fb18c9507
+  outcome:     ACCEPTED
+
+  attempt 1 — workspace SC-WI-000900-a01
+    producer run: SC-RUN-000002
+    reviewer run: SC-RUN-000003
+    change set:   SC-CS-000001
+    gate:         PASS_WITH_QUALIFICATION
+      - The engine reported no effective sandbox policy, so Serva confirmed the profile it wrote and not the policy the engine applied.
+
+  measured evidence:
+    [PASS] SC-RTC-005  1 changed path(s), all within scope
+    [PASS] SC-RTC-015  No credential-shaped content matched the rule set across 1 scanned file(s). This means nothing matched these rules; it is not a security review.
+    [PASS] SC-RTC-012  SC-RECIPE-UNIT-TEST -> SUCCEEDED (exit 0): exited 0
+    [PASS] SC-RTC-005  1 changed path(s), all within scope
+    [PASS] SC-RTC-015  No credential-shaped content matched the rule set across 1 scanned file(s). This means nothing matched these rules; it is not a security review.
+    [PASS] SC-RTC-012  SC-RECIPE-UNIT-TEST -> SUCCEEDED (exit 0): exited 0
+
+  commit 5cffd4d184526abb17ee140e5a2c3b10486451fa on serva/SC-WI-000900/01
+
+
+[90mstdout[2m | tests/live/engineering.live.test.ts
+[22m[39mlive fixtures preserved at:
+  C:\Users\adzor\AppData\Local\Temp\serva-test-e6Bxie
+  C:\Users\adzor\AppData\Local\Temp\serva-test-ZzgYbW
+  C:\Users\adzor\AppData\Local\Temp\serva-test-hleKPN
+  C:\Users\adzor\AppData\Local\Temp\serva-test-gh9dc6
+
+ [32m✓[39m tests/live/engineering.live.test.ts [2m([22m[2m6 tests[22m[2m)[22m[33m 399213[2mms[22m[39m
+   [33m[2m✓[22m[39m PHASE 4 — live boundaries[2m > [22mqualifies the RECIPE boundary from what this machine proved [33m10195[2mms[22m[39m
+   [33m[2m✓[22m[39m PHASE 4 — live boundaries[2m > [22mqualifies the PRODUCER boundary — engine, guest, auth, sandbox [33m25080[2mms[22m[39m
+   [33m[2m✓[22m[39m PHASE 4 — live boundaries[2m > [22mthe owner-facing status agrees with the recipe qualification [33m10032[2mms[22m[39m
+   [33m[2m✓[22m[39m PHASE 4 — live acceptance[2m > [22meither implements the work item or refuses, through the production path [33m353782[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 12:36:59
+[2m   Duration [22m 400.30s[2m (transform 502ms, setup 0ms, collect 809ms, tests 399.21s, environment 0ms, prepare 89ms)[22m
+

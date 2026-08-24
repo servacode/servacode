@@ -45,6 +45,25 @@ import type { SubstrateQualification } from '../../src/substrate/types.js';
 const roots: string[] = [];
 const fixtures: string[] = [];
 afterAll(() => {
+  /*
+   * `SERVA_PRESERVE_LIVE` keeps the stores this suite wrote.
+   *
+   * SPEC: Phase 6 final acceptance sequence §2.
+   *
+   * A LIVE acceptance proof has to RESOLVE the Producer run, the Reviewer run, the ChangeSet
+   * and the accepted commit against the store and repository they actually happened in. A
+   * suite that deletes them on the way out leaves nothing to resolve, so the only evidence
+   * available afterwards would be this file's own console output — which is prose, and prose
+   * is exactly what the acceptance model refuses.
+   *
+   * Off by default, because these are disposable fixtures and leaving them behind on every
+   * run is how a disk fills up.
+   */
+  if (process.env['SERVA_PRESERVE_LIVE'] === '1') {
+    console.log('live fixtures preserved at:');
+    for (const r of roots.splice(0)) console.log('  ' + r);
+    return;
+  }
   for (const r of roots.splice(0)) cleanup(r);
   for (const f of fixtures.splice(0)) removeFixtureDir(f);
 });
@@ -536,6 +555,36 @@ describe('PHASE 4 — live acceptance', () => {
         ? []
         : ['', '  commit ' + result.commit + ' on ' + String(result.branch)]),
     ]);
+
+    /*
+     * The candidate ids, written where a proof generator can find them.
+     *
+     * HINTS, not authority. `resolveLiveEngineering` re-resolves every one of these against
+     * the store, the trace, Git and this machine before anything is minted — this file's job
+     * is only to say WHERE to look.
+     */
+    if (process.env['SERVA_PRESERVE_LIVE'] === '1') {
+      const accepted = result.attempts[result.attempts.length - 1];
+      const candidate = {
+        producedBy: 'tests/live/engineering.live.test.ts',
+        storeRoot: root,
+        repoRoot: repo,
+        outcome: result.outcome,
+        boundaryFingerprint: result.boundaryFingerprint ?? null,
+        hints: {
+          producerRunId: accepted?.producerRunId ?? null,
+          reviewerRunId: accepted?.reviewerRunId ?? null,
+          changeSetId: accepted?.changeSetId ?? null,
+          acceptedCommit: result.commit ?? null,
+        },
+      };
+      mkdirSync(join(process.cwd(), 'evidence', 'acceptance-run'), { recursive: true });
+      writeFileSync(
+        join(process.cwd(), 'evidence', 'acceptance-run', 'live-engineering.json'),
+        JSON.stringify(candidate, null, 2) + '\n',
+        'utf8',
+      );
+    }
 
     // Whatever the outcome, the runs were real and distinct, and the checkout is clean.
     for (const a of result.attempts) {
