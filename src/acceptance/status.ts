@@ -1,322 +1,248 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { coverageSummary } from '../coverage/index.js';
 import { SERVA_VERSION } from '../portability/version.js';
+import { ACCEPTANCE_LINES, REQUIREMENTS, requirementsFor } from './requirements.js';
+import { ProofStatus, resolveProof } from './proof.js';
+import type { RepositoryIdentity, ResolvedProof, RunResolver } from './proof.js';
+import type { Requirement } from './requirements.js';
 
 /**
  * SERVA CODE 1.0 — THE STATUS SERVA ISSUES ABOUT ITSELF.
  *
- * SPEC: §63, §59.
+ * SPEC: Phase 6 closure §1; §59, §63.
  *
- * The temptation this file exists to refuse is a constant: `READY FOR OWNER USE`. It would
- * be one line, it would look magnificent, and it would mean nothing — a product that
- * declares its own readiness has declared a hope.
+ * The previous version of this file read prose. `Independent reviewer: Jane Roe` in a
+ * markdown file produced a green Security Acceptance; `RESULT: ACCEPTED` in a text file
+ * produced a green Live Acceptance; three phrases in a walkthrough produced a green
+ * Portability. An independent audit found all three — and my own test suite had proved that
+ * a synthetic file passed. I wrote that test believing it strengthened something.
  *
- * So every line below is computed, and the summary line is a CONJUNCTION. If one part is
- * not proven, `READY` is not printed. Not printed in yellow, not printed with an asterisk:
- * not printed.
+ * That was a category error rather than a parsing bug. A file somebody can edit is not an
+ * authority boundary however carefully it is parsed, and EVIDENCE FILE TEXT IS NOT
+ * AUTHORITY.
  *
- * What each line rests on is stated with it, because "PASS" without a source is exactly the
- * claim this whole system spends its time refusing to accept from anybody else.
+ * Nothing here reads prose. Every line is the conjunction of the REQUIREMENTS that roll up
+ * to it, and every requirement resolves a typed proof against the world: the exact commit
+ * and git tree re-derived from the repository, every cited file re-digested, and for a
+ * judged or live proof a real AgentRun that has to resolve in a real store.
+ *
+ * The summary stays a conjunction. If one mandatory requirement is unproven, `READY FOR
+ * OWNER USE` is not printed — not in yellow, not with an asterisk.
  */
 
 export const AcceptanceState = {
   PASS: 'PASS',
   /** Measured and failing. */
   FAIL: 'FAIL',
-  /** Nothing establishes it either way. Blocks, and reads differently from FAIL. */
+  /** Nothing resolvable establishes it. Blocks, and reads differently from FAIL. */
   NOT_VERIFIED: 'NOT_VERIFIED',
 } as const;
 export type AcceptanceState = (typeof AcceptanceState)[keyof typeof AcceptanceState];
 
+export interface RequirementStatus {
+  readonly id: string;
+  readonly requirement: string;
+  readonly expects: string;
+  readonly mandatory: boolean;
+  readonly state: AcceptanceState;
+  /** The proof that established it, or why none did. */
+  readonly resolution: ResolvedProof;
+  readonly implementation?: string;
+  readonly limitation?: string;
+}
+
 export interface AcceptanceLine {
   readonly label: string;
   readonly state: AcceptanceState;
-  /** The file or computation this rests on. A line with no source is an assertion. */
-  readonly source: string;
+  /** Every requirement under this line. A line is the conjunction of them. */
+  readonly requirements: readonly RequirementStatus[];
   readonly detail: string;
 }
 
 export interface AcceptanceStatus {
   readonly servaVersion: string;
+  readonly repository?: RepositoryIdentity;
   readonly lines: readonly AcceptanceLine[];
+  readonly requirements: readonly RequirementStatus[];
   readonly readyForOwnerUse: boolean;
   readonly notProven: readonly string[];
   readonly rendered: string;
 }
 
-interface Evidence {
-  readonly path: string;
-  readonly exists: boolean;
-  readonly text: string;
-}
-
-function evidence(root: string, relative: string): Evidence {
-  const path = join(root, relative);
-  if (!existsSync(path)) return { path: relative, exists: false, text: '' };
-  try {
-    return { path: relative, exists: true, text: readFileSync(path, 'utf8') };
-  } catch {
-    return { path: relative, exists: false, text: '' };
-  }
-}
-
-/** Strip terminal colour so a captured log can be read as text. */
-function plain(text: string): string {
-  return text.replace(/\u001B\[[0-9;]*m/g, '');
+export interface StatusOptions {
+  readonly root?: string;
+  /** Overridden in tests; read from git otherwise. */
+  readonly repository?: RepositoryIdentity;
+  readonly resolveRun?: RunResolver;
+  readonly implementationProducers?: readonly string[];
 }
 
 /**
- * Compute Serva's own acceptance status from what is on disk.
+ * The commit and tree this package actually is.
  *
- * Takes the repository root rather than assuming `process.cwd()`, so the status can be
- * computed about a package somebody has just unpacked — which is the situation an auditor
- * is actually in.
+ * Read from git rather than from any file in the package, because the whole point is that a
+ * proof is checked against the world instead of against its own claims. Where git is
+ * unavailable the identity is unknown and every proof fails to bind — which is correct: a
+ * package nobody can locate in history is one whose proofs are tied to nothing.
  */
-export function acceptanceStatus(root: string = process.cwd()): AcceptanceStatus {
-  const lines: AcceptanceLine[] = [];
-  const add = (label: string, state: AcceptanceState, source: string, detail: string): void => {
-    lines.push({ label, state, source, detail });
-  };
-
-  /* ------------------------------------------------------------ phases 1 to 5 */
-
-  const reports: readonly [string, string][] = [
-    ['Company Specification', 'docs/serva-code/30_CANONICAL_CATALOGUES.md'],
-    ['Core Engine', 'src/store/store.ts'],
-    ['AI Runtime', 'src/agents/runtime.ts'],
-    ['Engineering Factory', 'src/engineering/factory.ts'],
-    ['Company Intelligence', 'src/intelligence/app.ts'],
-  ];
-  for (const [label, path] of reports) {
-    const found = evidence(root, path);
-    add(
-      label,
-      found.exists ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-      path,
-      found.exists ? 'present in this package' : 'not present in this package',
-    );
-  }
-
-  /* ------------------------------------------------------- the engineering boundary */
-
-  /*
-   * ACTIVE is a statement about a MACHINE, and this function is reading a directory. It
-   * reports what the package contains — that the boundary is implemented and enforced —
-   * and refuses to say anything about whether any particular computer has earned HARD.
-   * `serva machine doctor` answers that, and only about the machine it runs on.
-   */
-  const boundary = evidence(root, 'src/substrate/boundary.ts');
-  add(
-    'Engineering HARD',
-    boundary.exists ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'src/substrate/boundary.ts',
-    boundary.exists
-      ? 'implemented and enforced; whether THIS machine is qualified is `serva machine doctor`'
-      : 'the boundary implementation is not present',
-  );
-
-  /* ------------------------------------------------------------------- Phase 6 */
-
-  const vsCode = evidence(root, 'extension/package.json');
-  add(
-    'VS Code Experience',
-    vsCode.exists ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'extension/package.json',
-    vsCode.exists ? 'extension present, and its logic is covered offline' : 'not present',
-  );
-
-  const portability = evidence(root, 'evidence/PORTABILITY_WALKTHROUGH.txt');
-  const walkthroughProved =
-    portability.exists &&
-    portability.text.includes('no machine-bound family is present') &&
-    portability.text.includes('every non-excluded file came back') &&
-    portability.text.includes('nothing in the bundle matches a credential shape');
-  add(
-    'Portability',
-    walkthroughProved ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'evidence/PORTABILITY_WALKTHROUGH.txt',
-    walkthroughProved
-      ? 'a real backup and restore were performed and inspected'
-      : 'no walkthrough evidence proves a real backup and restore',
-  );
-
-  const recovery = evidence(root, 'src/portability/restore.ts');
-  add(
-    'Recovery',
-    recovery.exists && recovery.text.includes('inspectRestore')
-      ? AcceptanceState.PASS
-      : AcceptanceState.NOT_VERIFIED,
-    'src/portability/restore.ts',
-    'inspect-before-write, staged restore, and refusal of an unverified bundle',
-  );
-
-  /* ------------------------------------------------------------------ coverage */
-
-  let coverage: ReturnType<typeof coverageSummary> | undefined;
-  try {
-    coverage = coverageSummary();
-  } catch {
-    coverage = undefined;
-  }
-  add(
-    'Lifecycle Coverage',
-    coverage === undefined
-      ? AcceptanceState.NOT_VERIFIED
-      : coverage.stages.uncovered.length === 0
-        ? AcceptanceState.PASS
-        : AcceptanceState.FAIL,
-    'src/coverage/index.ts',
-    coverage === undefined
-      ? 'the catalogue could not be read'
-      : String(coverage.stages.covered) + '/' + String(coverage.stages.total),
-  );
-  add(
-    'Gate Coverage',
-    coverage === undefined
-      ? AcceptanceState.NOT_VERIFIED
-      : coverage.gates.undefined.length === 0
-        ? AcceptanceState.PASS
-        : AcceptanceState.FAIL,
-    'src/coverage/index.ts',
-    coverage === undefined
-      ? 'the catalogue could not be read'
-      : String(coverage.gates.implemented) + '/' + String(coverage.gates.total),
-  );
-
-  /* -------------------------------------------------------------- verification */
-
-  const verify = evidence(root, 'evidence/VERIFY.txt');
-  const verifyText = plain(verify.text);
-  const testMatch = /Tests\s+(\d+)\s+passed\s+\((\d+)\)/.exec(verifyText);
-  const allPassed = testMatch !== null && testMatch[1] === testMatch[2];
-  add(
-    'Offline Verification',
-    verify.exists && allPassed ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'evidence/VERIFY.txt',
-    testMatch === null
-      ? 'no captured verify output shows a passing suite'
-      : String(testMatch[1]) + '/' + String(testMatch[2]) + ' tests passed',
-  );
-
-  const matrix = evidence(root, 'evidence/ACCEPTANCE_MATRIX.json');
-  let matrixOk = false;
-  let matrixDetail = 'no acceptance matrix was generated';
-  if (matrix.exists) {
+export function repositoryIdentity(root: string): RepositoryIdentity | undefined {
+  const git = (args: readonly string[]): string | undefined => {
     try {
-      const parsed = JSON.parse(matrix.text) as {
-        summary?: { total?: number; covered?: number; missing?: string[] };
-      };
-      const total = parsed.summary?.total ?? 0;
-      const covered = parsed.summary?.covered ?? 0;
-      matrixOk = total > 0 && covered === total;
-      matrixDetail =
-        String(covered) +
-        '/' +
-        String(total) +
-        ' rows covered' +
-        ((parsed.summary?.missing ?? []).length === 0
-          ? ''
-          : '; missing ' + (parsed.summary?.missing ?? []).join(', '));
+      const out = execFileSync('git', [...args], {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 15_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      return out === '' ? undefined : out;
     } catch {
-      matrixDetail = 'the acceptance matrix could not be read';
+      return undefined;
     }
-  }
-  add(
-    'Acceptance Matrix',
-    matrixOk ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'evidence/ACCEPTANCE_MATRIX.json',
-    matrixDetail,
-  );
+  };
+  const commit = git(['rev-parse', 'HEAD']);
+  const tree = git(['rev-parse', 'HEAD^{tree}']);
+  if (commit === undefined || tree === undefined) return undefined;
+  return { commit, tree };
+}
 
-  /* ---------------------------------------------------------- security review */
+/**
+ * Resolve a run id in a store on disk.
+ *
+ * Used when a caller supplies no resolver. It reads the terminal record the AgentRun
+ * projection writes, so a run that never terminated does not resolve — the correct answer
+ * for a proof that cites it.
+ */
+export function defaultRunResolver(root: string): RunResolver {
+  return (ref) => {
+    const dir = join(root, ref.storePath, 'canon', 'agentRunRecord', ref.runId);
+    if (!existsSync(dir)) return undefined;
+    try {
+      const head = readFileSync(join(dir, 'HEAD'), 'utf8').trim();
+      const envelope = JSON.parse(readFileSync(join(dir, head + '.json'), 'utf8')) as {
+        body?: { agentId?: string; outcome?: string };
+      };
+      return envelope.body;
+    } catch {
+      return undefined;
+    }
+  };
+}
 
-  const review = evidence(root, 'evidence/SECURITY_REVIEW.md');
+function stateOf(resolution: ResolvedProof, expects: string): AcceptanceState {
+  if (resolution.status === ProofStatus.FAIL) return AcceptanceState.FAIL;
+  if (resolution.status !== ProofStatus.PASS) return AcceptanceState.NOT_VERIFIED;
   /*
-   * A review this same actor wrote about its own work is not an independent review, and
-   * saying so is the honest state rather than a disclaimer. PASS here requires the
-   * document AND a recorded independent reviewer.
+   * A weaker kind of proof does not satisfy a stronger requirement. A DETERMINISTIC proof
+   * offered where a LIVE one is required is not a partial pass — it is evidence about a
+   * different question.
    */
-  /*
-   * NAMED, and not merely mentioned.
-   *
-   * The first version of this check was `/independent reviewer:\s*\S/i`, which matched the
-   * asterisk in "**Independent reviewer:** *none recorded.*" — so a document whose own
-   * first line said it was a self-review certified itself, and `serva acceptance` printed
-   * PASS. A control that a plausible negative satisfies is not a control.
-   *
-   * So the reviewer must be a real name, the disclaimers are refused explicitly, and a
-   * document containing the words NOT INDEPENDENTLY REVIEWED can never pass whatever else
-   * it says.
-   */
-  const reviewerLine = /independent reviewer:\s*(.+)/i.exec(review.text);
-  const claimed = (reviewerLine?.[1] ?? '').replace(/[*_`]/g, '').trim();
-  const disclaimed =
-    claimed === '' || /^(none|n\/a|not recorded|none recorded|tbd|pending|unknown)/i.test(claimed);
-  const independentlyReviewed =
-    review.exists && !disclaimed && !/NOT INDEPENDENTLY REVIEWED/i.test(review.text);
+  return resolution.verificationType === expects
+    ? AcceptanceState.PASS
+    : AcceptanceState.NOT_VERIFIED;
+}
 
-  add(
-    'Security Acceptance',
-    independentlyReviewed ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'evidence/SECURITY_REVIEW.md',
-    review.exists
-      ? independentlyReviewed
-        ? 'reviewed by ' + claimed
-        : 'a review exists and names no independent reviewer, so it is not an independent review'
-      : 'no security review is present',
-  );
+/** Compute Serva's own acceptance status from resolvable proofs alone. */
+export function acceptanceStatus(o: StatusOptions | string = {}): AcceptanceStatus {
+  const opts: StatusOptions = typeof o === 'string' ? { root: o } : o;
+  const root = opts.root ?? process.cwd();
+  const repository = opts.repository ?? repositoryIdentity(root);
+  const resolveRun = opts.resolveRun ?? defaultRunResolver(root);
 
-  /* --------------------------------------------------------------- live proof */
+  const requirements: RequirementStatus[] = REQUIREMENTS.map((r: Requirement) => {
+    const base = resolveProof(r.id, {
+      root,
+      ...(repository === undefined ? {} : { repository }),
+      resolveRun,
+      ...(opts.implementationProducers === undefined
+        ? {}
+        : { implementationProducers: opts.implementationProducers }),
+    });
+    const wrongKind =
+      base.status === ProofStatus.PASS && base.verificationType !== r.expects;
+    const resolution: ResolvedProof = wrongKind
+      ? {
+          ...base,
+          refusals: [
+            ...base.refusals,
+            'the proof is ' + base.verificationType + ' and this requirement needs ' + r.expects,
+          ],
+        }
+      : base;
+    return {
+      id: r.id,
+      requirement: r.requirement,
+      expects: r.expects,
+      mandatory: r.mandatory,
+      state: stateOf(base, r.expects),
+      resolution,
+      ...(r.implementation === undefined ? {} : { implementation: r.implementation }),
+      ...(r.limitation === undefined ? {} : { limitation: r.limitation }),
+    };
+  });
 
-  const live = evidence(root, 'evidence/LIVE_SERVA_ACCEPTANCE.txt');
-  /*
-   * A STRUCTURED MARKER, NOT A SUBSTRING.
-   *
-   * The first version tested `text.includes('ACCEPTED')`, and the evidence file — which
-   * records a BLOCKED run — contains the sentence "the word ACCEPTED does not appear as a
-   * claim anywhere in this file". So the check passed on a document whose whole purpose was
-   * to say the opposite. That is the third time in this file that a presence-of-string test
-   * was satisfied by a denial of the thing it looked for.
-   *
-   * The evidence must therefore declare its outcome on a `RESULT:` line, and only the
-   * exact word ACCEPTED there counts. Prose cannot reach it.
-   */
-  const liveResult = /^\s*RESULT:\s*([A-Z_]+)/m.exec(live.text)?.[1];
-  add(
-    'Live Acceptance',
-    liveResult === 'ACCEPTED' ? AcceptanceState.PASS : AcceptanceState.NOT_VERIFIED,
-    'evidence/LIVE_SERVA_ACCEPTANCE.txt',
-    !live.exists
-      ? 'no live acceptance evidence is present'
-      : liveResult === undefined
-        ? 'the evidence declares no RESULT, so it establishes nothing'
-        : 'the live attempt recorded RESULT: ' + liveResult,
-  );
+  const byId = new Map(requirements.map((r) => [r.id, r]));
 
-  const notProven = lines
-    .filter((l) => l.state !== AcceptanceState.PASS)
-    .map((l) => l.label + ' (' + l.state + ': ' + l.detail + ')');
+  const lines: AcceptanceLine[] = ACCEPTANCE_LINES.map((label) => {
+    const under = requirementsFor(label)
+      .map((r) => byId.get(r.id))
+      .filter((r): r is RequirementStatus => r !== undefined);
+    const failed = under.filter((r) => r.state === AcceptanceState.FAIL);
+    const unproven = under.filter((r) => r.state === AcceptanceState.NOT_VERIFIED);
+    const state =
+      under.length === 0
+        ? AcceptanceState.NOT_VERIFIED
+        : failed.length > 0
+          ? AcceptanceState.FAIL
+          : unproven.length > 0
+            ? AcceptanceState.NOT_VERIFIED
+            : AcceptanceState.PASS;
+    return {
+      label,
+      state,
+      requirements: under,
+      detail:
+        under.length === 0
+          ? 'no requirement rolls up to this line'
+          : state === AcceptanceState.PASS
+            ? String(under.length) + '/' + String(under.length) + ' proven'
+            : String(under.length - unproven.length - failed.length) +
+              '/' +
+              String(under.length) +
+              ' proven — ' +
+              [...failed, ...unproven].map((r) => r.id).join(', '),
+    };
+  });
+
+  const mandatory = requirements.filter((r) => r.mandatory);
+  const notProven = mandatory
+    .filter((r) => r.state !== AcceptanceState.PASS)
+    .map((r) => r.id + ' (' + r.state + ': ' + (r.resolution.refusals[0] ?? 'unproven') + ')');
 
   const width = 30;
   const rendered = [
     'SERVA CODE ' + SERVA_VERSION,
+    repository === undefined
+      ? 'commit  (git identity unavailable — no proof can bind to this tree)'
+      : 'commit  ' + repository.commit.slice(0, 12) + '   tree ' + repository.tree.slice(0, 12),
     '',
-    ...lines.map((l) => l.label.padEnd(width, '.') + ' ' + l.state),
+    ...lines.map((l) => l.label.padEnd(width, '.') + ' ' + l.state.padEnd(14) + l.detail),
     '',
-    /*
-     * THE CONJUNCTION. Not printed unless every line above is PASS — no asterisk, no
-     * "READY with caveats". A caveat on this line is how a product ships unfinished.
-     */
     notProven.length === 0
       ? 'READY FOR OWNER USE'
-      : 'NOT READY — ' + String(notProven.length) + ' item(s) are not proven:',
+      : 'NOT READY — ' +
+        String(notProven.length) +
+        ' of ' +
+        String(mandatory.length) +
+        ' mandatory requirement(s) are not proven:',
     ...notProven.map((n) => '  - ' + n),
   ].join('\n');
 
   return {
     servaVersion: SERVA_VERSION,
+    ...(repository === undefined ? {} : { repository }),
     lines,
+    requirements,
     readyForOwnerUse: notProven.length === 0,
     notProven,
     rendered,

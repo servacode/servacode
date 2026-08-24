@@ -2,19 +2,31 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AcceptanceState, acceptanceStatus } from '../src/acceptance/status.js';
+import {
+  PROOF_DIR,
+  ProofStatus,
+  VerificationType,
+  fileDigest,
+  resolveProof,
+} from '../src/acceptance/proof.js';
+import { REQUIREMENTS } from '../src/acceptance/requirements.js';
 import { cleanup, tempRoot } from './helpers.js';
+import type { AcceptanceProof, RepositoryIdentity } from '../src/acceptance/proof.js';
 
 /**
- * READY FOR OWNER USE IS A CONJUNCTION, NOT A HEADLINE.
+ * EVIDENCE FILE TEXT IS NOT AUTHORITY.
  *
- * It is the most tempting line in the product: one sentence, magnificent, and meaningless
- * — a product that declares its own readiness has declared a hope.
+ * The previous acceptance model read prose, and an independent audit took it apart. A
+ * markdown line reading `Independent reviewer: Jane Roe` produced a green Security
+ * Acceptance. `RESULT: ACCEPTED` in a text file produced a green Live Acceptance. Three
+ * phrases in a walkthrough produced a green Portability.
  *
- * These tests exist because the first version of the security check was
- * `/independent reviewer:\s*\S/i`, which matched the asterisk in
- * "**Independent reviewer:** *none recorded.*" — so a document whose own first line said it
- * was a self-review certified itself, and the status printed PASS. A control that a
- * plausible negative satisfies is not a control.
+ * Worse than any of them: the test suite PROVED a synthetic markdown file passed, and I
+ * wrote that test believing it strengthened something. A test can assert a defect as
+ * confidently as a property.
+ *
+ * These tests are the replacement, and the first one is the adversarial case the audit
+ * asked for by name.
  */
 
 const roots: string[] = [];
@@ -22,7 +34,11 @@ afterEach(() => {
   for (const r of roots.splice(0)) cleanup(r);
 });
 
-/** A package directory with only the files a test puts in it. */
+const COMMIT = 'a'.repeat(40);
+const TREE = 'b'.repeat(40);
+const REPOSITORY: RepositoryIdentity = { commit: COMMIT, tree: TREE };
+
+/** A package directory with the files a test puts in it. */
 function pkg(files: Readonly<Record<string, string>> = {}): string {
   const root = tempRoot();
   roots.push(root);
@@ -34,154 +50,427 @@ function pkg(files: Readonly<Record<string, string>> = {}): string {
   return root;
 }
 
-function lineFor(root: string, label: string) {
-  return acceptanceStatus(root).lines.find((l) => l.label === label);
+/** Write a proof, and an evidence file it cites with a correct digest. */
+function writeProof(
+  root: string,
+  proof: Partial<AcceptanceProof> & { requirementId: string },
+  evidenceContent = 'the evidence\n',
+): AcceptanceProof {
+  const evidencePath = 'evidence/' + proof.requirementId + '.txt';
+  const full = join(root, ...evidencePath.split('/'));
+  mkdirSync(join(full, '..'), { recursive: true });
+  writeFileSync(full, evidenceContent, 'utf8');
+
+  const complete: AcceptanceProof = {
+    requirementId: proof.requirementId,
+    verificationType: proof.verificationType ?? VerificationType.DETERMINISTIC,
+    status: proof.status ?? ProofStatus.PASS,
+    implementationCommit: proof.implementationCommit ?? COMMIT,
+    treeDigest: proof.treeDigest ?? TREE,
+    producedAt: proof.producedAt ?? '2026-08-24T00:00:00.000Z',
+    producer: proof.producer ?? { kind: 'TOOL', id: 'test-harness' },
+    scope: proof.scope ?? 'the thing being proved',
+    evidence: proof.evidence ?? [
+      { kind: 'FILE', id: evidencePath, digest: String(fileDigest(full)) },
+    ],
+    notes: proof.notes ?? [],
+    ...(proof.machineFingerprint === undefined
+      ? {}
+      : { machineFingerprint: proof.machineFingerprint }),
+    ...(proof.reviewerRunRef === undefined ? {} : { reviewerRunRef: proof.reviewerRunRef }),
+    ...(proof.liveRunRef === undefined ? {} : { liveRunRef: proof.liveRunRef }),
+  };
+
+  const path = join(root, ...PROOF_DIR.split('/'), proof.requirementId + '.json');
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, JSON.stringify(complete, null, 2), 'utf8');
+  return complete;
 }
 
-describe('an empty package proves nothing', () => {
-  it('reports NOT_VERIFIED everywhere and refuses READY', () => {
-    const status = acceptanceStatus(pkg());
+function resolve(root: string, id: string, over: Record<string, unknown> = {}) {
+  return resolveProof(id, { root, repository: REPOSITORY, ...over });
+}
+
+/* ============================================ the adversarial case the audit named */
+
+describe('a markdown line naming a person does not satisfy the security requirement', () => {
+  it('SECURITY_REVIEW.md with `Independent reviewer: Jane Roe` and no governed review is NOT_VERIFIED', () => {
+    const root = pkg({
+      'evidence/SECURITY_REVIEW.md':
+        '# SECURITY REVIEW\n\nIndependent reviewer: Jane Roe\n\nEverything looks fine to me.\n',
+    });
+    const status = acceptanceStatus({ root, repository: REPOSITORY });
+    const security = status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT');
+
+    expect(security?.state).toBe(AcceptanceState.NOT_VERIFIED);
+    expect(security?.resolution.refusals.join(' ')).toContain('no acceptance proof exists');
     expect(status.readyForOwnerUse).toBe(false);
-    expect(status.rendered).not.toContain('READY FOR OWNER USE');
-    expect(status.rendered).toContain('NOT READY');
-    /* And every line says what it rests on, so the reader can go and look. */
-    for (const line of status.lines) expect(line.source.length).toBeGreaterThan(0);
   });
-});
 
-describe('the security line cannot be satisfied by a disclaimer', () => {
-  const REVIEW_HEAD = '# SECURITY REVIEW\n\n**Independent reviewer:** ';
-
-  it('a review that records no reviewer is NOT_VERIFIED', () => {
-    for (const claimed of [
-      '*none recorded.*',
-      'none',
-      'N/A',
-      'TBD',
-      'pending',
-      '_not recorded_',
-      '',
-    ]) {
-      const root = pkg({ 'evidence/SECURITY_REVIEW.md': REVIEW_HEAD + claimed + '\n' });
-      expect(lineFor(root, 'Security Acceptance')?.state, JSON.stringify(claimed)).toBe(
+  it('a text file containing `RESULT: ACCEPTED` grants nothing', () => {
+    const root = pkg({
+      'evidence/LIVE_SERVA_ACCEPTANCE.txt': 'RESULT: ACCEPTED\n\nIt all worked.\n',
+    });
+    const status = acceptanceStatus({ root, repository: REPOSITORY });
+    for (const id of ['LIVE-ENGINEERING', 'LIVE-SERVA']) {
+      expect(status.requirements.find((r) => r.id === id)?.state, id).toBe(
         AcceptanceState.NOT_VERIFIED,
       );
     }
   });
 
-  it('a review that says NOT INDEPENDENTLY REVIEWED can never pass, whatever else it says', () => {
+  it('prose phrases in a walkthrough grant nothing', () => {
     const root = pkg({
-      'evidence/SECURITY_REVIEW.md':
-        REVIEW_HEAD + 'Jane Roe, external\n\nStatus: NOT INDEPENDENTLY REVIEWED\n',
-    });
-    expect(lineFor(root, 'Security Acceptance')?.state).toBe(AcceptanceState.NOT_VERIFIED);
-  });
-
-  it('a named reviewer passes, and the name is reported rather than assumed', () => {
-    const root = pkg({
-      'evidence/SECURITY_REVIEW.md': REVIEW_HEAD + 'Jane Roe, external\n\nEverything checked.\n',
-    });
-    const line = lineFor(root, 'Security Acceptance');
-    expect(line?.state).toBe(AcceptanceState.PASS);
-    expect(line?.detail).toContain('Jane Roe');
-  });
-
-  it('no review at all is NOT_VERIFIED, and says so plainly', () => {
-    expect(lineFor(pkg(), 'Security Acceptance')?.detail).toContain('no security review');
-  });
-});
-
-describe('the other lines are computed from files, not asserted', () => {
-  it('portability needs a walkthrough that actually proves the three things', () => {
-    const partial = pkg({
-      'evidence/PORTABILITY_WALKTHROUGH.txt': 'every non-excluded file came back.\n',
-    });
-    /* One of three is not the proof: a restore that carried a qualification would say this too. */
-    expect(lineFor(partial, 'Portability')?.state).toBe(AcceptanceState.NOT_VERIFIED);
-
-    const complete = pkg({
       'evidence/PORTABILITY_WALKTHROUGH.txt': [
         'every non-excluded file came back.',
         'no machine-bound family is present.',
         'nothing in the bundle matches a credential shape.',
       ].join('\n'),
     });
-    expect(lineFor(complete, 'Portability')?.state).toBe(AcceptanceState.PASS);
+    expect(
+      acceptanceStatus({ root, repository: REPOSITORY }).requirements.find(
+        (r) => r.id === 'PORTABILITY-FINAL',
+      )?.state,
+    ).toBe(AcceptanceState.NOT_VERIFIED);
   });
 
-  it('offline verification needs a captured run where every test passed', () => {
-    const failing = pkg({ 'evidence/VERIFY.txt': 'Tests  1130 passed | 2 failed (1132)\n' });
-    expect(lineFor(failing, 'Offline Verification')?.state).toBe(AcceptanceState.NOT_VERIFIED);
-
-    const passing = pkg({ 'evidence/VERIFY.txt': 'Tests  1132 passed (1132)\n' });
-    expect(lineFor(passing, 'Offline Verification')?.state).toBe(AcceptanceState.PASS);
-  });
-
-  it('the acceptance matrix must have every row covered', () => {
-    const incomplete = pkg({
-      'evidence/ACCEPTANCE_MATRIX.json': JSON.stringify({
-        summary: { total: 33, covered: 32, missing: ['P6-DOCS'] },
-      }),
-    });
-    const line = lineFor(incomplete, 'Acceptance Matrix');
-    expect(line?.state).toBe(AcceptanceState.NOT_VERIFIED);
-    expect(line?.detail).toContain('P6-DOCS');
-  });
-
-  it('live acceptance needs a declared RESULT, not a word in the prose', () => {
-    /*
-     * The check was `includes('ACCEPTED')`, and the real evidence file — which records a
-     * BLOCKED run — contains the sentence "the word ACCEPTED does not appear as a claim
-     * anywhere in this file". It passed. A presence-of-string test is satisfied by a
-     * denial of the thing it looks for, which is the third time that shape has bitten in
-     * this module.
-     */
-    const prose = pkg({
-      'evidence/LIVE_SERVA_ACCEPTANCE.txt': [
-        'RESULT: BLOCKED',
-        '',
-        'The word ACCEPTED does not appear as a claim here.',
-        'No accepted commit exists.',
-        '',
-      ].join('\n'),
-    });
-    expect(lineFor(prose, 'Live Acceptance')?.state).toBe(AcceptanceState.NOT_VERIFIED);
-    expect(lineFor(prose, 'Live Acceptance')?.detail).toContain('RESULT: BLOCKED');
-
-    const undeclared = pkg({ 'evidence/LIVE_SERVA_ACCEPTANCE.txt': 'it all went fine\n' });
-    expect(lineFor(undeclared, 'Live Acceptance')?.detail).toContain('declares no RESULT');
-
-    const accepted = pkg({
-      'evidence/LIVE_SERVA_ACCEPTANCE.txt': 'RESULT: ACCEPTED\n\nA commit was accepted.\n',
-    });
-    expect(lineFor(accepted, 'Live Acceptance')?.state).toBe(AcceptanceState.PASS);
-  });
-
-  it('the HARD line describes the package, and never claims a machine is qualified', () => {
-    const root = pkg({ 'src/substrate/boundary.ts': 'export const x = 1;\n' });
-    const line = lineFor(root, 'Engineering HARD');
-    expect(line?.state).toBe(AcceptanceState.PASS);
-    /*
-     * A status computed by reading a directory cannot know whether a computer earned HARD.
-     * Saying so is the difference between a fact and an implication.
-     */
-    expect(line?.detail).toContain('machine doctor');
+  it('an implementation file existing proves nothing about it', () => {
+    const root = pkg({ 'src/coverage/index.ts': 'export const x = 1;\n' });
+    expect(
+      acceptanceStatus({ root, repository: REPOSITORY }).requirements.find(
+        (r) => r.id === 'P6-LIFECYCLE',
+      )?.state,
+    ).toBe(AcceptanceState.NOT_VERIFIED);
   });
 });
 
-describe('READY is all of it or none of it', () => {
-  it('one unproven line is enough to withhold it', () => {
-    const status = acceptanceStatus(pkg());
-    expect(status.notProven.length).toBeGreaterThan(0);
-    expect(status.readyForOwnerUse).toBe(false);
-    /* No asterisk, no "READY with caveats" — the string simply is not there. */
-    expect(status.rendered).not.toMatch(/READY FOR OWNER USE/);
+/* ================================================== a proof is checked, not believed */
+
+describe('a proof resolves against the world or it does not resolve', () => {
+  it('a complete, honest proof resolves to PASS', () => {
+    const root = pkg();
+    writeProof(root, { requirementId: 'P6-LIFECYCLE' });
+    const resolved = resolve(root, 'P6-LIFECYCLE');
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });
 
-  it('every unproven line is named with its reason', () => {
-    const status = acceptanceStatus(pkg());
+  it('a proof for a different commit does not bind to this package', () => {
+    const root = pkg();
+    writeProof(root, { requirementId: 'P6-LIFECYCLE', implementationCommit: 'c'.repeat(40) });
+    expect(resolve(root, 'P6-LIFECYCLE').refusals.join(' ')).toContain('describes commit');
+  });
+
+  it('a proof carried onto a modified tree fails on the tree digest', () => {
+    const root = pkg();
+    /*
+     * The commit is a label and the tree is the content. Without this, a proof survives
+     * every change that does not create a new commit — which is every change during work.
+     */
+    writeProof(root, { requirementId: 'P6-LIFECYCLE', treeDigest: 'd'.repeat(40) });
+    expect(resolve(root, 'P6-LIFECYCLE').refusals.join(' ')).toContain('describes tree');
+  });
+
+  it('evidence that changed since the proof was written fails its digest', () => {
+    const root = pkg();
+    writeProof(root, { requirementId: 'P6-LIFECYCLE' });
+    writeFileSync(join(root, 'evidence', 'P6-LIFECYCLE.txt'), 'something else\n', 'utf8');
+    expect(resolve(root, 'P6-LIFECYCLE').refusals.join(' ')).toContain(
+      'does not match its recorded digest',
+    );
+  });
+
+  it('evidence named but absent fails', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'P6-LIFECYCLE',
+      evidence: [{ kind: 'FILE', id: 'evidence/nowhere.txt', digest: 'e'.repeat(64) }],
+    });
+    expect(resolve(root, 'P6-LIFECYCLE').refusals.join(' ')).toContain('not in this package');
+  });
+
+  it('a proof citing no evidence asserts rather than establishes', () => {
+    const root = pkg();
+    writeProof(root, { requirementId: 'P6-LIFECYCLE', evidence: [] });
+    expect(resolve(root, 'P6-LIFECYCLE').refusals.join(' ')).toContain('cites no evidence');
+  });
+
+  it('a deterministic proof produced by a person is a claim', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'P6-LIFECYCLE',
+      producer: { kind: 'HUMAN', id: 'somebody' },
+    });
+    expect(resolve(root, 'P6-LIFECYCLE').refusals.join(' ')).toContain('produced by a person');
+  });
+
+  it('with no repository identity, nothing binds and nothing passes', () => {
+    const root = pkg();
+    writeProof(root, { requirementId: 'P6-LIFECYCLE' });
+    const resolved = resolveProof('P6-LIFECYCLE', { root });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('repository identity could not be read');
+  });
+
+  it('a proof that claims FAIL stays FAIL however clean everything else is', () => {
+    const root = pkg();
+    writeProof(root, { requirementId: 'P6-LIFECYCLE', status: ProofStatus.FAIL });
+    expect(resolve(root, 'P6-LIFECYCLE').status).toBe(ProofStatus.FAIL);
+  });
+});
+
+/* ================================================= judged proofs need a real reviewer */
+
+describe('a JUDGED proof needs a governed reviewer run that actually exists', () => {
+  const REVIEWER = { runId: 'SC-RUN-000001', agentId: 'SC-AGENT-200', storePath: '.serva-self' };
+
+  it('with no reviewer run named, it fails', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-200', runId: 'SC-RUN-000001' },
+    });
+    expect(resolve(root, 'SECURITY-INDEPENDENT').refusals.join(' ')).toContain(
+      'must name the governed reviewer run',
+    );
+  });
+
+  it('with a reviewer run that does not resolve, it fails', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-200', runId: 'SC-RUN-000001' },
+      reviewerRunRef: REVIEWER,
+    });
+    expect(
+      resolve(root, 'SECURITY-INDEPENDENT', { resolveRun: () => undefined }).refusals.join(' '),
+    ).toContain('does not resolve');
+  });
+
+  it('a reviewer run that did not complete judged nothing', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-200', runId: 'SC-RUN-000001' },
+      reviewerRunRef: REVIEWER,
+    });
+    const refusals = resolve(root, 'SECURITY-INDEPENDENT', {
+      resolveRun: () => ({ agentId: 'SC-AGENT-200', outcome: 'FAILED' }),
+    }).refusals;
+    expect(refusals.join(' ')).toContain('judged nothing');
+  });
+
+  it('a reviewer who produced the implementation is not independent', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-150', runId: 'SC-RUN-000001' },
+      reviewerRunRef: { ...REVIEWER, agentId: 'SC-AGENT-150' },
+    });
+    const refusals = resolve(root, 'SECURITY-INDEPENDENT', {
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      implementationProducers: ['SC-AGENT-150'],
+    }).refusals;
+    expect(refusals.join(' ')).toContain('not an independent review');
+  });
+
+  it('a run by a different actor than the proof names is refused', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-200', runId: 'SC-RUN-000001' },
+      reviewerRunRef: REVIEWER,
+    });
+    const refusals = resolve(root, 'SECURITY-INDEPENDENT', {
+      resolveRun: () => ({ agentId: 'SC-AGENT-999', outcome: 'COMPLETED' }),
+    }).refusals;
+    expect(refusals.join(' ')).toContain('was made by SC-AGENT-999');
+  });
+
+  it('a complete, independent, completed reviewer run resolves', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-200', runId: 'SC-RUN-000001' },
+      reviewerRunRef: REVIEWER,
+    });
+    const resolved = resolve(root, 'SECURITY-INDEPENDENT', {
+      resolveRun: () => ({ agentId: 'SC-AGENT-200', outcome: 'COMPLETED' }),
+      implementationProducers: ['SC-AGENT-150'],
+    });
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+  });
+});
+
+/* ==================================================== live proofs need a real machine */
+
+describe('a LIVE proof needs a machine and a run', () => {
+  const LIVE = { runId: 'SC-RUN-000009', agentId: 'SC-AGENT-150', storePath: '.serva-live' };
+
+  it('without a machine fingerprint it fails', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-ENGINEERING',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'serva-live' },
+      liveRunRef: LIVE,
+    });
+    expect(
+      resolve(root, 'LIVE-ENGINEERING', {
+        resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      }).refusals.join(' '),
+    ).toContain('must name the machine');
+  });
+
+  it('without a resolvable run it fails', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-ENGINEERING',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'serva-live' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: LIVE,
+    });
+    expect(
+      resolve(root, 'LIVE-ENGINEERING', { resolveRun: () => undefined }).refusals.join(' '),
+    ).toContain('does not resolve');
+  });
+
+  it('with both, it resolves', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-ENGINEERING',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'serva-live' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: LIVE,
+    });
+    const resolved = resolve(root, 'LIVE-ENGINEERING', {
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+    });
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+  });
+});
+
+/* ================================================= the kind of proof has to match */
+
+describe('a weaker kind of proof does not satisfy a stronger requirement', () => {
+  it('a DETERMINISTIC proof does not satisfy a LIVE requirement', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-ENGINEERING',
+      verificationType: VerificationType.DETERMINISTIC,
+    });
+    const status = acceptanceStatus({ root, repository: REPOSITORY });
+    const live = status.requirements.find((r) => r.id === 'LIVE-ENGINEERING');
+    expect(live?.state).toBe(AcceptanceState.NOT_VERIFIED);
+    expect(live?.resolution.refusals.join(' ')).toContain('needs LIVE');
+  });
+
+  it('a DETERMINISTIC proof does not satisfy the JUDGED security requirement', () => {
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.DETERMINISTIC,
+    });
+    const status = acceptanceStatus({ root, repository: REPOSITORY });
+    expect(status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT')?.state).toBe(
+      AcceptanceState.NOT_VERIFIED,
+    );
+  });
+});
+
+/* ================================================== the catalogue, and the fail-first */
+
+describe('the requirement catalogue is complete and the current tree does not satisfy it', () => {
+  it('names every Phase 6 requirement the audit called missing', () => {
+    const ids = new Set(REQUIREMENTS.map((r) => r.id));
+    for (const required of [
+      'EXT-HOST',
+      'UX-NEW-PROJECT',
+      'UX-CONVERSATION',
+      'UX-OWNER-VALUE',
+      'UX-RECONCILIATION',
+      'MACHINE-BOOTSTRAP',
+      'MIGRATE-WORKFLOW',
+      'INSTALL-UPDATE',
+      'RESTORE-FRESH',
+      'BACKUP-IDENTITY',
+      'VERSION-IDENTITY',
+      'STATUS-BOUNDARY-SEMANTICS',
+      'SECURITY-INDEPENDENT',
+      'LIVE-ENGINEERING',
+      'LIVE-SERVA',
+      'PORTABILITY-FINAL',
+    ]) {
+      expect(ids.has(required), required + ' is not in the catalogue').toBe(true);
+    }
+  });
+
+  it('every requirement is mandatory, so none can be dropped by exempting it quietly', () => {
+    expect(REQUIREMENTS.every((r) => r.mandatory)).toBe(true);
+  });
+
+  it('an empty package proves nothing at all, and READY is not printed', () => {
+    const status = acceptanceStatus({ root: pkg(), repository: REPOSITORY });
+    expect(status.readyForOwnerUse).toBe(false);
+    expect(status.rendered).not.toContain('READY FOR OWNER USE');
+    expect(status.notProven.length).toBe(REQUIREMENTS.length);
+    /* Every line, not merely the interesting ones. */
+    expect(status.lines.every((l) => l.state === AcceptanceState.NOT_VERIFIED)).toBe(true);
+  });
+
+  it('one unproven mandatory requirement withholds READY', () => {
+    const root = pkg();
+    for (const r of REQUIREMENTS) {
+      if (r.id === 'EXT-HOST') continue;
+      /* Each kind carries what its kind requires; a LIVE proof needs a machine and a run. */
+      writeProof(root, {
+        requirementId: r.id,
+        verificationType: r.expects,
+        ...(r.expects === 'JUDGED'
+          ? {
+              producer: { kind: 'AGENT_RUN', id: 'SC-AGENT-200', runId: 'SC-RUN-000001' },
+              reviewerRunRef: {
+                runId: 'SC-RUN-000001',
+                agentId: 'SC-AGENT-200',
+                storePath: '.serva-self',
+              },
+            }
+          : {}),
+        ...(r.expects === 'LIVE'
+          ? {
+              machineFingerprint: 'f'.repeat(64),
+              liveRunRef: {
+                runId: 'SC-RUN-000009',
+                agentId: 'SC-AGENT-150',
+                storePath: '.serva-live',
+              },
+            }
+          : {}),
+        ...(r.expects === 'HUMAN' ? { producer: { kind: 'HUMAN', id: 'the owner' } } : {}),
+      });
+    }
+    const status = acceptanceStatus({
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-200', outcome: 'COMPLETED' }),
+    });
+    expect(status.notProven).toHaveLength(1);
+    expect(status.notProven[0]).toContain('EXT-HOST');
+    expect(status.readyForOwnerUse).toBe(false);
+    expect(status.rendered).not.toContain('READY FOR OWNER USE');
+  });
+
+  it('every unproven requirement is reported with the reason it did not resolve', () => {
+    const status = acceptanceStatus({ root: pkg(), repository: REPOSITORY });
     for (const entry of status.notProven) {
-      expect(entry).toMatch(/\((NOT_VERIFIED|FAIL):/);
+      expect(entry).toMatch(/\((NOT_VERIFIED|FAIL): .+\)/);
     }
   });
 });

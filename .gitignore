@@ -4,3 +4,9 @@ coverage/
 *.zip
 .serva-tmp/
 *.log
+
+# Acceptance proofs are BUILD OUTPUT, minted by scripts/prove.mjs against the current
+# tree. Committing them would make them a source artifact somebody edits, and would change
+# the tree they bind to. Regenerate with `npm run acceptance`.
+evidence/acceptance/
+evidence/acceptance-run/

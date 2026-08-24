@@ -1,7 +1,7 @@
 {
   "name": "serva-code",
-  "version": "0.2.0",
-  "description": "Serva Code — Local AI Software Company Operating System. Phase 2 Core Engine.",
+  "version": "1.0.0",
+  "description": "Serva Code — Local AI Software Company Operating System. Local-first, single-owner, VS Code native.",
   "type": "module",
   "license": "UNLICENSED",
   "private": true,
@@ -26,6 +26,8 @@
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
     "serva": "node dist/cli/main.js",
     "contracts": "node scripts/generate-agent-contracts.mjs",
+    "prove": "node scripts/prove.mjs",
+    "acceptance": "npm run build && npm run prove && node scripts/acceptance-matrix.mjs",
     "generate": "npm run catalogues && npm run contracts",
     "test:claude": "vitest run --config vitest.live.config.ts",
     "test:engineering-live": "vitest run --config vitest.engineering.config.ts",
