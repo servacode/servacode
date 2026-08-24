@@ -2,6 +2,7 @@ import { ACTIONS, invokeAction } from '../../app/actions.js';
 import { projectSnapshot } from '../../app/services.js';
 import { machineDoctor, renderDoctor } from '../../portability/doctor.js';
 import { nodeDoctorProbes } from '../../portability/probes.js';
+import { bootstrapPlan, renderBootstrap } from '../../portability/bootstrap.js';
 import { verifyBackup } from '../../portability/backup.js';
 import { inspectRestore } from '../../portability/restore.js';
 import {
@@ -42,11 +43,31 @@ function flag(args: ParsedArgs, name: string): string | undefined {
 /** `serva machine doctor` — inspect this computer. Nothing is repaired. */
 export function cmdMachine(args: ParsedArgs): number {
   const sub = args.positionals[0] ?? 'doctor';
-  if (sub !== 'doctor') {
-    console.error('Usage: serva machine doctor [--json]');
+  if (sub !== 'doctor' && sub !== 'bootstrap') {
+    console.error('Usage: serva machine doctor | bootstrap  [--json]');
     return 2;
   }
   const rt = tryOpenRuntime(args);
+
+  if (sub === 'bootstrap') {
+    const plan = bootstrapPlan({
+      probes: nodeDoctorProbes(),
+      ...(rt === undefined ? {} : { projectRoots: [rt.root] }),
+    });
+    if (wantsJson(args)) {
+      emitJson(plan);
+    } else {
+      console.log(renderBootstrap(plan));
+    }
+    /*
+     * Exit 0 only when the machine needs nothing. Anything waiting on the owner exits
+     * non-zero, so a script cannot mistake "you still have to install WSL" for success — and
+     * BLOCKED gets its own code, because "do this" and "this cannot be done here" are
+     * different answers and a caller may want to tell them apart.
+     */
+    return plan.state === 'COMPLETE' ? 0 : plan.state === 'BLOCKED' ? 2 : 1;
+  }
+
   const report = machineDoctor({
     probes: nodeDoctorProbes(),
     ...(rt === undefined ? {} : { projectRoots: [rt.root] }),

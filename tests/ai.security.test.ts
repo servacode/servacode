@@ -501,6 +501,13 @@ describe('provider-specific code stays behind the adapter boundary', () => {
        * contents, and never the account behind it.
        */
       if (norm.endsWith('src/portability/probes.ts')) continue;
+      /*
+       * bootstrap.ts is doctor.ts's reason exactly, one step further on: it turns the
+       * doctor's findings into an ordered list of things the OWNER must do, and a remedy
+       * that would not say which program to install and sign into is not a remedy. It names
+       * the doctor's own check ids and reaches into no adapter; the test below proves it.
+       */
+      if (norm.endsWith('src/portability/bootstrap.ts')) continue;
       const text = readFileSync(file, 'utf8');
       const stripped = text
         .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -531,6 +538,7 @@ describe('provider-specific code stays behind the adapter boundary', () => {
       'src/portability/doctor.ts',
       'src/portability/machine.ts',
       'src/portability/probes.ts',
+      'src/portability/bootstrap.ts',
       'src/cli/commands/portability.ts',
     ]) {
       expect(readFileSync(file, 'utf8')).not.toContain('engine/claude');

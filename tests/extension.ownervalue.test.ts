@@ -141,12 +141,24 @@ describe('the panel script sends the typed value, unconfirmed', () => {
     expect(PANEL).toMatch(/invoke\(\s*'owner\.answer',\s*\{\s*decisionId:[^}]*value:\s*typed/);
   });
 
-  it('never claims the owner confirmed; the host asks natively', () => {
+  it('never claims the owner confirmed for anything that changes something', () => {
     /*
-     * `confirmed: true` from a page is a boolean in a forgeable message. Every `invoke` in
-     * this file passes false, and the host shows a modal a page cannot fabricate.
+     * `confirmed: true` from a page is a boolean in a forgeable message, and the host ignores
+     * it for anything but a READ — but the panel should not be sending it either.
+     *
+     * Scoped to the mutating actions rather than to every `invoke`. A blanket rule looked
+     * stronger and was wrong: `reconcile.inspect` is a read, legitimately passes true, and a
+     * rule that forbade it would have to be loosened the moment a second read appeared —
+     * which is how a real check becomes a decorative one.
      */
-    expect(PANEL).not.toMatch(/invoke\([^)]*,\s*true\s*\)/);
+    for (const mutating of ['owner.answer', 'conversation.send', 'reconcile.repair']) {
+      const calls = [...PANEL.matchAll(/invoke\(\s*'([^']+)'[\s\S]*?,\s*(true|false)\s*\)/g)];
+      for (const [, action, confirmed] of calls) {
+        if (action === mutating) {
+          expect(confirmed, action + ' claims the owner already confirmed').toBe('false');
+        }
+      }
+    }
   });
 
   it('refuses an empty box in the panel rather than sending an empty answer', () => {

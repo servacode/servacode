@@ -10,3 +10,7 @@ coverage/
 # the tree they bind to. Regenerate with `npm run acceptance`.
 evidence/acceptance/
 evidence/acceptance-run/
+
+# Extension Host test output and the VS Code build it downloads.
+out/
+.vscode-test/

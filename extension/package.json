@@ -13,7 +13,7 @@
   "categories": [
     "Other"
   ],
-  "main": "./dist/extension.js",
+  "main": "./dist/extension/src/extension.js",
   "activationEvents": [
     "workspaceContains:.serva/SCHEMA_VERSION",
     "onCommand:serva.newProject",

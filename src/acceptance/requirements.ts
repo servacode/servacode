@@ -357,6 +357,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'VS Code Runtime',
     mandatory: true,
+    provenBy: ['tests/vscode/activation.host.test.ts', 'tests/vscode/controlCenter.host.test.ts'],
   },
 
   /* ------------------------------------------------------------------ portability */
@@ -469,6 +470,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Machine Readiness',
     mandatory: true,
+    provenBy: ['tests/bootstrap.test.ts'],
   },
   {
     id: 'STATUS-BOUNDARY-SEMANTICS',

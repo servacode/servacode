@@ -115,6 +115,7 @@ const USAGE = [
   '  release                       Derived release readiness, condition by condition',
   '  actions                       Every validated action the UI can dispatch',
   '  machine doctor                Inspect this computer. Nothing is repaired.',
+  '  machine bootstrap             What this computer still needs, and who must do it.',
   '  backup --to <path> --confirm  Write a verified backup of this project',
   '  verify-backup <path>          Prove a bundle before relying on it',
   '  restore <bundle> --to <dir>   Inspect a restore; --confirm to perform it',
