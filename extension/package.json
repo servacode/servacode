@@ -15,7 +15,8 @@
   ],
   "main": "./dist/extension.js",
   "activationEvents": [
-    "workspaceContains:.serva/SCHEMA_VERSION"
+    "workspaceContains:.serva/SCHEMA_VERSION",
+    "onCommand:serva.newProject"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -25,6 +26,11 @@
   },
   "contributes": {
     "commands": [
+      {
+        "command": "serva.newProject",
+        "title": "Serva: New Project",
+        "icon": "$(new-folder)"
+      },
       {
         "command": "serva.openControlCenter",
         "title": "Serva: Open Control Center",

@@ -14,6 +14,16 @@
   const vscode = acquireVsCodeApi();
   let counter = 0;
 
+  /*
+   * Decision ids are Serva-issued and already narrow, but a selector built by concatenation
+   * is the one place a surprising id would change what is selected rather than what is
+   * matched. `CSS.escape` where the host provides it, a conservative reject otherwise.
+   */
+  function cssEscape(value) {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(value);
+    return String(value).replace(/["\\\]]/g, '\\$&');
+  }
+
   function invoke(actionId, input, confirmed) {
     counter += 1;
     vscode.postMessage({
@@ -34,6 +44,31 @@
       return;
     }
 
+    /*
+     * A VALUE question. The owner types an answer and presses record; nothing here stands
+     * for a value on their behalf, and an empty box is refused in the panel rather than
+     * sent as an empty answer — `answerOwnerDecision` would refuse it anyway, but the owner
+     * should see why without a round trip.
+     */
+    const valueFor = target.getAttribute('data-value-submit');
+    if (valueFor !== null) {
+      const input = document.querySelector('[data-value-for="' + cssEscape(valueFor) + '"]');
+      const error = document.querySelector('[data-value-error="' + cssEscape(valueFor) + '"]');
+      const typed = input === null ? '' : String(input.value).trim();
+      if (typed === '') {
+        if (error !== null) error.hidden = false;
+        if (input !== null) input.focus();
+        return;
+      }
+      if (error !== null) error.hidden = true;
+      /*
+       * `confirmed: false`, exactly as for an option. The host shows a native modal that a
+       * page cannot fabricate, and only then does the action layer accept the answer.
+       */
+      invoke('owner.answer', { decisionId: valueFor, value: typed, answeredBy: 'owner' }, false);
+      return;
+    }
+
     const decisionId = target.getAttribute('data-option-for');
     if (decisionId !== null) {
       /*
@@ -50,6 +85,21 @@
         false,
       );
     }
+  });
+
+  /*
+   * Enter in the value box records it. Somebody who types an answer and presses Enter has
+   * finished answering; making them find a button is a keyboard trap in everything but name.
+   */
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Enter') return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const id = target.getAttribute('data-value-for');
+    if (id === null) return;
+    event.preventDefault();
+    const submit = document.querySelector('[data-value-submit="' + cssEscape(id) + '"]');
+    if (submit !== null) submit.click();
   });
 
   window.addEventListener('message', function (event) {

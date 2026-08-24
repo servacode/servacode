@@ -267,6 +267,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Owner Experience',
     mandatory: true,
+    provenBy: ['tests/newproject.test.ts', 'tests/vscode/newProject.host.test.ts'],
   },
   {
     id: 'UX-OWNER-VALUE',
@@ -275,6 +276,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Owner Experience',
     mandatory: true,
+    provenBy: ['tests/extension.ownervalue.test.ts', 'tests/vscode/ownerValue.host.test.ts'],
   },
   {
     id: 'UX-CONVERSATION',

@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { ServaRuntime } from '../../src/app/runtime.js';
 import { invokeAction, ACTIONS, ActionConsequence } from '../../src/app/actions.js';
 import { ProjectHealth, isServaProject, projectSnapshot } from '../../src/app/services.js';
+import { NewProjectField, createProject, newProjectRefusal } from '../../src/app/create.js';
 import { parseWebviewMessage, webviewMayInvoke } from '../../src/extension/protocol.js';
 import { Language, t } from '../../src/extension/i18n.js';
 import { renderControlCenter, statusBarText } from '../../src/extension/render.js';
@@ -40,6 +41,12 @@ import type { ProjectSnapshot } from '../../src/app/services.js';
 let statusBar: vscode.StatusBarItem | undefined;
 let panel: vscode.WebviewPanel | undefined;
 let runtime: ServaRuntime | undefined;
+/*
+ * Set at activation. `handleMessage` needs to repaint the whole surface after a governed
+ * mutation, and it has no `context` to build a panel with; without this it repainted the
+ * status bar alone, so an answered question stayed on screen looking unanswered.
+ */
+let refreshEverything: (() => void) | undefined;
 
 function language(): Language {
   const configured = vscode.workspace.getConfiguration('serva').get<string>('language');
@@ -208,7 +215,10 @@ async function handleMessage(raw: unknown): Promise<void> {
      */
     const answer = await vscode.window.showWarningMessage(
       definition.confirmPrompt ?? definition.title,
-      { modal: true },
+      ((): vscode.MessageOptions => {
+        const detail = describePayload(message.input);
+        return detail === undefined ? { modal: true } : { modal: true, detail };
+      })(),
       t(language(), 'common.confirm'),
     );
     confirmed = answer === t(language(), 'common.confirm');
@@ -228,8 +238,154 @@ async function handleMessage(raw: unknown): Promise<void> {
     void vscode.window.showWarningMessage(
       t(language(), 'error.actionRefused') + ': ' + String(result.refusal),
     );
+    refreshStatusBar();
+    return;
+  }
+
+  /*
+   * A successful mutation changed the Store, so the panel is now describing a company that
+   * no longer exists. Drop the runtime handle and repaint everything from disk: an answered
+   * decision disappears from the owner-action list, the lifecycle moves, and the tree and
+   * status bar agree with the panel because all three read the same fresh snapshot.
+   */
+  if (definition !== undefined && definition.consequence !== ActionConsequence.READ) {
+    runtime = undefined;
+    if (refreshEverything !== undefined) {
+      refreshEverything();
+      return;
+    }
   }
   refreshStatusBar();
+}
+
+/**
+ * What the owner is about to commit, in their own words rather than a schema's.
+ *
+ * Generic on purpose: it walks the parsed payload instead of knowing about any particular
+ * action, so a new action gets a truthful confirmation without anybody remembering to write
+ * one. A modal that says "this is consequential" without saying WHAT is a formality; one
+ * that shows the value being recorded is a decision.
+ */
+function describePayload(input: unknown): string | undefined {
+  if (input === null || typeof input !== 'object') return undefined;
+  const lines = Object.entries(input as Record<string, unknown>)
+    .filter(([, v]) => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean')
+    .map(([k, v]) => k + ': ' + String(v));
+  return lines.length === 0 ? undefined : lines.join('\n');
+}
+
+/**
+ * `Serva: New Project` — the way a company comes into existence inside VS Code.
+ *
+ * SPEC: Phase 6 closure §4; 03 §2.
+ *
+ * It decides nothing. Every rule about what may be created lives in `src/app/create.ts`,
+ * which `serva init` calls too, so a project made here is the same project made the same way.
+ *
+ * Three properties matter more than the sequence of prompts:
+ *
+ *   THE IDEA IS THE OWNER'S WORDS. It is shown back before creation and recorded verbatim.
+ *   Nothing here summarises it, and there is no "improve this" step, because a tidied idea is
+ *   no longer the record of what was asked.
+ *
+ *   REFUSALS ARRIVE WHERE THEY BELONG. Each answer is validated as it is given, so an owner
+ *   is told the folder already holds a project before they have written a paragraph into it.
+ *
+ *   CANCELLING LEAVES NOTHING BEHIND. Every step can be escaped, and creation happens once,
+ *   at the end, after an explicit confirmation.
+ */
+async function newProjectCommand(): Promise<void> {
+  const lang = language();
+  const T = (key: Parameters<typeof t>[1]): string => t(lang, key);
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: T('newProject.folderLabel'),
+    title: T('newProject.chooseFolder'),
+    ...(vscode.workspace.workspaceFolders?.[0] === undefined
+      ? {}
+      : { defaultUri: vscode.workspace.workspaceFolders[0].uri }),
+  });
+  const folder = picked?.[0];
+  if (folder === undefined) return;
+  const root = folder.fsPath;
+
+  const rootRefusal = newProjectRefusal({ root }, NewProjectField.ROOT);
+  if (rootRefusal !== undefined) {
+    void vscode.window.showWarningMessage('Serva: ' + rootRefusal.message, {
+      modal: true,
+      detail: rootRefusal.remedy,
+    });
+    return;
+  }
+
+  const name = await vscode.window.showInputBox({
+    title: T('newProject.title'),
+    prompt: T('newProject.namePrompt'),
+    placeHolder: T('newProject.namePlaceholder'),
+    ignoreFocusOut: true,
+    validateInput: (value) => newProjectRefusal({ name: value }, NewProjectField.NAME)?.message,
+  });
+  if (name === undefined) return;
+
+  const idea = await vscode.window.showInputBox({
+    title: T('newProject.title'),
+    prompt: T('newProject.ideaPrompt'),
+    placeHolder: T('newProject.ideaPlaceholder'),
+    ignoreFocusOut: true,
+    validateInput: (value) => newProjectRefusal({ idea: value }, NewProjectField.IDEA)?.message,
+  });
+  if (idea === undefined) return;
+
+  /*
+   * The last thing the owner sees before it becomes permanent is their own idea, unedited.
+   * A confirmation that summarises what it is about to record would be confirming something
+   * other than what gets written.
+   */
+  const confirm = await vscode.window.showInformationMessage(
+    T('newProject.confirm'),
+    {
+      modal: true,
+      detail:
+        name.trim() + '\n' + root + '\n\n' + idea.trim() + '\n\n' + T('newProject.ideaVerbatim'),
+    },
+    T('common.confirm'),
+  );
+  if (confirm !== T('common.confirm')) {
+    void vscode.window.showInformationMessage('Serva: ' + T('newProject.cancelled'));
+    return;
+  }
+
+  let created;
+  try {
+    created = createProject({ root, name, idea });
+  } catch (error) {
+    const e = error as Error & { remedy?: string };
+    void vscode.window.showWarningMessage(
+      'Serva: ' + e.message,
+      ...(e.remedy === undefined ? [] : ([{ modal: true, detail: e.remedy }] as never[])),
+    );
+    return;
+  }
+
+  const openIt = await vscode.window.showInformationMessage(
+    T('newProject.created') + ': ' + created.name + ' (' + created.projectId + ')',
+    T('newProject.openFolder'),
+    T('newProject.stayHere'),
+  );
+  if (openIt === T('newProject.openFolder')) {
+    /*
+     * Opening the folder replaces this window's workspace, which ends this extension host.
+     * Nothing may be scheduled after it.
+     */
+    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(created.root), {
+      forceNewWindow: false,
+    });
+    return;
+  }
+  if (refreshEverything !== undefined) refreshEverything();
 }
 
 /* ------------------------------------------------------------------- the tree view */
@@ -276,8 +432,12 @@ export function activate(context: vscode.ExtensionContext): void {
     tree.refresh();
     if (panel !== undefined) renderPanel(context);
   };
+  refreshEverything = refreshAll;
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('serva.newProject', () => {
+      void newProjectCommand();
+    }),
     vscode.commands.registerCommand('serva.openControlCenter', () => {
       showControlCenter(context);
     }),

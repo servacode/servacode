@@ -190,9 +190,10 @@ export interface RepositoryIdentity {
  * has just unpacked — where the store a run lives in may be anywhere, or absent.
  */
 export interface RunResolver {
-  (ref: { readonly runId: string; readonly storePath: string }):
-    | { readonly agentId?: string; readonly outcome?: string }
-    | undefined;
+  (ref: {
+    readonly runId: string;
+    readonly storePath: string;
+  }): { readonly agentId?: string; readonly outcome?: string } | undefined;
 }
 
 export interface ResolveOptions {
@@ -289,9 +290,7 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
   const refusals: string[] = [];
 
   if (proof.requirementId !== requirementId) {
-    refusals.push(
-      'the proof is for ' + proof.requirementId + ', not ' + requirementId,
-    );
+    refusals.push('the proof is for ' + proof.requirementId + ', not ' + requirementId);
   }
 
   /* ------------------------------------------------- the tree it claims to describe */
@@ -376,7 +375,11 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
       } else {
         if (run.outcome !== 'COMPLETED') {
           refusals.push(
-            'reviewer run ' + reviewer.runId + ' ended ' + String(run.outcome) + ', so it judged nothing',
+            'reviewer run ' +
+              reviewer.runId +
+              ' ended ' +
+              String(run.outcome) +
+              ', so it judged nothing',
           );
         }
         if (run.agentId !== reviewer.agentId) {

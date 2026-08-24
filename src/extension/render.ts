@@ -198,11 +198,46 @@ export function renderControlCenter(o: RenderOptions): string {
               text(a.recommendationRationale, language) +
               '</p>' +
               (a.responseMode === 'VALUE'
-                ? '<label class="decision__value">' +
-                  T('owner.enterValue') +
-                  '<input type="text" data-value-for="' +
+                ? /*
+                   * A VALUE question needs somewhere to type AND a way to record it. The
+                   * first version of this rendered the input alone, with no submit and no
+                   * handler in the panel script, so the primary owner surface could not
+                   * actually answer the primary kind of blocking question. An input that
+                   * goes nowhere reads as a working control, which is worse than no control.
+                   *
+                   * No meta-option: there is no button here that stands for a value. The
+                   * owner types the answer and Serva records exactly that.
+                   */
+                  '<div class="decision__value">' +
+                  '<label for="value-' +
                   escapeHtml(a.id) +
-                  '" /></label>'
+                  '">' +
+                  T('owner.enterValue') +
+                  '</label>' +
+                  '<input type="text" id="value-' +
+                  escapeHtml(a.id) +
+                  '" data-value-for="' +
+                  escapeHtml(a.id) +
+                  '" autocomplete="off" spellcheck="false" ' +
+                  'aria-describedby="value-hint-' +
+                  escapeHtml(a.id) +
+                  '" />' +
+                  '<button type="button" class="decision__submit" data-value-submit="' +
+                  escapeHtml(a.id) +
+                  '">' +
+                  T('owner.answer') +
+                  '</button>' +
+                  '<p class="decision__hint" id="value-hint-' +
+                  escapeHtml(a.id) +
+                  '">' +
+                  T('owner.valueHint') +
+                  '</p>' +
+                  '<p class="decision__error" data-value-error="' +
+                  escapeHtml(a.id) +
+                  '" role="alert" hidden>' +
+                  T('owner.valueRequired') +
+                  '</p>' +
+                  '</div>'
                 : '<ul class="decision__options">' +
                   a.options
                     .map(

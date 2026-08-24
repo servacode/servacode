@@ -158,8 +158,7 @@ export function acceptanceStatus(o: StatusOptions | string = {}): AcceptanceStat
         ? {}
         : { implementationProducers: opts.implementationProducers }),
     });
-    const wrongKind =
-      base.status === ProofStatus.PASS && base.verificationType !== r.expects;
+    const wrongKind = base.status === ProofStatus.PASS && base.verificationType !== r.expects;
     const resolution: ResolvedProof = wrongKind
       ? {
           ...base,

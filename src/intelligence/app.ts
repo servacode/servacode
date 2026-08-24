@@ -253,7 +253,7 @@ export function answerOwnerDecision(
         responseMode: existing.responseMode,
         offered: existing.options.map((opt) => opt.option),
       },
-      specRef: '""" + SEC + """32',
+      specRef: '§32',
     });
   }
 
@@ -269,7 +269,7 @@ export function answerOwnerDecision(
       message: 'Owner decision ' + o.decisionId + ' cannot be answered by ' + o.answeredBy,
       remedy:
         'An owner decision is answered by a person. An agent answering it is the system asking itself for permission.',
-      specRef: '""" + SEC + """32',
+      specRef: '§32',
     });
   }
 

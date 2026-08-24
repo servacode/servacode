@@ -96,7 +96,17 @@ const md = [
   '|---|---|---|---|---|',
   ...rows.map(
     (r) =>
-      '| ' + r.id + ' | ' + r.requirement + ' | ' + r.expects + ' | `' + r.proof + '` | ' + r.state + ' |',
+      '| ' +
+      r.id +
+      ' | ' +
+      r.requirement +
+      ' | ' +
+      r.expects +
+      ' | `' +
+      r.proof +
+      '` | ' +
+      r.state +
+      ' |',
   ),
   '',
   '## Why each unproven requirement did not resolve',
@@ -109,7 +119,9 @@ const md = [
   '',
   ...(rows.filter((r) => r.limitation !== undefined).length === 0
     ? ['None recorded.']
-    : rows.filter((r) => r.limitation !== undefined).map((r) => '- **' + r.id + '** — ' + r.limitation)),
+    : rows
+        .filter((r) => r.limitation !== undefined)
+        .map((r) => '- **' + r.id + '** — ' + r.limitation)),
 ].join('\n');
 
 writeFileSync(join(root, 'evidence', 'ACCEPTANCE_MATRIX.md'), md + '\n', 'utf8');

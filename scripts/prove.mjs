@@ -129,6 +129,30 @@ if (!existsSync(reportPath)) {
 const report = JSON.parse(readFileSync(reportPath, 'utf8'));
 const suites = Array.isArray(report.testResults) ? report.testResults : [];
 
+/*
+ * The Extension Host suite runs in a real VS Code, so it cannot be part of the offline run.
+ * Its result is merged here when it exists, in the same shape, which means a requirement can
+ * name BOTH an offline test file and a host test file and be proven only when both passed.
+ *
+ * When it does not exist, nothing is merged and every requirement naming a host test reports
+ * "did not run". That is the honest answer, and it is what makes `npm run test:vscode` a
+ * prerequisite for those rows rather than a suggestion.
+ */
+const HOST_REPORT = 'evidence/acceptance-run/extension-host.json';
+const hostPath = join(root, ...HOST_REPORT.split('/'));
+let hostReportCited = false;
+if (existsSync(hostPath)) {
+  try {
+    const host = JSON.parse(readFileSync(hostPath, 'utf8'));
+    if (Array.isArray(host.testResults)) {
+      suites.push(...host.testResults);
+      hostReportCited = true;
+    }
+  } catch {
+    console.error('prove: the Extension Host result could not be read; treating it as absent.');
+  }
+}
+
 /**
  * Did every test in this file pass, in THIS run?
  *
@@ -185,8 +209,19 @@ for (const r of candidates) {
     continue;
   }
 
+  const usesHost = r.provenBy.some((f) => f.replace(/\\/g, '/').startsWith('tests/vscode/'));
   const evidence = [
     { kind: 'FILE', id: REPORT, digest: digest(reportPath), note: 'the offline suite result' },
+    ...(usesHost && hostReportCited
+      ? [
+          {
+            kind: 'FILE',
+            id: HOST_REPORT,
+            digest: digest(hostPath),
+            note: 'the Extension Host suite result',
+          },
+        ]
+      : []),
     ...r.provenBy.map((f) => ({
       kind: 'FILE',
       id: f,

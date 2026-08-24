@@ -162,7 +162,7 @@ export function requestProposalApproval(
       message: 'Proposal ' + p.id + ' is ' + p.state + ', not ASSESSED',
       remedy:
         'Assess a proposal before asking anybody to accept it. Accepting an idea nobody costed is not a decision.',
-      specRef: '""" + SEC + """33',
+      specRef: '§33',
     });
   }
 
@@ -490,7 +490,7 @@ export function accept(
       message: 'Proposal ' + p.id + ' has no assessment',
       remedy:
         'Accepting an idea nobody costed is not a decision. Record the value, complexity, cost, risk and scope effect first.',
-      specRef: '""" + SEC + """33',
+      specRef: '§33',
     });
   }
 
@@ -506,7 +506,7 @@ export function accept(
         affectsCanon: p.affectsCanon,
         owners: [...owningAuthorities(p.affectsCanon)].sort(),
       },
-      specRef: '""" + SEC + """33',
+      specRef: '§33',
     });
   }
 
