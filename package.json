@@ -23,7 +23,7 @@
     "format": "prettier --write \"{src,tests,scripts}/**/*.{ts,mjs}\" \"extension/src/**/*.ts\"",
     "format:check": "prettier --check \"{src,tests,scripts}/**/*.{ts,mjs}\" \"extension/src/**/*.ts\"",
     "catalogues": "node scripts/generate-catalogues.mjs",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && vitest run --reporter=json --outputFile=evidence/acceptance-run/offline-suite.json && npm run build",
     "serva": "node dist/cli/main.js",
     "contracts": "node scripts/generate-agent-contracts.mjs",
     "prove": "node scripts/prove.mjs",
