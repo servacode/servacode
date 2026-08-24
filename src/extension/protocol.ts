@@ -115,6 +115,8 @@ export const WEBVIEW_INVOCABLE: ReadonlySet<string> = new Set([
   'project.snapshot',
   'release.readiness',
   'coverage.report',
+  'reconcile.inspect',
+  'reconcile.repair',
   'conversation.read',
   'conversation.send',
   'owner.answer',

@@ -45,6 +45,25 @@
     }
 
     /*
+     * Comparing Serva's records with the repository. A read, so no confirmation — and the
+     * host repaints with the result rather than this file patching anything in.
+     */
+    if (target.hasAttribute('data-reconcile-check')) {
+      invoke('reconcile.inspect', {}, true);
+      return;
+    }
+
+    /*
+     * Correcting Serva's OWN records. Unconfirmed from here: the host asks natively, and the
+     * service refuses anything that would touch a file the owner might have written — so
+     * pressing this cannot revert, stash or clean a working tree even by mistake.
+     */
+    if (target.hasAttribute('data-reconcile-repair')) {
+      invoke('reconcile.repair', {}, false);
+      return;
+    }
+
+    /*
      * Asking the company for something. The text goes to `conversation.send`, which routes
      * it through classification, planning and Serva's own deterministic check of that plan.
      * There is no action here that hands what the owner typed to a model session, and the

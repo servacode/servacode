@@ -57,6 +57,14 @@ export const AuditAction = {
   OWNER_DECISION_ANSWERED: 'OWNER_DECISION_ANSWERED',
   /** External content was retrieved and captured as evidence. Always UNTRUSTED. */
   SOURCE_CAPTURED: 'SOURCE_CAPTURED',
+  /**
+   * Serva corrected one of its OWN records to match the repository.
+   *
+   * Scoped deliberately: this action is only ever written for bookkeeping. Nothing that
+   * touches a file the owner might have written is repaired, so an audit line carrying this
+   * action can never be evidence that Serva changed somebody's work.
+   */
+  RECONCILIATION_REPAIRED: 'RECONCILIATION_REPAIRED',
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 

@@ -3,6 +3,8 @@ import { fail } from '../core/errors.js';
 import { answerOwnerDecision } from '../intelligence/app.js';
 import { projectSnapshot } from './services.js';
 import { conversationTranscript, sendOwnerRequest } from './conversation.js';
+import { reconciliationView, repairBookkeeping } from './reconciliation.js';
+import { buildEngineeringLayer, engineeringReconcile } from './engineering.js';
 import { buildAiLayer } from './ai.js';
 import { assessReleaseReadiness } from '../intelligence/releaseReadiness.js';
 import { coverageSummary, gateCoverage, lifecycleCoverage } from '../coverage/index.js';
@@ -187,6 +189,39 @@ const DEFINITIONS: readonly ActionDefinition[] = Object.freeze([
         ...(turn.haltReason === undefined ? {} : { refusal: turn.haltReason }),
         data: turn,
       };
+    },
+  } as ActionDefinition<z.ZodTypeAny>,
+
+  {
+    id: 'reconcile.inspect',
+    title: 'Compare Serva’s records with the repository',
+    consequence: ActionConsequence.READ,
+    schema: empty,
+    handler: async (ctx) => {
+      const layer = await buildEngineeringLayer(ctx.rt);
+      const view = reconciliationView(await engineeringReconcile(ctx.rt, layer));
+      return { ok: true, summary: view.headline, data: view };
+    },
+  } as ActionDefinition<z.ZodTypeAny>,
+
+  {
+    id: 'reconcile.repair',
+    title: 'Correct Serva’s own records',
+    consequence: ActionConsequence.CONSEQUENTIAL,
+    confirmPrompt:
+      'This corrects Serva’s own bookkeeping so it matches the repository. It does not revert, stash or clean anything in your working tree.',
+    schema: empty,
+    handler: async (ctx) => {
+      /*
+       * Re-detected here rather than taking a view from the caller. A view is a snapshot of
+       * the world at a moment, and repairing against a stale one would mean acting on a
+       * repository that has since changed — which is the exact failure this whole module is
+       * about.
+       */
+      const layer = await buildEngineeringLayer(ctx.rt);
+      const view = reconciliationView(await engineeringReconcile(ctx.rt, layer));
+      const result = repairBookkeeping(ctx.rt, view);
+      return { ok: true, summary: result.summary, data: result };
     },
   } as ActionDefinition<z.ZodTypeAny>,
 

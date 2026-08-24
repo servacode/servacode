@@ -294,6 +294,7 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Owner Experience',
     mandatory: true,
+    provenBy: ['tests/reconciliation.test.ts', 'tests/vscode/reconciliation.host.test.ts'],
   },
   {
     id: 'UX-CONTROL-CENTER',
@@ -302,6 +303,12 @@ export const REQUIREMENTS: readonly Requirement[] = Object.freeze([
     expects: VerificationType.DETERMINISTIC,
     line: 'Owner Experience',
     mandatory: true,
+    provenBy: [
+      'tests/extension.test.ts',
+      'tests/reconciliation.test.ts',
+      'tests/conversation.test.ts',
+      'tests/vscode/controlCenter.host.test.ts',
+    ],
   },
 
   /* ---------------------------------------------------------------- VS Code runtime */

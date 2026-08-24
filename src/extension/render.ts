@@ -5,6 +5,7 @@ import { MachineQualificationState } from '../portability/machine.js';
 import type { MessageKey } from './i18n.js';
 import type { ProjectSnapshot } from '../app/services.js';
 import type { ConversationTurn } from '../app/conversation.js';
+import type { ReconciliationView } from '../app/reconciliation.js';
 
 /**
  * THE CONTROL CENTER, RENDERED.
@@ -143,6 +144,14 @@ export interface RenderOptions {
    * cannot see where to ask has no way to learn that they may.
    */
   readonly conversation?: readonly ConversationTurn[];
+  /**
+   * The last comparison between Serva's records and the repository.
+   *
+   * Absent means nobody has compared them in this session — which the section says, rather
+   * than showing a reassuring empty list. "Not checked" and "nothing wrong" are different
+   * facts and an owner is entitled to know which one they are looking at.
+   */
+  readonly reconciliation?: ReconciliationView;
   readonly nonce: string;
   readonly cspSource: string;
   readonly styleUri: string;
@@ -246,6 +255,69 @@ export function renderControlCenter(o: RenderOptions): string {
     '</p>' +
     '<p class="ask__error" data-ask-error role="alert" hidden>' +
     T('conversation.empty.refusal') +
+    '</p>' +
+    '</div>';
+
+  /*
+   * DIVERGENCE, MADE ACTIONABLE.
+   *
+   * SPEC: Phase 6 closure §6.
+   *
+   * The header could already say DIVERGENCE. What it could not say was what had diverged or
+   * what the owner could do, so the state was a dead end. Each item now carries its
+   * disposition, and the disposition decides whether a button exists at all.
+   *
+   * There is no button on an item that touches the owner's files. Not a disabled one, and
+   * not one behind a confirmation — the absence is the point.
+   */
+  const reconciliation =
+    o.reconciliation === undefined
+      ? '<p class="empty">' + T('reconcile.notChecked') + '</p>'
+      : o.reconciliation.clean
+        ? '<p class="reconcile reconcile--clean">' + T('reconcile.clean') + '</p>'
+        : '<p class="reconcile reconcile--diverged">' +
+          text(o.reconciliation.headline, language) +
+          '</p>' +
+          '<ul class="divergences">' +
+          o.reconciliation.items
+            .map(
+              (item) =>
+                '<li class="divergence divergence--' +
+                escapeHtml(item.disposition.toLowerCase()) +
+                '">' +
+                '<span class="divergence__disposition">' +
+                escapeHtml(
+                  item.disposition === 'SERVA_MAY_REPAIR'
+                    ? t(language, 'reconcile.servaMayRepair')
+                    : item.disposition === 'OWNER_DECIDES'
+                      ? t(language, 'reconcile.ownerDecides')
+                      : t(language, 'reconcile.evidenceInvalidated'),
+                ) +
+                '</span>' +
+                '<span class="divergence__subject">' +
+                text(item.subject, language) +
+                '</span>' +
+                '<span class="divergence__detail">' +
+                text(item.detail, language) +
+                '</span>' +
+                '<span class="divergence__remedy">' +
+                text(item.remedy, language) +
+                '</span>' +
+                '</li>',
+            )
+            .join('') +
+          '</ul>';
+
+  const reconcileControls =
+    '<div class="reconcile__controls">' +
+    '<button type="button" data-reconcile-check>' +
+    T('reconcile.check') +
+    '</button>' +
+    (o.reconciliation !== undefined && o.reconciliation.repairable > 0
+      ? '<button type="button" data-reconcile-repair>' + T('reconcile.repair') + '</button>'
+      : '') +
+    '<p class="reconcile__promise">' +
+    T('reconcile.neverOverwrites') +
     '</p>' +
     '</div>';
 
@@ -456,6 +528,12 @@ export function renderControlCenter(o: RenderOptions): string {
     '<section aria-labelledby="release-h">',
     '<h2 id="release-h">' + T('release.status') + '</h2>',
     release,
+    '</section>',
+
+    '<section aria-labelledby="reconcile-h">',
+    '<h2 id="reconcile-h">' + T('nav.reconciliation') + '</h2>',
+    reconcileControls,
+    reconciliation,
     '</section>',
 
     '<section aria-labelledby="machine-h">',

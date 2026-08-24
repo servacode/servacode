@@ -330,6 +330,72 @@ textarea:focus-visible {
   color: var(--vscode-errorForeground);
 }
 
+/* ------------------------------------------------------------------ reconciliation */
+
+.reconcile__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-block-end: 10px;
+}
+
+.reconcile__promise {
+  margin: 0;
+  flex-basis: 100%;
+  opacity: 0.8;
+  font-size: 0.9em;
+}
+
+.reconcile--clean {
+  color: var(--vscode-charts-green, inherit);
+}
+
+.divergences {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.divergence {
+  display: grid;
+  gap: 2px;
+  border-inline-start: 3px solid var(--vscode-panel-border);
+  padding-inline-start: 10px;
+}
+
+.divergence--serva_may_repair {
+  border-inline-start-color: var(--vscode-charts-blue, var(--vscode-panel-border));
+}
+
+.divergence--owner_decides {
+  border-inline-start-color: var(--vscode-charts-yellow, var(--vscode-panel-border));
+}
+
+.divergence--evidence_invalidated {
+  border-inline-start-color: var(--vscode-errorForeground);
+}
+
+.divergence__disposition {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+.divergence__subject {
+  font-weight: 600;
+}
+
+.divergence__detail,
+.divergence__remedy {
+  font-size: 0.95em;
+  opacity: 0.9;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

@@ -5,6 +5,7 @@ import { invokeAction, ACTIONS, ActionConsequence } from '../../src/app/actions.
 import { ProjectHealth, isServaProject, projectSnapshot } from '../../src/app/services.js';
 import { NewProjectField, createProject, newProjectRefusal } from '../../src/app/create.js';
 import { conversationTranscript } from '../../src/app/conversation.js';
+import type { ReconciliationView } from '../../src/app/reconciliation.js';
 import { parseWebviewMessage, webviewMayInvoke } from '../../src/extension/protocol.js';
 import { Language, t } from '../../src/extension/i18n.js';
 import { renderControlCenter, statusBarText } from '../../src/extension/render.js';
@@ -48,6 +49,15 @@ let runtime: ServaRuntime | undefined;
  * status bar alone, so an answered question stayed on screen looking unanswered.
  */
 let refreshEverything: (() => void) | undefined;
+
+/*
+ * The last comparison between Serva's records and the repository.
+ *
+ * Held rather than recomputed on every render because it shells out to git, and a panel that
+ * ran git each time it repainted would make every unrelated refresh slow. Cleared whenever a
+ * repair runs, so a repaired view is never shown as if it were still current.
+ */
+let lastReconciliation: ReconciliationView | undefined;
 
 function language(): Language {
   const configured = vscode.workspace.getConfiguration('serva').get<string>('language');
@@ -176,6 +186,7 @@ function renderPanel(context: vscode.ExtensionContext): void {
        * come to disagree.
        */
       conversation: conversationTranscript(runtime ?? (open() as ServaRuntime)),
+      ...(lastReconciliation === undefined ? {} : { reconciliation: lastReconciliation }),
       nonce,
       cspSource: panel.webview.cspSource,
       styleUri: panel.webview.asWebviewUri(vscode.Uri.joinPath(media, 'style.css')).toString(),
@@ -236,6 +247,18 @@ async function handleMessage(raw: unknown): Promise<void> {
     { rt },
     { id: message.actionId, input: message.input, confirmed },
   );
+
+  /*
+   * A comparison is the one action whose RESULT is part of what the panel shows, so it is
+   * kept. A repair invalidates it: the view it produced described a world that has since
+   * changed, and showing it afterwards would tell the owner nothing was corrected.
+   */
+  if (message.actionId === 'reconcile.inspect' && result.ok) {
+    lastReconciliation = result.data as ReconciliationView;
+  }
+  if (message.actionId === 'reconcile.repair') {
+    lastReconciliation = undefined;
+  }
   panel?.webview.postMessage({
     kind: result.ok ? 'RESULT' : 'ERROR',
     requestId: message.requestId,
@@ -261,6 +284,14 @@ async function handleMessage(raw: unknown): Promise<void> {
       refreshEverything();
       return;
     }
+  }
+  /*
+   * A read that changed what the panel has to show still needs a repaint. Without this the
+   * owner presses Compare, git runs, and the section keeps saying "not compared yet".
+   */
+  if (message.actionId === 'reconcile.inspect' && refreshEverything !== undefined) {
+    refreshEverything();
+    return;
   }
   refreshStatusBar();
 }
