@@ -33,7 +33,7 @@ import { join, resolve as resolvePath } from 'node:path';
 
 const root = process.cwd();
 const only = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-const REPORT = 'evidence/acceptance-run/offline-suite.json';
+const REPORT = 'evidence/acceptance-run/prove-offline-suite.json';
 
 const { REQUIREMENTS } = await import('../dist/acceptance/requirements.js');
 const { repositoryIdentity } = await import('../dist/acceptance/status.js');
