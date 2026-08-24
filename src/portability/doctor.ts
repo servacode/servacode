@@ -4,7 +4,7 @@ import { SERVA_DIR } from '../store/paths.js';
 import { SERVA_VERSION } from './version.js';
 import { MachineQualificationState, machineIdentity, qualificationRefusal } from './machine.js';
 import { verifyBackup } from './backup.js';
-import type { MachineIdentityFacts, MachineQualification } from './machine.js';
+import type { MachineIdentity, MachineQualification } from './machine.js';
 
 /**
  * MACHINE DOCTOR — INSPECT, NEVER GUESS, NEVER FIX WITHOUT BEING ASKED.
@@ -136,7 +136,14 @@ export interface DoctorInput {
 export interface DoctorReport {
   readonly servaVersion: string;
   readonly checks: readonly CheckResult[];
-  readonly identity?: MachineIdentityFacts;
+  /**
+   * The identity this machine was measured as, INCLUDING its fingerprint.
+   *
+   * Declared as the facts alone for most of Phase 6, while `machineIdentity()` was already
+   * returning the built identity — so the fingerprint was there at runtime and invisible to
+   * every caller through the type. The live acceptance found it by trying to read it.
+   */
+  readonly identity?: MachineIdentity;
   readonly qualification: MachineQualificationState;
   readonly qualificationReason: string;
   readonly engineeringReady: boolean;

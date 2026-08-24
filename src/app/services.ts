@@ -237,9 +237,23 @@ export function projectSnapshot(rt: ServaRuntime, o: SnapshotOptions = {}): Proj
 }
 
 function projectName(rt: ServaRuntime): string {
+  /*
+   * THE PROJECT RECORD, VIA THE ACCESSOR THAT KNOWS WHERE IT IS.
+   *
+   * SPEC: Phase 6 closure §14.
+   *
+   * This used to look up canon id `project` in family `project`, and no such record exists:
+   * a project is stored under its own `SC-PROJ-...` id. The lookup always missed and the
+   * fallback always won, so the Control Center, the status bar and every report showed an
+   * owner their FOLDER NAME as the name of their company.
+   *
+   * It failed silently because a folder name is usually plausible. The live acceptance
+   * created a project in a temporary directory, and `serva-live-636PIX` is not plausible.
+   *
+   * The fallback survives for a store too damaged to read, and only for that.
+   */
   try {
-    const project = rt.store.getCanon<{ readonly name?: string }>('project', 'project');
-    return project?.body.name ?? rt.root.split(/[\\/]/).pop() ?? 'project';
+    return rt.project()?.name ?? rt.root.split(/[\\/]/).pop() ?? 'project';
   } catch {
     return rt.root.split(/[\\/]/).pop() ?? 'project';
   }

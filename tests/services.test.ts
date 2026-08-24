@@ -387,3 +387,27 @@ describe('every consequential action is a validated command', () => {
     expect(result.summary).toBe('stages 26/26, gates 19/19');
   });
 });
+
+/* ===================================================== the company has its own name */
+
+describe('the snapshot shows the company’s name, not the folder’s', () => {
+  it('reads the project record rather than the directory', () => {
+    /*
+     * SPEC: Phase 6 closure §14.
+     *
+     * The lookup used to miss — no canon record is stored under the id `project` — so the
+     * fallback always won and every surface showed an owner their FOLDER NAME. It failed
+     * silently because a folder is usually named after the project. Here it deliberately is
+     * not.
+     */
+    const root = tempRoot();
+    roots.push(root);
+    const rt = ServaRuntime.init('RahalGo', 'Stop losing phone orders', { root });
+    try {
+      expect(projectSnapshot(rt).projectName).toBe('RahalGo');
+      expect(projectSnapshot(rt).projectName).not.toBe(root.split(/[\/]/).pop());
+    } finally {
+      rt.close();
+    }
+  });
+});

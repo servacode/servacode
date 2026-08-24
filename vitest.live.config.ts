@@ -16,6 +16,7 @@ export default defineConfig({
       // rather than riding along with the model-call suite.
       'tests/live/engineering.live.test.ts',
       'tests/live/intelligence.live.test.ts',
+      'tests/live/serva.live.test.ts',
     ],
     environment: 'node',
     reporters: ['default'],

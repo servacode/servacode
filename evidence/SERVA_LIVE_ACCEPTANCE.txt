@@ -1,0 +1,24 @@
+
+> serva-code@1.0.0 test:serva-live
+> vitest run --config vitest.serva.config.ts
+
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mD:/SEVACODE[39m
+
+[90mstdout[2m | tests/live/serva.live.test.ts[2m > [22m[2mServa 1.0, live, on this machine[2m > [22m[2mreports whether the engine will answer, without spending anything to find out
+[22m[39mengine health: READY
+
+[90mstdout[2m | tests/live/serva.live.test.ts[2m > [22m[2mServa 1.0, live, on this machine[2m > [22m[2mrecords which machine this ran on, so the evidence names a computer
+[22m[39mmachine fingerprint: bee49fd944f5cff726030df407f9b6f0a1228b41fc872a736a42e30f61d63790
+qualification: UNQUALIFIED — this machine has never been qualified, so write-capable engineering may not run on it
+
+ [32m✓[39m tests/live/serva.live.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 237428[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva 1.0, live, on this machine[2m > [22mreports whether the engine will answer, without spending anything to find out [33m837[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva 1.0, live, on this machine[2m > [22man owner request is routed through the governed path, or refused honestly [33m234815[2mms[22m[39m
+   [33m[2m✓[22m[39m Serva 1.0, live, on this machine[2m > [22mrecords which machine this ran on, so the evidence names a computer [33m1730[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m4 passed[39m[22m[90m (4)[39m
+[2m   Start at [22m 11:50:47
+[2m   Duration [22m 239.17s[2m (transform 894ms, setup 0ms, collect 1.50s, tests 237.43s, environment 0ms, prepare 76ms)[22m
+
