@@ -41,7 +41,12 @@ export interface AggregateOutcome {
   readonly refusals: readonly string[];
 }
 
-/** The most recent attempt at each scope, since a retry is new evidence about the same thing. */
+/**
+ * The most recent attempt at each scope, which decides COVERAGE.
+ *
+ * Coverage is a property of the latest look: an area reviewed completely today is covered
+ * however badly an earlier attempt went. FINDINGS are not treated this way — see below.
+ */
 function latestByScope(reviews: readonly ScopeReview[]): Map<string, ScopeReview> {
   const latest = new Map<string, ScopeReview>();
   for (const r of reviews) {
@@ -51,7 +56,41 @@ function latestByScope(reviews: readonly ScopeReview[]): Map<string, ScopeReview
   return latest;
 }
 
+/**
+ * EVERY FINDING EVER RECORDED AT A SCOPE, NOT ONLY THE LATEST ATTEMPT'S.
+ *
+ * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-F2.
+ *
+ * The aggregate read findings from the latest attempt alone, so a CRITICAL recorded by an
+ * earlier attempt disappeared the moment a later one did not re-report it — and a later run
+ * has no obligation to re-find anything. Retrying a scope until it came back quiet would have
+ * un-blocked the review.
+ *
+ * `scopeReview.ts` rejects exactly that inference in its own docstring: "a finding that stops
+ * appearing may have been fixed, or may simply not have been looked for". Resolution is a
+ * RECORDED fact, so a finding stops blocking when someone marks it resolved and says why —
+ * never by going unmentioned.
+ *
+ * Findings are keyed by id within a scope, so re-reporting the same finding does not double
+ * it, and a later attempt CAN resolve one by recording it resolved.
+ */
+function findingsAcrossAttempts(
+  reviews: readonly ScopeReview[],
+  scopeId: string,
+): readonly ScopeFinding[] {
+  const byId = new Map<string, ScopeFinding>();
+  for (const r of reviews.filter((x) => x.scopeId === scopeId)) {
+    for (const f of r.findings) {
+      const seen = byId.get(f.id);
+      /* A later resolution wins; a later silence does not. */
+      if (seen === undefined || (!seen.resolved && f.resolved)) byId.set(f.id, f);
+    }
+  }
+  return [...byId.values()];
+}
+
 export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome {
+  const store = input.store;
   const refusals: string[] = [];
   const all = listScopeReviews(input.store);
   const latest = latestByScope(all);
@@ -116,11 +155,59 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
         );
       }
 
+      /*
+       * THE RUN IS RESOLVED, NOT READ OFF THE RECORD.
+       *
+       * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-F1.
+       *
+       * This module derived authority and independence canonically and then believed each
+       * record's own `terminalOutcome` about whether its run happened at all.
+       * `resolveSecurityReview` performs exactly this check a few files away, with a comment
+       * saying why — so the fix was in view and simply not applied here. Downstream,
+       * `resolveProof` re-verifies only the ONE run the aggregate names, which left the other
+       * twenty-one confirmed by nobody.
+       */
+      const run = store.getCanon<{ agentId?: string; outcome?: string }>(
+        'agentRunRecord',
+        record.reviewerRunId,
+      )?.body;
+
+      if (run === undefined) {
+        refusals.push(
+          '"' + unit + '" cites reviewer run ' + record.reviewerRunId + ', which does not resolve',
+        );
+      } else {
+        if (run.outcome !== 'COMPLETED') {
+          refusals.push(
+            'reviewer run ' +
+              record.reviewerRunId +
+              ' for "' +
+              unit +
+              '" ended ' +
+              String(run.outcome) +
+              ', so it reviewed nothing',
+          );
+        }
+        if (run.agentId !== record.reviewerAgentId) {
+          refusals.push(
+            'reviewer run ' +
+              record.reviewerRunId +
+              ' for "' +
+              unit +
+              '" was made by ' +
+              String(run.agentId) +
+              ', not the ' +
+              record.reviewerAgentId +
+              ' the record names',
+          );
+        }
+      }
+
       if (record.verdict === ReviewVerdict.NOT_VERIFIED) {
         refusals.push('"' + unit + '" returned NOT_VERIFIED, so it decided nothing');
       }
 
-      findings.push(...record.findings);
+      findings.push(...findingsAcrossAttempts(all, record.scopeId));
     }
   }
 

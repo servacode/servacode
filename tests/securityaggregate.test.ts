@@ -48,12 +48,27 @@ function seedCompleteReview(
   for (const area of REQUIRED_SCOPE) {
     for (const { unit } of reviewUnitsFor(area)) {
       n += 1;
+      const runId = 'SC-RUN-' + String(n).padStart(6, '0');
+      /*
+       * The run is seeded too, because the aggregate now RESOLVES it rather than believing the
+       * record. A fixture that recorded reviews for runs that never happened was describing a
+       * world the verifier is right to refuse.
+       */
+      const tx = store.begin();
+      tx.putCanon('agentRunRecord', runId, {
+        runId,
+        agentId: REVIEWER,
+        outcome: 'COMPLETED',
+        roleInTask: 'VERIFIER',
+      });
+      tx.commit();
+
       recordScopeReview(store, {
         scopeId: '',
         scopeName: unit,
         implementationCommit: COMMIT,
         treeDigest: TREE,
-        reviewerRunId: 'SC-RUN-' + String(n).padStart(6, '0'),
+        reviewerRunId: runId,
         reviewerAgentId: REVIEWER,
         coverage: ScopeCoverage.COMPLETE,
         filesReviewed: ['src/x.ts'],
@@ -270,5 +285,202 @@ describe('the aggregate refuses anything less than a real review of everything',
     const result = aggregate(rt);
     expect(result.review).toBeUndefined();
     expect(result.refusals.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the aggregate re-resolves the runs it aggregates', () => {
+  /*
+   * SPEC: HIGH findings SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-F1 and F2, from the independent
+   * review — both against this module, written earlier in this same effort.
+   *
+   * F1: the aggregate derived authority and independence canonically and then took each scope
+   * record's `terminalOutcome` on its word, never resolving `reviewerRunId` against
+   * `agentRunRecord`. `resolveSecurityReview` does exactly that check a few files away, with a
+   * comment explaining why — so this module had the fix in view and did not apply it.
+   * `resolveProof` re-verifies only the ONE run the aggregate names, so the other twenty-one
+   * were confirmed by nobody.
+   *
+   * F2: `latestByScope` kept only the newest attempt per unit, so a CRITICAL recorded by an
+   * earlier attempt vanished if a later one simply did not re-report it. `scopeReview.ts`'s
+   * own docstring rejects that inference in as many words: "a finding that stops appearing may
+   * have been fixed, or may simply not have been looked for." Retrying a scope must not
+   * un-block a review.
+   */
+  function seedReviewerRun(store: Store, runId: string, agentId = REVIEWER, outcome = 'COMPLETED') {
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', runId, { runId, agentId, outcome, roleInTask: 'VERIFIER' });
+    tx.commit();
+  }
+
+  it('refuses a scope record whose reviewer run does not exist', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    /*
+     * One record cites a run nobody recorded — the shape a fabricated review takes: a real
+     * scope, a plausible run id, and nothing behind it.
+     */
+    recordScopeReview(rt.store, {
+      scopeId: '',
+      scopeName: 'Reconciliation',
+      implementationCommit: COMMIT,
+      treeDigest: TREE,
+      reviewerRunId: 'SC-RUN-INVENTED',
+      reviewerAgentId: REVIEWER,
+      coverage: ScopeCoverage.COMPLETE,
+      filesReviewed: ['src/engineering/reconcile.ts'],
+      filesOmitted: [],
+      findings: [],
+      verdict: ReviewVerdict.ACCEPTED,
+      terminalOutcome: 'COMPLETED',
+      /* Later than the seeded attempt, so this is the one coverage resolves from. */
+      reviewedAt: '2026-08-26T00:00:00.000Z',
+    });
+
+    const result = aggregate(rt);
+    expect(result.review).toBeUndefined();
+    expect(result.refusals.join(' ')).toMatch(/does not resolve|does not exist/i);
+  });
+
+  it('refuses a reviewer run that did not COMPLETE, whatever the record claims', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    let n = 0;
+    for (const area of REQUIRED_SCOPE) {
+      for (let i = 0; i < reviewUnitsFor(area).length; i += 1) {
+        n += 1;
+        seedReviewerRun(
+          rt.store,
+          'SC-RUN-' + String(n).padStart(6, '0'),
+          REVIEWER,
+          n === 3 ? 'FAILED' : 'COMPLETED',
+        );
+      }
+    }
+    const result = aggregate(rt);
+    expect(result.review).toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('FAILED');
+  });
+
+  it('refuses a run made by a different agent than the record names', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    let n = 0;
+    for (const area of REQUIRED_SCOPE) {
+      for (let i = 0; i < reviewUnitsFor(area).length; i += 1) {
+        n += 1;
+        seedReviewerRun(
+          rt.store,
+          'SC-RUN-' + String(n).padStart(6, '0'),
+          n === 5 ? 'SC-AGENT-200' : REVIEWER,
+        );
+      }
+    }
+    const result = aggregate(rt);
+    expect(result.review).toBeUndefined();
+    expect(result.refusals.join(' ')).toMatch(/SC-AGENT-200|made by/);
+  });
+
+  it('resolves when every cited run is real, completed and by the named agent', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    let n = 0;
+    for (const area of REQUIRED_SCOPE) {
+      for (let i = 0; i < reviewUnitsFor(area).length; i += 1) {
+        n += 1;
+        seedReviewerRun(rt.store, 'SC-RUN-' + String(n).padStart(6, '0'));
+      }
+    }
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+    expect(result.review?.verdict).toBe(ReviewVerdict.ACCEPTED);
+  });
+
+  it('a retry does not erase an earlier unresolved CRITICAL', () => {
+    /* F2: history stays, and an unresolved finding keeps blocking until it is RESOLVED. */
+    const rt = project();
+    seedCompleteReview(rt.store);
+    let n = 0;
+    for (const area of REQUIRED_SCOPE) {
+      for (let i = 0; i < reviewUnitsFor(area).length; i += 1) {
+        n += 1;
+        seedReviewerRun(rt.store, 'SC-RUN-' + String(n).padStart(6, '0'));
+      }
+    }
+
+    /* An EARLIER attempt at one scope found something CRITICAL and nobody resolved it. */
+    seedReviewerRun(rt.store, 'SC-RUN-EARLIER');
+    recordScopeReview(rt.store, {
+      scopeId: '',
+      scopeName: 'Reconciliation',
+      implementationCommit: COMMIT,
+      treeDigest: TREE,
+      reviewerRunId: 'SC-RUN-EARLIER',
+      reviewerAgentId: REVIEWER,
+      coverage: ScopeCoverage.COMPLETE,
+      filesReviewed: ['src/engineering/reconcile.ts'],
+      filesOmitted: [],
+      findings: [
+        {
+          id: 'R-CRIT',
+          severity: Severity.CRITICAL,
+          area: 'Reconciliation',
+          statement: 'evidence can be trusted after an external change',
+          evidence: ['src/engineering/reconcile.ts:234'],
+          resolved: false,
+        },
+      ],
+      verdict: ReviewVerdict.BLOCKED,
+      terminalOutcome: 'COMPLETED',
+      /* Earlier in time than the clean attempt seeded above. */
+      reviewedAt: '2026-08-24T00:00:00.000Z',
+    });
+
+    const result = aggregate(rt);
+    expect(result.review, 'a retry silently un-blocked the review').toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('R-CRIT');
+  });
+
+  it('an earlier finding recorded as RESOLVED stops blocking', () => {
+    /* Resolution is recorded, so fixing something genuinely clears it — and stays visible. */
+    const rt = project();
+    seedCompleteReview(rt.store);
+    let n = 0;
+    for (const area of REQUIRED_SCOPE) {
+      for (let i = 0; i < reviewUnitsFor(area).length; i += 1) {
+        n += 1;
+        seedReviewerRun(rt.store, 'SC-RUN-' + String(n).padStart(6, '0'));
+      }
+    }
+    seedReviewerRun(rt.store, 'SC-RUN-EARLIER');
+    recordScopeReview(rt.store, {
+      scopeId: '',
+      scopeName: 'Reconciliation',
+      implementationCommit: COMMIT,
+      treeDigest: TREE,
+      reviewerRunId: 'SC-RUN-EARLIER',
+      reviewerAgentId: REVIEWER,
+      coverage: ScopeCoverage.COMPLETE,
+      filesReviewed: ['src/engineering/reconcile.ts'],
+      filesOmitted: [],
+      findings: [
+        {
+          id: 'R-CRIT',
+          severity: Severity.CRITICAL,
+          area: 'Reconciliation',
+          statement: 'evidence can be trusted after an external change',
+          evidence: ['src/engineering/reconcile.ts:234'],
+          resolved: true,
+          resolvedNote: 'fixed: four divergence kinds are now detected',
+        },
+      ],
+      verdict: ReviewVerdict.BLOCKED,
+      terminalOutcome: 'COMPLETED',
+      reviewedAt: '2026-08-24T00:00:00.000Z',
+    });
+
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+    /* The resolved finding is still carried, because history does not disappear. */
+    expect(result.review?.findings.some((f) => f.id === 'R-CRIT')).toBe(true);
   });
 });

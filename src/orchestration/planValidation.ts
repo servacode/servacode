@@ -134,6 +134,57 @@ export function validateExecutionPlan(
     });
   }
 
+  /*
+   * WHEN THE COMPANY SAYS IT NEEDS THE OWNER, IT DOES NOT PROCEED.
+   *
+   * SPEC: 04 §3.4, §7; finding CONVERSATION-GOVERNANCE/F1.
+   *
+   * These three signals were carried in the schemas and read nowhere. `route()` branched only
+   * on run outcome, schema parsing and the meta-class short-circuit, and this function never
+   * mentioned them — so a classification or plan that the AI ITSELF flagged as requiring the
+   * owner reached QUEUED and dispatched. The company decided on the owner's behalf at exactly
+   * the moment it had written down that it must not.
+   *
+   * A declared safeguard that nothing consumes is worse than no safeguard: the schema
+   * documents a protection, and a reader has no reason to check that anything reads it.
+   *
+   * Refusing here rather than in `route()` is deliberate. This is the deterministic gate, it
+   * already rejects rather than sanitizes, and a caller cannot reach dispatch around it.
+   */
+  if (opts.classification.ownerDecisionRequired) {
+    add({
+      kind: PlanFindingKind.OWNER_ACTION_DELEGATED,
+      detail:
+        'The classification records that this request needs an owner decision, so it cannot be ' +
+        'planned into execution without one.',
+      specRef: '04 §3.4',
+    });
+  }
+
+  for (const decision of plan.ownerDecisionsRequired) {
+    add({
+      kind: PlanFindingKind.OWNER_ACTION_DELEGATED,
+      detail:
+        'The plan itself records an owner decision it needs: ' +
+        decision +
+        '. A plan that names what only the owner can settle must stop and ask.',
+      specRef: '04 §7',
+    });
+  }
+
+  /*
+   * `unresolved` from either source. An item nobody has settled is not made settled by
+   * planning around it — and the plan naming it is the company noticing, which is the part
+   * worth acting on.
+   */
+  for (const item of [...opts.classification.unresolved, ...plan.unresolved]) {
+    add({
+      kind: PlanFindingKind.UNRECORDED_OMISSION,
+      detail: 'Unresolved before execution: ' + item,
+      specRef: '04 §3.4',
+    });
+  }
+
   if (plan.planFor !== opts.classification.requestClass) {
     add({
       kind: PlanFindingKind.CLASSIFICATION_MISMATCH,

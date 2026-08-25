@@ -6,6 +6,7 @@ import {
   type EngineeringWorkspaceManager,
 } from './workspace.js';
 import { listChangeSets, type ChangeSet } from './changeset.js';
+import { listEvidence } from './execution.js';
 import type { GitService } from './git.js';
 import type { Store } from '../store/store.js';
 import type { Clock } from '../core/clock.js';
@@ -177,10 +178,125 @@ export async function reconcileWorkspaces(deps: ReconcileDeps): Promise<Reconcil
     });
   }
 
+  /*
+   * FOUR KINDS THAT WERE VOCABULARY RATHER THAN DETECTION.
+   *
+   * SPEC: finding RECONCILIATION/RECON-1.
+   *
+   * `DivergenceKind` declared BRANCH_MOVED, INTERRUPTED_PRODUCER_RUN, UNVERIFIED_CHANGESET and
+   * ACCEPTED_NOT_INTEGRATED — four categories central to this module's stated purpose of
+   * keeping a gate from trusting stale evidence — and nothing here ever constructed one. An
+   * enum value nothing can emit is worse than a missing feature: the vocabulary reads as a
+   * finished threat model, and `invalidatesEvidence()` looks like it filters for conditions
+   * that could never arrive.
+   *
+   * Every one of these is REPORTED and never repaired, like everything else here. A
+   * reconciliation that fixed what it found would be deciding, on its own, which of two
+   * disagreeing records is the true one.
+   */
+  const branchTips = new Map(
+    gitWorktrees.filter((w) => w.branch !== undefined).map((w) => [w.branch as string, w.head]),
+  );
+
+  for (const w of recorded) {
+    if (w.branch === undefined || w.branch === '') continue;
+    if (w.state === WorkspaceState.REMOVED || w.state === WorkspaceState.ABANDONED) continue;
+    const tip = branchTips.get(w.branch);
+    /*
+     * A branch Serva created that now points somewhere Serva did not put it.
+     *
+     * The reference is the head Serva last recorded, or the base it created the branch at when
+     * no head has been recorded yet — a fresh worktree whose branch has already moved is
+     * exactly the case worth catching, and requiring `headCommit` would have skipped it.
+     *
+     * Only checked against a tip git actually reports: a branch git no longer knows about is
+     * an abandoned worktree, which is already its own finding above.
+     */
+    const expected =
+      w.headCommit !== undefined && w.headCommit !== '' ? w.headCommit : w.baseCommit;
+    if (tip !== undefined && expected !== '' && tip !== expected) {
+      divergences.push({
+        kind: DivergenceKind.BRANCH_MOVED,
+        subject: w.branch,
+        detail:
+          'Serva recorded ' +
+          w.branch +
+          ' at ' +
+          expected.slice(0, 12) +
+          ' and the repository has it at ' +
+          tip.slice(0, 12) +
+          '.',
+        selfRepairable: false,
+        remedy:
+          'Something moved this branch outside Serva. Establish which commit is the intended one before any evidence bound to it is trusted.',
+      });
+    }
+  }
+
   const changeSets = listChangeSets(deps.store);
   for (const cs of changeSets) {
     const w = deps.workspaces.get(cs.workspaceId);
     if (w === undefined) continue;
+
+    /*
+     * A Producer run that started and never reached a terminal record. Its change set cannot
+     * be trusted as finished work, because nothing recorded how it ended.
+     */
+    if (cs.producerRunId !== undefined) {
+      const run = deps.store.getCanon<{ terminal?: boolean; outcome?: string }>(
+        'agentRunRecord',
+        cs.producerRunId,
+      )?.body;
+      if (run !== undefined && run.terminal !== true && run.outcome === undefined) {
+        divergences.push({
+          kind: DivergenceKind.INTERRUPTED_PRODUCER_RUN,
+          subject: cs.producerRunId,
+          detail:
+            'Run ' +
+            cs.producerRunId +
+            ' produced ' +
+            cs.changeSetId +
+            ' and never reached a terminal record, so how it ended was never written down.',
+          selfRepairable: false,
+          remedy:
+            'An interrupted run leaves work whose completeness nobody established. Inspect the change set before any gate consumes it.',
+        });
+      }
+    }
+
+    const evidence = listEvidence(deps.store).filter((e) => e.changeSetId === cs.changeSetId);
+    if (evidence.length === 0 && w.state !== WorkspaceState.CREATED) {
+      divergences.push({
+        kind: DivergenceKind.UNVERIFIED_CHANGESET,
+        subject: cs.changeSetId,
+        detail:
+          'Change set ' +
+          cs.changeSetId +
+          ' exists in workspace state ' +
+          w.state +
+          ' with no verification evidence bound to it at all.',
+        selfRepairable: false,
+        remedy:
+          'Nothing measured this change. Run the required checks against it, or discard it; do not accept it on the strength of its existence.',
+      });
+    }
+
+    if (w.state === WorkspaceState.ACCEPTED && cs.headCommit === '') {
+      divergences.push({
+        kind: DivergenceKind.ACCEPTED_NOT_INTEGRATED,
+        subject: cs.changeSetId,
+        detail:
+          'Workspace ' +
+          cs.workspaceId +
+          ' is recorded ACCEPTED and ' +
+          cs.changeSetId +
+          ' names no integrated commit, so the acceptance points at nothing in the repository.',
+        selfRepairable: false,
+        remedy:
+          'An acceptance with no commit behind it cannot be relied on. Establish whether the integration happened before treating this work as landed.',
+      });
+    }
+
     if (w.state === WorkspaceState.ACCEPTED && cs.headCommit !== '') {
       const exists = await deps.git.commitExists(cs.headCommit);
       if (!exists) {
@@ -232,11 +348,21 @@ export async function reconcileWorkspaces(deps: ReconcileDeps): Promise<Reconcil
  * the same reason a ChangeSet change makes evidence stale.
  */
 export function invalidatesEvidence(report: ReconciliationReport): Divergence[] {
+  /*
+   * Four of these were unreachable until the detector could produce them, so this filter looked
+   * complete while covering only the three kinds that could actually arrive. A gate consuming
+   * evidence must react to all of them: each one means the thing the evidence describes is not
+   * the thing on disk.
+   */
   return report.divergences.filter(
     (d) =>
       d.kind === DivergenceKind.WORKTREE_HEAD_MOVED ||
       d.kind === DivergenceKind.EXTERNAL_WORKSPACE_CHANGE ||
-      d.kind === DivergenceKind.INTEGRATION_NOT_IN_GIT,
+      d.kind === DivergenceKind.INTEGRATION_NOT_IN_GIT ||
+      d.kind === DivergenceKind.BRANCH_MOVED ||
+      d.kind === DivergenceKind.INTERRUPTED_PRODUCER_RUN ||
+      d.kind === DivergenceKind.UNVERIFIED_CHANGESET ||
+      d.kind === DivergenceKind.ACCEPTED_NOT_INTEGRATED,
   );
 }
 

@@ -124,8 +124,36 @@ export function inspectRestore(o: RestoreOptions): RestoreInspection {
       : undefined;
 
   const destinationRoot = resolve(o.destinationRoot);
+
+  /*
+   * THE PROJECT ID IS PART OF THE BUNDLE, AND A BUNDLE IS INPUT.
+   *
+   * SPEC: §32; CRITICAL finding INSTALL-UPDATE-ROLLBACK/SEC-1.
+   *
+   * Every FILE path here went through `safeBundlePath`/`resolveInside`, and the header states
+   * the rule: "A BACKUP IS INPUT... every path is checked for traversal." The directory those
+   * files all land in never was. `join(destinationRoot, p.projectId)` accepted `../../escaped`,
+   * and `performRestore` then drove `rmSync`, `mkdirSync` and `renameSync` from it — including
+   * displacing whatever it found at the target.
+   *
+   * The manifest digest does not help: `manifestDigest` is exported, so anyone crafting a
+   * bundle re-signs it. A digest proves a bundle is self-consistent, never that its contents
+   * are safe to act on.
+   *
+   * So the id is confined by the SAME helper the entries use rather than by a second, weaker
+   * check written beside it. Nested ids stay legal — confinement is not a ban on structure.
+   */
+  const unconfined = manifest.projects.filter((p) => safeBundlePath(p.projectId) === undefined);
+
   const projects = manifest.projects.map((p): RestorePlanProject => {
-    const destination = join(destinationRoot, p.projectId);
+    const safeId = safeBundlePath(p.projectId);
+    /*
+     * An unconfined id still gets a plan row, because inspection must be able to REPORT it.
+     * The destination is pinned inside the root so that nothing downstream can act on the
+     * escaping path, and `ok` is false below, so nothing downstream runs at all.
+     */
+    const destination =
+      safeId === undefined ? join(destinationRoot, '.refused') : join(destinationRoot, safeId);
     const files = manifest.inventory.filter((e) => e.path.startsWith(p.bundlePath + '/'));
     return {
       projectId: p.projectId,
@@ -141,10 +169,20 @@ export function inspectRestore(o: RestoreOptions): RestoreInspection {
     (p) => p.conflict !== RestoreConflict.EMPTY && o.overwrite !== true,
   );
 
+  /* An escaping id is refused outright: no overwrite flag and no conflict state excuses it. */
+  const problems = unconfined.map(
+    (p) =>
+      'the bundle names a project id that escapes the destination root: ' +
+      JSON.stringify(p.projectId) +
+      '. A backup is input, and a project id that leaves the root would let an archive write ' +
+      'anywhere on the machine that restores it.',
+  );
+
   return {
-    ok: blocking.length === 0,
+    ok: blocking.length === 0 && problems.length === 0,
     manifest,
     compatibility: compat.reason,
+    ...(problems.length === 0 ? {} : { problems }),
     ...(migration === undefined ? {} : { migration }),
     projects,
     /*
@@ -229,6 +267,33 @@ export function performRestore(o: RestoreOptions): RestoreResult {
       specRef: '§32',
     });
   }
+  /*
+   * CONFINEMENT IS NOT A CONFLICT, SO `overwrite` DOES NOT WAIVE IT.
+   *
+   * SPEC: CRITICAL finding INSTALL-UPDATE-ROLLBACK/SEC-1.
+   *
+   * The refusal below is waived by `overwrite`, which is right for its own case: an owner who
+   * says "yes, replace what is there" has answered the question that check asks. Nobody has
+   * answered "yes, write outside the directory I named", and no flag on this call means that.
+   * So this is checked first, separately, and admits no override.
+   */
+  const escaping = inspection.manifest.projects.filter(
+    (p) => safeBundlePath(p.projectId) === undefined,
+  );
+  if (escaping.length > 0) {
+    return fail({
+      code: 'E_VALIDATION',
+      message:
+        'Refusing to restore a bundle whose project id escapes the destination root: ' +
+        escaping.map((p) => JSON.stringify(p.projectId)).join(', '),
+      remedy:
+        'A backup is input. A project id that leaves the destination root would let an archive ' +
+        'delete or replace files anywhere on the machine that restores it.',
+      details: { projectIds: escaping.map((p) => p.projectId) },
+      specRef: '§32',
+    });
+  }
+
   if (!inspection.ok && o.overwrite !== true) {
     return fail({
       code: 'E_VALIDATION',

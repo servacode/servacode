@@ -1,5 +1,7 @@
 import { fail } from '../core/errors.js';
 import { AuditAction, audit } from '../events/audit.js';
+import { readTerminalSnapshot } from '../events/agentRun.js';
+import { RunOutcome } from '../vocab/index.js';
 import { ARTIFACT_TYPES, repository } from './repository.js';
 import {
   ApplicabilityAssessmentSchema,
@@ -70,6 +72,86 @@ function refuseLeakage(kind: string, fields: readonly string[]): void {
   });
 }
 
+/**
+ * PROVE THE CURATOR, RATHER THAN TAKING ITS NAME.
+ *
+ * SPEC: §32; CRITICAL finding ORGANIZATIONAL-LEARNING-CORE/SEC-1.
+ *
+ * `KNOWLEDGE_CURATOR` was exported and never compared to anything. `curatedBy` arrived as a
+ * plain string and went straight into `meta.attribution.agentId`, so any caller holding a
+ * `LearningDeps` — store, clock, ids; no registry, no run context — could publish company
+ * knowledge attributed to any agent it chose to name, including SC-AGENT-290 itself.
+ *
+ * The module's own docstring claimed the curator and the assessor were "declared independent
+ * of one another" and that independence was "checked, not assumed". Nothing was checked: two
+ * different literal strings satisfied it.
+ *
+ * `proposals.ts` already held the answer, with a comment saying precisely why — "a
+ * caller-supplied actor string is not proof of a governed run." So a contribution now cites a
+ * run, and the run is resolved: it must exist, it must have COMPLETED, and it must have been
+ * made by the agent the contribution claims. Attribution still RECORDS who acted; it no longer
+ * GRANTS the permission to.
+ */
+function assertCurator(deps: LearningDeps, curatedBy: string, curatorRunId: string): void {
+  if (curatedBy !== KNOWLEDGE_CURATOR) {
+    fail({
+      code: 'E_GATE_AUTHORITY',
+      message:
+        'Only the Knowledge Curator publishes organizational learning: ' +
+        curatedBy +
+        ' is not ' +
+        KNOWLEDGE_CURATOR,
+      remedy:
+        'Generalised knowledge outlives the project it came from, so one declared role owns it.',
+      details: { curatedBy, expected: KNOWLEDGE_CURATOR },
+      specRef: '§32',
+    });
+  }
+
+  const snapshot = readTerminalSnapshot(deps.store, curatorRunId) as
+    { readonly outcome?: string; readonly agentId?: string } | undefined;
+
+  if (snapshot === undefined) {
+    fail({
+      code: 'E_GATE_AUTHORITY',
+      message: 'Curation cites run ' + curatorRunId + ', which does not exist in this store',
+      remedy: 'A caller-supplied actor string is not proof of a governed run. Cite a real one.',
+      details: { curatorRunId },
+      specRef: '§32',
+    });
+  }
+  if (snapshot?.outcome !== RunOutcome.COMPLETED) {
+    fail({
+      code: 'E_GATE_AUTHORITY',
+      message:
+        'Curator run ' +
+        curatorRunId +
+        ' ended ' +
+        String(snapshot?.outcome) +
+        ', so it curated nothing',
+      remedy: 'Only a completed governed run can publish knowledge the company will rely on.',
+      details: { curatorRunId, outcome: snapshot?.outcome },
+      specRef: '§32',
+    });
+  }
+  if (snapshot?.agentId !== curatedBy) {
+    fail({
+      code: 'E_GATE_AUTHORITY',
+      message:
+        'Curator run ' +
+        curatorRunId +
+        ' was made by ' +
+        String(snapshot?.agentId) +
+        ', not the ' +
+        curatedBy +
+        ' this contribution claims',
+      remedy: 'Borrowing a real run does not transfer the authority of the agent that made it.',
+      details: { curatorRunId, actual: snapshot?.agentId, claimed: curatedBy },
+      specRef: '§32',
+    });
+  }
+}
+
 /** Contribute a lesson. Generalised or refused; there is no third outcome. */
 export function contributeLesson(
   deps: LearningDeps,
@@ -78,8 +160,11 @@ export function contributeLesson(
     readonly context: string;
     readonly applicableWhen: string;
     readonly curatedBy: string;
+    /** The governed run that performed this curation. Resolved, never taken on trust. */
+    readonly curatorRunId: string;
   },
 ): LessonLearned {
+  assertCurator(deps, o.curatedBy, o.curatorRunId);
   refuseLeakage('lesson', [o.statement, o.context, o.applicableWhen]);
   const at = deps.clock.now();
   const lesson = LessonLearnedSchema.parse({
@@ -102,7 +187,7 @@ export function contributeLesson(
         confidence: 'MEDIUM',
         loadBearing: false,
       },
-      attribution: { at, agentId: o.curatedBy },
+      attribution: { at, agentId: o.curatedBy, runId: o.curatorRunId },
     },
   });
   return write(deps, ARTIFACT_TYPES.LESSON_LEARNED, LessonLearnedSchema, lesson);
@@ -125,8 +210,11 @@ export function contributePattern(
     readonly notApplicableWhen: readonly string[];
     readonly tradeoffs?: readonly string[];
     readonly curatedBy: string;
+    /** The governed run that performed this curation. Resolved, never taken on trust. */
+    readonly curatorRunId: string;
   },
 ): ReusablePattern {
+  assertCurator(deps, o.curatedBy, o.curatorRunId);
   refuseLeakage('pattern', [
     o.name,
     o.problem,
@@ -160,7 +248,7 @@ export function contributePattern(
         confidence: 'MEDIUM',
         loadBearing: false,
       },
-      attribution: { at, agentId: o.curatedBy },
+      attribution: { at, agentId: o.curatedBy, runId: o.curatorRunId },
     },
   });
   return write(deps, ARTIFACT_TYPES.REUSABLE_PATTERN, ReusablePatternSchema, pattern);
@@ -174,8 +262,11 @@ export function contributeFailedApproach(
     readonly whyItFailed: string;
     readonly symptomsToWatchFor?: readonly string[];
     readonly curatedBy: string;
+    /** The governed run that performed this curation. Resolved, never taken on trust. */
+    readonly curatorRunId: string;
   },
 ): FailedApproach {
+  assertCurator(deps, o.curatedBy, o.curatorRunId);
   refuseLeakage('failed approach', [o.approach, o.whyItFailed, ...(o.symptomsToWatchFor ?? [])]);
   const at = deps.clock.now();
   const failed = FailedApproachSchema.parse({
@@ -198,7 +289,7 @@ export function contributeFailedApproach(
         confidence: 'MEDIUM',
         loadBearing: false,
       },
-      attribution: { at, agentId: o.curatedBy },
+      attribution: { at, agentId: o.curatedBy, runId: o.curatorRunId },
     },
   });
   return write(deps, ARTIFACT_TYPES.FAILED_APPROACH, FailedApproachSchema, failed);

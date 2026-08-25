@@ -846,7 +846,16 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
    */
   private async qualifyNoUnsandboxedRetry(
     layout: FixtureLayout,
-    record: (id: string, outcome: QualificationResult['outcome'], detail: string) => void,
+    record: (
+      id: string,
+      outcome: QualificationResult['outcome'],
+      detail: string,
+      evidence?: {
+        readonly reachedGuest?: GuestReach;
+        readonly notRunReason?: NotRunReason;
+        readonly transportAttempts?: readonly TransportAttempt[];
+      },
+    ) => void,
   ): Promise<void> {
     const before = this.transportCalls;
     const result = await this.execute({
@@ -862,6 +871,44 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       networkAllowed: false,
     });
     const attempts = this.transportCalls - before;
+
+    /*
+     * A COMMAND THAT NEVER RAN MEASURED NOTHING — Q-K INCLUDED.
+     *
+     * SPEC: Phase 6 qualification transport invariant §1; finding QTS-1.
+     *
+     * Every other adversarial case opens with this guard. Q-K did not, because it counts
+     * transport invocations rather than reading an exit code — and counting is exactly what
+     * made the gap invisible. On a WSL transport failure (exit 4294967295, no output, nothing
+     * reached the guest) the refused branch does not fire, the exit-0 branch does not fire,
+     * and `attempts === 1` holds because the substrate counter increments once however many
+     * times the transport retried internally. Q-K was then recorded PASSED, with a detail line
+     * claiming there had been no unsandboxed retry of a command that was never sent.
+     *
+     * It failed OPEN, which is what makes it the serious one: `deriveEnforcementClass` counts
+     * only NOT_RUN/TRANSPORT_FAILURE toward its unreached guard, so a PASSED Q-K sails past it
+     * and `capabilitiesFrom` credits it toward host-escape enforcement — granting HARD, and
+     * with it Producer dispatch authority, on a boundary nobody exercised.
+     */
+    if (result.reach !== GuestReach.REACHED) {
+      record(
+        'Q-K',
+        'NOT_RUN',
+        'The command never reached the execution environment after ' +
+          String(result.transportAttempts?.length ?? 0) +
+          ' attempt(s), so no unsandboxed retry was measured either way: ' +
+          (result.transportAttempts?.[result.transportAttempts.length - 1]?.detail ??
+            'no attempt was recorded'),
+        {
+          reachedGuest: result.reach,
+          notRunReason: NotRunReason.TRANSPORT_FAILURE,
+          ...(result.transportAttempts === undefined
+            ? {}
+            : { transportAttempts: result.transportAttempts }),
+        },
+      );
+      return;
+    }
 
     if (result.refusedBySubstrate) {
       record('Q-K', 'PASSED', 'The substrate refused outright and made no attempt to run it.');

@@ -1019,6 +1019,19 @@ describe('learning crosses the boundary only as a generalisation', () => {
    */
   const CURATOR = 'SC-AGENT-290';
 
+  /** A completed governed run by the curator, which authority now requires. */
+  function curatorRun(store: Store): string {
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', 'SC-RUN-CURATOR', {
+      runId: 'SC-RUN-CURATOR',
+      agentId: CURATOR,
+      outcome: 'COMPLETED',
+      roleInTask: 'ANALYST',
+    });
+    tx.commit();
+    return 'SC-RUN-CURATOR';
+  }
+
   it('a lesson still carrying project specifics is refused, with every reason', () => {
     const f = setup();
     expect(() =>
@@ -1027,6 +1040,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
         context: 'contact dave@acme.example about SC-WI-000700',
         applicableWhen: 'always',
         curatedBy: CURATOR,
+        curatorRunId: curatorRun(f.store),
       }),
     ).toThrow(/file path|email|project identifier/);
   });
@@ -1038,6 +1052,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       context: 'high-pressure point-of-sale work with both hands occupied',
       applicableWhen: 'the operator is standing, busy, and interrupted',
       curatedBy: CURATOR,
+      curatorRunId: curatorRun(f.store),
     });
     expect(lesson.generalised).toBe(true);
   });
@@ -1052,6 +1067,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
         applicableWhen: 'the operator cannot wait for the network',
         notApplicableWhen: [],
         curatedBy: CURATOR,
+        curatorRunId: curatorRun(f.store),
       }),
     ).toThrow();
   });
@@ -1066,6 +1082,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       notApplicableWhen: ['when two operators may edit the same order'],
       tradeoffs: ['reconciliation is not free'],
       curatedBy: CURATOR,
+      curatorRunId: curatorRun(f.store),
     });
     offerCandidate(f, {
       kind: 'PATTERN',
@@ -1109,6 +1126,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       applicableWhen: 'the operator cannot wait for the network',
       notApplicableWhen: ['when two operators may edit the same order'],
       curatedBy: CURATOR,
+      curatorRunId: curatorRun(f.store),
     });
 
     /*
@@ -1180,6 +1198,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       applicableWhen: 'regulated finance',
       notApplicableWhen: ['a small business with one operator'],
       curatedBy: CURATOR,
+      curatorRunId: curatorRun(f.store),
     });
     assessApplicability(f, {
       patternId: pattern.id,
@@ -1200,6 +1219,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
         approach: 'we wrote `function reconcile() {` on the client',
         whyItFailed: 'it drifted',
         curatedBy: CURATOR,
+        curatorRunId: curatorRun(f.store),
       }),
     ).toThrow(/source-code fragment/);
 
@@ -1208,7 +1228,134 @@ describe('learning crosses the boundary only as a generalisation', () => {
       whyItFailed: 'two devices reconciled differently and neither was wrong',
       symptomsToWatchFor: ['totals that disagree only after a network outage'],
       curatedBy: CURATOR,
+      curatorRunId: curatorRun(f.store),
     });
     expect(ok.generalised).toBe(true);
+  });
+});
+
+/* ============ CRITICAL-2: a caller-supplied name is not a curator ============ */
+
+describe('curation authority is proved, never declared', () => {
+  /*
+   * SPEC: §32; CRITICAL finding ORGANIZATIONAL-LEARNING-CORE/SEC-1.
+   *
+   * `KNOWLEDGE_CURATOR = 'SC-AGENT-290'` was exported and never compared to anything.
+   * `curatedBy` arrived as a plain string and went straight into `meta.attribution.agentId`
+   * and into the provenance basis, so any caller holding a `LearningDeps` — store, clock, ids,
+   * no registry and no run context — could publish company knowledge attributed to any agent
+   * it named, SC-AGENT-290 included.
+   *
+   * The module's own docstring says the curator and the assessor are "declared independent of
+   * one another" and that independence is "checked, not assumed". Nothing was checked: two
+   * different literal strings satisfied it.
+   *
+   * `proposals.ts` already had the answer — resolve the cited run, require COMPLETED, require
+   * the agent to match — with a comment saying exactly why: "a caller-supplied actor string is
+   * not proof of a governed run." These tests hold learning.ts to its neighbour's standard.
+   */
+  const CURATOR_AGENT = 'SC-AGENT-290';
+
+  function seedRun(store: Store, runId: string, agentId: string, outcome = 'COMPLETED'): void {
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', runId, { runId, agentId, outcome, roleInTask: 'ANALYST' });
+    tx.commit();
+  }
+
+  const lesson = {
+    statement: 'Counter staff will not use a screen that needs more than one tap during a rush',
+    context: 'high-pressure point-of-sale work with both hands occupied',
+    applicableWhen: 'the operator is standing, busy, and interrupted',
+  };
+
+  it('refuses a caller that simply names the curator', () => {
+    /* The attack, in its simplest form: type the right string. */
+    const f = setup();
+    expect(() =>
+      contributeLesson(f, { ...lesson, curatedBy: CURATOR_AGENT, curatorRunId: 'SC-RUN-NOPE' }),
+    ).toThrow(/run|governed/i);
+  });
+
+  it('refuses a run that does not exist', () => {
+    const f = setup();
+    expect(() =>
+      contributeLesson(f, { ...lesson, curatedBy: CURATOR_AGENT, curatorRunId: 'SC-RUN-000999' }),
+    ).toThrow(/does not exist|not resolve/i);
+  });
+
+  it('refuses a run made by a different agent than the one claimed', () => {
+    /* Forged metadata: a real run, borrowed. */
+    const f = setup();
+    seedRun(f.store, 'SC-RUN-000001', 'SC-AGENT-280');
+    expect(() =>
+      contributeLesson(f, {
+        ...lesson,
+        curatedBy: CURATOR_AGENT,
+        curatorRunId: 'SC-RUN-000001',
+      }),
+    ).toThrow(/SC-AGENT-280|made by/i);
+  });
+
+  it('refuses a run that did not complete', () => {
+    const f = setup();
+    seedRun(f.store, 'SC-RUN-000001', CURATOR_AGENT, 'FAILED');
+    expect(() =>
+      contributeLesson(f, {
+        ...lesson,
+        curatedBy: CURATOR_AGENT,
+        curatorRunId: 'SC-RUN-000001',
+      }),
+    ).toThrow(/FAILED|curated nothing/i);
+  });
+
+  it('refuses an agent that is not the Knowledge Curator, however real its run', () => {
+    /* Authority is a role, not merely a governed identity. */
+    const f = setup();
+    seedRun(f.store, 'SC-RUN-000001', 'SC-AGENT-280');
+    expect(() =>
+      contributeLesson(f, {
+        ...lesson,
+        curatedBy: 'SC-AGENT-280',
+        curatorRunId: 'SC-RUN-000001',
+      }),
+    ).toThrow(/curator|SC-AGENT-290/i);
+  });
+
+  it('publishes for a real, completed run by the real curator', () => {
+    const f = setup();
+    seedRun(f.store, 'SC-RUN-000001', CURATOR_AGENT);
+    const published = contributeLesson(f, {
+      ...lesson,
+      curatedBy: CURATOR_AGENT,
+      curatorRunId: 'SC-RUN-000001',
+    });
+    expect(published.generalised).toBe(true);
+    /* Attribution records the run, so a later reader can check this the same way. */
+    expect(published.meta.attribution.agentId).toBe(CURATOR_AGENT);
+    expect(published.meta.attribution.runId).toBe('SC-RUN-000001');
+  });
+
+  it('the same rule governs patterns and failed approaches', () => {
+    const f = setup();
+    expect(() =>
+      contributePattern(f, {
+        name: 'Offline-first order capture',
+        problem: 'connectivity drops during service',
+        solution: 'queue locally and reconcile',
+        applicableWhen: 'the operator cannot wait for the network',
+        notApplicableWhen: ['the operator needs a real-time total'],
+        curatedBy: CURATOR_AGENT,
+        curatorRunId: 'SC-RUN-NOPE',
+      }),
+    ).toThrow(/run|governed/i);
+
+    expect(() =>
+      contributeFailedApproach(f, {
+        approach: 'a single long form',
+        whyItFailed: 'staff abandoned it midway',
+        curatedBy: CURATOR_AGENT,
+        curatorRunId: 'SC-RUN-NOPE',
+      }),
+    ).toThrow(/run|governed/i);
   });
 });

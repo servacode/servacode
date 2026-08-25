@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
+  closeSync,
   copyFileSync,
   existsSync,
+  openSync,
+  readSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -274,6 +277,66 @@ export function credentialScan(content: string): readonly string[] {
   return found;
 }
 
+/**
+ * The longest credential shape the patterns can match.
+ *
+ * A chunked scan must overlap by at least this much, or a key straddling a chunk boundary is
+ * split into two halves that match nothing. Generous on purpose: the cost of overlapping too
+ * much is a little rescanning, and the cost of overlapping too little is a missed credential.
+ */
+const CREDENTIAL_WINDOW = 4096;
+
+/** Chunks big enough to be efficient and small enough to stay off the heap. */
+const SCAN_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * SCAN THE WHOLE FILE, WHATEVER ITS SIZE.
+ *
+ * SPEC: §32; HIGH finding BACKUP-RESTORE/SEC-1.
+ *
+ * `createBackup` scanned only files of 2MB or less, and copied everything larger into the
+ * bundle unscanned — directly under a comment reading "THE CONTENT IS SCANNED, NOT ONLY THE
+ * PATH". A log, a dump or a bundled config is exactly where a pasted key ends up, and exactly
+ * the kind of file that clears 2MB. The cutoff protected the scan's running time at the
+ * expense of the guarantee the scan exists to provide.
+ *
+ * Files here may be up to `maxFileBytes` (512MB), so this reads in overlapping chunks rather
+ * than loading the file: bounded memory, and no boundary a credential can hide across.
+ */
+function scanFileForCredentials(absolute: string, bytes: number): readonly string[] {
+  if (bytes <= SCAN_CHUNK_BYTES) {
+    try {
+      return credentialScan(readFileSync(absolute, 'utf8'));
+    } catch {
+      /* An unreadable file is excluded by the reader above; nothing to report here. */
+      return [];
+    }
+  }
+
+  const found = new Set<string>();
+  const buffer = Buffer.alloc(SCAN_CHUNK_BYTES);
+  let carry = '';
+  let fd: number | undefined;
+  try {
+    fd = openSync(absolute, 'r');
+    let position = 0;
+    for (;;) {
+      const read = readSync(fd, buffer, 0, SCAN_CHUNK_BYTES, position);
+      if (read === 0) break;
+      position += read;
+      const text = carry + buffer.subarray(0, read).toString('utf8');
+      for (const hit of credentialScan(text)) found.add(hit);
+      /* Carry the tail so a credential spanning two chunks is still one string when scanned. */
+      carry = text.slice(-CREDENTIAL_WINDOW);
+    }
+  } catch {
+    return [...found];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  return [...found];
+}
+
 interface WalkOutput {
   readonly entries: { path: string; absolute: string; bytes: number }[];
   readonly excluded: BackupManifest['excluded'][number][];
@@ -485,9 +548,8 @@ export function createBackup(
          * into a note. This refuses at write time rather than warning, because the owner
          * will not read the warning and the file will be on a USB stick by then.
          */
-        if (e.bytes <= 2 * 1024 * 1024) {
-          const text = readFileSync(e.absolute, 'utf8');
-          const found = credentialScan(text);
+        {
+          const found = scanFileForCredentials(e.absolute, e.bytes);
           if (found.length > 0) {
             excluded.push({
               path: e.path,

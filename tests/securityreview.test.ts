@@ -937,6 +937,113 @@ describe('the review is scoped by area, because one reviewer cannot read the who
     }
   });
 
+  it('retries a transient engine failure rather than losing the area', async () => {
+    /*
+     * SPEC: Phase 6 final acceptance sequence §7.
+     *
+     * Five of twenty-two areas were lost to three causes, none of them a product defect and
+     * all of them mine: a wall-clock budget the largest area exceeded, two ENGINE_ERRORs six
+     * seconds apart (a transient provider failure — "engine result error: success" alongside
+     * exit code 1), and one `error_max_structured_output_retries` after 42k output tokens.
+     *
+     * A single transient failure costing an entire scoped review is a review that reports on
+     * the provider's mood. One retry per unit costs one extra call in the rare case and saves
+     * a whole area; it does NOT retry a refusal, because a refusal is an answer.
+     */
+    const rt = project();
+    let attempts = 0;
+    const seenAreas = new Map<string, number>();
+    const runtime = {
+      run: (request: Record<string, unknown>) => {
+        attempts += 1;
+        const task = String(request['taskDefinition']);
+        const units = REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a)).map((u) => u.unit);
+        const area = units.find((a) => task.includes('Area under review: ' + a)) ?? '?';
+        /*
+         * The FIRST attempt at one area dies the way the real ones did, and the second
+         * succeeds — which is what "transient" means, and what a retry is for.
+         */
+        seenAreas.set(area, (seenAreas.get(area) ?? 0) + 1);
+        const transient = area === 'AI Runtime' && seenAreas.get(area) === 1;
+        return Promise.resolve({
+          runId: 'SC-RUN-' + String(attempts),
+          outcome: transient ? 'FAILED' : 'COMPLETED',
+          bundle: {},
+          envelope: { result: transient ? undefined : clean(area).result },
+          claimAssessments: [],
+          attempts: 1,
+          diagnostics: transient ? ['terminated: ENGINE_ERROR'] : [],
+        });
+      },
+    } as unknown as Parameters<typeof runScopedSecurityReview>[0]['runtime'];
+
+    const outcome = await runScopedSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+      allFiles: FILES,
+      readFile: () => 'export const x = 1;',
+      store: rt.store,
+    });
+
+    const ai = outcome.areas.find((a) => a.area === 'AI Runtime');
+    /* It was retried: more runs than units. */
+    expect(attempts).toBeGreaterThan(REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a)).length);
+    expect(ai?.refusal, 'a transient failure still lost the area').toBeUndefined();
+  });
+
+  it('does not retry a refusal, because a refusal is an answer', async () => {
+    /*
+     * An EVIDENCE_VIOLATION is the runtime catching a false claim. Retrying it would be asking
+     * the same reviewer to say something different, which is not verification.
+     */
+    const rt = project();
+    let attempts = 0;
+    const runtime = {
+      run: () => {
+        attempts += 1;
+        return Promise.resolve({
+          runId: 'SC-RUN-' + String(attempts),
+          outcome: 'EVIDENCE_VIOLATION',
+          bundle: {},
+          envelope: {},
+          claimAssessments: [],
+          attempts: 1,
+          diagnostics: [],
+        });
+      },
+    } as unknown as Parameters<typeof runScopedSecurityReview>[0]['runtime'];
+
+    await runScopedSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+      allFiles: FILES,
+      readFile: () => 'export const x = 1;',
+      store: rt.store,
+    });
+    expect(attempts).toBe(REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a)).length);
+  });
+
+  it('bounds what the reviewer may return, so a huge answer is not a lost area', async () => {
+    /*
+     * One area died on `error_max_structured_output_retries` after 42k output tokens: the
+     * reviewer wrote more than the structured schema could carry. Asking for fewer, better
+     * findings is the fix — a review that reports everything reports nothing.
+     */
+    const rt = project();
+    const { seen, runtime } = areaRuntime(clean);
+    await scoped(rt, runtime);
+    const task = String(seen[0]?.request['taskDefinition']);
+    expect(task).toMatch(/most|at most|no more than/i);
+  });
+
   it('maps every required area to real source', () => {
     /* An area matching nothing is a hole in the table, and would review nothing at all. */
     for (const area of REQUIRED_SCOPE) {

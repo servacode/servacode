@@ -427,7 +427,10 @@ const AREA_TASK =
   'Do not modify anything: you hold no write authority, and a reviewer that changes what it ' +
   'reviews has reviewed nothing. ' +
   'Do not report a finding you cannot point at: cite file:line from the supplied source. ' +
-  'An unsupported finding wastes the same attention a real one needs.';
+  'An unsupported finding wastes the same attention a real one needs. ' +
+  'Report AT MOST 8 findings, the most serious first, and keep each statement under 200 words. ' +
+  'A review that reports everything reports nothing, and an answer too large to return is a ' +
+  'review nobody receives.';
 
 const TASK =
   'Perform an independent security review of this implementation at the exact commit given to you. ' +
@@ -581,6 +584,16 @@ function persist(
 }
 
 /**
+ * Does this diagnostic describe the provider failing, rather than the code being judged?
+ *
+ * Deliberately narrow. Anything not recognised here is treated as an answer and not retried,
+ * because the expensive mistake is asking a reviewer again until it stops objecting.
+ */
+function isTransient(diagnostics: readonly string[]): boolean {
+  return diagnostics.some((d) => /ENGINE_ERROR|TIMEOUT|retry|rate.?limit|overload/i.test(d));
+}
+
+/**
  * REVIEW EACH AREA ON ITS OWN SOURCE, THEN COMBINE.
  *
  * SPEC: Phase 6 final acceptance sequence §7.
@@ -645,57 +658,78 @@ export async function runScopedSecurityReview(
       continue;
     }
 
-    const run = await input.runtime.run({
-      agentId,
-      workItemId: input.workItemId,
-      taskDefinition:
-        AREA_TASK +
-        '\n\nArea under review: ' +
-        unit +
-        '\nCommit under review: ' +
-        input.repository.commit +
-        '\nFiles you were given (' +
-        String(source.files.length) +
-        '): ' +
-        source.files.join(', ') +
-        (source.omitted.length === 0
-          ? ''
-          : '\n\nNOT included, and therefore NOT reviewed by you (' +
-            String(source.omitted.length) +
-            '): ' +
-            source.omitted.join(', ') +
-            '\nDo not report on these, and do not assume anything about them.'),
-      scopeBoundary:
-        'Review the area "' +
-        unit +
-        '" at commit ' +
-        input.repository.commit +
-        ', using only the source you were given. Read-only: do not write, do not execute, do ' +
-        'not reach the network. Do not report findings about other areas.',
-      resultSchema: REVIEW_RESULT_SCHEMA,
-      resultValidator: ReviewResultSchema,
-      capability: {
-        policy: readOnlyGrant(),
-        cwd: input.storePath,
-        basis: 'independent security review of ' + unit + ': read-only judgement',
-      },
-      canon: [
-        {
-          source: 'implementation',
-          kind: 'SOURCE',
-          version: input.repository.tree,
-          content: source.content,
-          relevance: 1,
+    /*
+     * ONE RETRY FOR A TRANSIENT FAILURE, AND NONE FOR AN ANSWER.
+     *
+     * SPEC: Phase 6 final acceptance sequence §7.
+     *
+     * Five of twenty-two areas were lost in the first full run: one wall-clock timeout, two
+     * ENGINE_ERRORs six seconds apart (the provider reporting "success" alongside exit code 1),
+     * and one answer too large for the structured schema. None was a product defect and every
+     * one cost an entire scoped review — a review whose coverage depended on the provider's
+     * mood that minute.
+     *
+     * A retry is offered ONLY for a failure that says nothing about the code: FAILED with an
+     * engine or timeout diagnostic. An EVIDENCE_VIOLATION or a refusal is an ANSWER, and
+     * asking the same reviewer again until it says something else is not verification.
+     */
+    const dispatch = (): Promise<AgentRunResult> =>
+      input.runtime.run({
+        agentId,
+        workItemId: input.workItemId,
+        taskDefinition:
+          AREA_TASK +
+          '\n\nArea under review: ' +
+          unit +
+          '\nCommit under review: ' +
+          input.repository.commit +
+          '\nFiles you were given (' +
+          String(source.files.length) +
+          '): ' +
+          source.files.join(', ') +
+          (source.omitted.length === 0
+            ? ''
+            : '\n\nNOT included, and therefore NOT reviewed by you (' +
+              String(source.omitted.length) +
+              '): ' +
+              source.omitted.join(', ') +
+              '\nDo not report on these, and do not assume anything about them.'),
+        scopeBoundary:
+          'Review the area "' +
+          unit +
+          '" at commit ' +
+          input.repository.commit +
+          ', using only the source you were given. Read-only: do not write, do not execute, do ' +
+          'not reach the network. Do not report findings about other areas.',
+        resultSchema: REVIEW_RESULT_SCHEMA,
+        resultValidator: ReviewResultSchema,
+        capability: {
+          policy: readOnlyGrant(),
+          cwd: input.storePath,
+          basis: 'independent security review of ' + unit + ': read-only judgement',
         },
-      ],
-      maxContextChars: 400_000,
-      /*
-       * Reading 200KB of unfamiliar source and judging it takes longer than the 180s default,
-       * and every FAILED area in the first real run was `terminated: TIMEOUT`. A review cut off
-       * mid-thought is not a fast review; it is an unreviewed area wearing a run id.
-       */
-      budget: { maxWallTimeMs: 900_000, maxTurns: 6 },
-    });
+        canon: [
+          {
+            source: 'implementation',
+            kind: 'SOURCE',
+            version: input.repository.tree,
+            content: source.content,
+            relevance: 1,
+          },
+        ],
+        maxContextChars: 400_000,
+        /*
+         * Reading 200KB of unfamiliar source and judging it takes longer than the 180s default,
+         * and the first real run lost areas to `terminated: TIMEOUT` at 900s. A review cut off
+         * mid-thought is not a fast review; it is an unreviewed area wearing a run id.
+         */
+        budget: { maxWallTimeMs: 1_500_000, maxTurns: 6 },
+      });
+
+    let run = await dispatch();
+    if (run.outcome === 'FAILED' && isTransient(run.diagnostics)) {
+      run = await dispatch();
+    }
 
     const parsed =
       run.outcome === 'COMPLETED' ? ReviewResultSchema.safeParse(run.envelope?.result) : undefined;

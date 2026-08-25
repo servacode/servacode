@@ -10,6 +10,7 @@ import {
   type SubstrateCapabilities,
   type SubstrateQualification,
   ExecutionAvailability,
+  NotRunReason,
   QualificationAttempt,
 } from '../src/substrate/types.js';
 import { BLOCKING_CASE_IDS, QUALIFICATION_CASES } from '../src/substrate/qualification.js';
@@ -291,6 +292,27 @@ class StubTransport implements ExecTransport {
     }
     if (exe === 'node' && args[0] === '-e') {
       // The Q-K probe: a violating write, which the boundary must refuse.
+      if (this.programs['Q-K-write'] === -1) {
+        /*
+         * A TRANSPORT failure, not a refusal. WSL's documented shape: a huge exit code, no
+         * output, and nothing reached the guest at all.
+         */
+        return {
+          ...blank(4294967295),
+          spawnFailed: true,
+          reach: GuestReach.NOT_REACHED,
+          attempts: [
+            {
+              attempt: 1,
+              reach: GuestReach.NOT_REACHED,
+              exitCode: 4294967295,
+              spawnFailed: true,
+              timedOut: false,
+              detail: 'wsl.exe exited 4294967295 with no output',
+            },
+          ],
+        };
+      }
       return blank(this.programs['Q-K-write'] ?? 1);
     }
 
@@ -1079,5 +1101,62 @@ describe('a qualification is a measurement OF something', () => {
       profileDigest: 'z'.repeat(64),
     }).qualify(fixture());
     expect(boundaryMismatch(q.boundary, other.boundary)).toMatch(/sandbox profile/);
+  });
+});
+
+/* ====== HIGH: a transport failure on Q-K is not a measurement of containment ====== */
+
+describe('Q-K refuses to call a command it never ran a pass', () => {
+  /*
+   * SPEC: Phase 6 qualification transport invariant; HIGH finding
+   * QUALIFICATION-TRANSPORT-SEMANTICS/QTS-1.
+   *
+   * Every other adversarial case in `qualify()` opens with
+   * `if (result.reach !== GuestReach.REACHED) { record(..., NOT_RUN, TRANSPORT_FAILURE) }`.
+   * Q-K, measured separately because it counts transport invocations rather than reading an
+   * exit code, never inspected `reach` at all.
+   *
+   * On a WSL transport failure — exit 4294967295, no output, nothing reached the guest — Q-K
+   * took neither the refused branch nor the exit-0 branch, `attempts === 1` held because the
+   * substrate counter increments once regardless of the transport's internal retries, and Q-K
+   * was recorded PASSED with "the transport was invoked exactly once: no unsandboxed retry".
+   *
+   * That is a measured-containment claim about a command that never ran, and it fails OPEN:
+   * `deriveEnforcementClass`'s unreached guard counts only NOT_RUN/TRANSPORT_FAILURE, so a
+   * PASSED Q-K sails past it and `capabilitiesFrom` credits it toward host-escape enforcement.
+   * The one probe that was not guarded is the one guarding Producer dispatch authority.
+   */
+  it('records NOT_RUN with a transport reason, not PASSED', async () => {
+    const transport = new StubTransport(healthyGuest(), { ...CONTAINED, 'Q-K-write': -1 });
+    const s = sandboxed(transport);
+    const q = await s.qualify(fixture());
+
+    const qk = q.tests.find((t) => t.id === 'Q-K')!;
+    expect(qk.outcome).toBe('NOT_RUN');
+    expect(qk.notRunReason).toBe(NotRunReason.TRANSPORT_FAILURE);
+    expect(qk.reachedGuest).toBe(GuestReach.NOT_REACHED);
+    expect(qk.detail).toMatch(/never reached|transport/i);
+  });
+
+  it('does not grant HARD on the strength of a probe that never ran', async () => {
+    /*
+     * The consequence, stated as its own test: every other probe contained, and this one
+     * unmeasured, must not add up to a measured HARD boundary.
+     */
+    const transport = new StubTransport(healthyGuest(), { ...CONTAINED, 'Q-K-write': -1 });
+    const s = sandboxed(transport);
+    const q = await s.qualify(fixture());
+    expect(q.enforcementClass).not.toBe(EnforcementClass.HARD);
+  });
+
+  it('still PASSES Q-K when the command genuinely reached the guest and was refused', () => {
+    /* The fix must not turn a real refusal into a non-measurement. */
+    return (async () => {
+      const transport = new StubTransport(healthyGuest(), CONTAINED);
+      const s = sandboxed(transport);
+      const q = await s.qualify(fixture());
+      const qk = q.tests.find((t) => t.id === 'Q-K')!;
+      expect(qk.outcome).toBe('PASSED');
+    })();
   });
 });

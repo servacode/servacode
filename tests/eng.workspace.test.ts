@@ -11,6 +11,7 @@ import {
   parsePorcelainZ,
 } from '../src/engineering/git.js';
 import { EngineeringWorkspaceManager, WorkspaceState } from '../src/engineering/workspace.js';
+import { CHANGESET_CANON_TYPE } from '../src/engineering/changeset.js';
 import {
   buildChangeSet,
   checkScopeConformance,
@@ -531,5 +532,185 @@ describe('reconciliation reports divergence and never repairs by overwriting', (
     const d = report.divergences.find((x) => x.kind === DivergenceKind.EXTERNAL_WORKSPACE_CHANGE)!;
     expect(d).toBeDefined();
     expect(d.remedy).toMatch(/Do not carry the earlier result forward/);
+  });
+});
+
+/* ====== HIGH: four DivergenceKind values that could never be produced ====== */
+
+describe('every declared divergence kind can actually be detected', () => {
+  /*
+   * SPEC: HIGH finding RECONCILIATION/RECON-1.
+   *
+   * `DivergenceKind` declared BRANCH_MOVED, INTERRUPTED_PRODUCER_RUN, UNVERIFIED_CHANGESET and
+   * ACCEPTED_NOT_INTEGRATED — four categories central to the module's own stated purpose of
+   * stopping a gate from trusting stale evidence — and `reconcileWorkspaces()` never
+   * constructed any of them. They were vocabulary, not detection.
+   *
+   * An enum value nothing can emit is worse than a missing feature: the vocabulary reads as a
+   * completed threat model, and `invalidatesEvidence()` looks like it filters for conditions
+   * that in fact could never arrive.
+   */
+  it('reports an UNVERIFIED_CHANGESET when a change set has no evidence at all', async () => {
+    const { repo, base } = makeRepo();
+    const { mgr, git, store } = managerFor(repo);
+    const { deps } = freshStore();
+    const w = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000040',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+
+    /*
+     * The workspace has been used: a change set exists. A freshly CREATED workspace with no
+     * evidence yet is the ordinary state at the start of a run, not a divergence.
+     */
+    mgr.update(w.workspaceId, { state: WorkspaceState.IN_USE });
+
+    const tx = store.begin();
+    tx.putCanon(CHANGESET_CANON_TYPE, 'SC-CS-000040', {
+      changeSetId: 'SC-CS-000040',
+      workItemId: 'SC-WI-000040',
+      workspaceId: w.workspaceId,
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      producerRunId: 'SC-RUN-000040',
+      baseCommit: base,
+      headCommit: '',
+      entries: [],
+      diffDigest: 'd'.repeat(64),
+      digest: 'e'.repeat(64),
+      createdAt: '2026-08-25T00:00:00.000Z',
+    });
+    tx.commit();
+
+    const report = await reconcileWorkspaces({ store, git, workspaces: mgr, clock: deps.clock });
+    expect(report.divergences.map((d) => d.kind)).toContain(DivergenceKind.UNVERIFIED_CHANGESET);
+  });
+
+  it('reports an INTERRUPTED_PRODUCER_RUN when a producer run never terminated', async () => {
+    const { repo, base } = makeRepo();
+    const { mgr, git, store } = managerFor(repo);
+    const { deps } = freshStore();
+    const w = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000041',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+
+    const tx = store.begin();
+    tx.putCanon(CHANGESET_CANON_TYPE, 'SC-CS-000041', {
+      changeSetId: 'SC-CS-000041',
+      workItemId: 'SC-WI-000041',
+      workspaceId: w.workspaceId,
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      producerRunId: 'SC-RUN-000041',
+      baseCommit: base,
+      headCommit: '',
+      entries: [],
+      diffDigest: 'd'.repeat(64),
+      digest: 'e'.repeat(64),
+      createdAt: '2026-08-25T00:00:00.000Z',
+    });
+    /* A run record that exists but never reached a terminal outcome. */
+    tx.putCanon('agentRunRecord', 'SC-RUN-000041', {
+      runId: 'SC-RUN-000041',
+      agentId: 'SC-AGENT-150',
+      terminal: false,
+    });
+    tx.commit();
+
+    const report = await reconcileWorkspaces({ store, git, workspaces: mgr, clock: deps.clock });
+    expect(report.divergences.map((d) => d.kind)).toContain(
+      DivergenceKind.INTERRUPTED_PRODUCER_RUN,
+    );
+  });
+
+  it('reports ACCEPTED_NOT_INTEGRATED when an accepted change set never landed', async () => {
+    const { repo, base } = makeRepo();
+    const { mgr, git, store } = managerFor(repo);
+    const { deps } = freshStore();
+    const w = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000042',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+    mgr.update(w.workspaceId, { state: WorkspaceState.ACCEPTED });
+
+    const tx = store.begin();
+    tx.putCanon(CHANGESET_CANON_TYPE, 'SC-CS-000042', {
+      changeSetId: 'SC-CS-000042',
+      workItemId: 'SC-WI-000042',
+      workspaceId: w.workspaceId,
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      producerRunId: 'SC-RUN-000042',
+      baseCommit: base,
+      /* Accepted, and never integrated: no head commit was ever recorded. */
+      headCommit: '',
+      entries: [],
+      diffDigest: 'd'.repeat(64),
+      digest: 'e'.repeat(64),
+      createdAt: '2026-08-25T00:00:00.000Z',
+    });
+    tx.commit();
+
+    const report = await reconcileWorkspaces({ store, git, workspaces: mgr, clock: deps.clock });
+    expect(report.divergences.map((d) => d.kind)).toContain(DivergenceKind.ACCEPTED_NOT_INTEGRATED);
+  });
+
+  it('reports BRANCH_MOVED when a recorded branch points somewhere Serva did not put it', async () => {
+    const { repo, base } = makeRepo();
+    const { mgr, git, store } = managerFor(repo);
+    const { deps } = freshStore();
+    const w = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000043',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+
+    /* Someone commits on the branch outside Serva, so its tip is no longer what Serva knows. */
+    writeFileSync(join(w.path, 'outside.txt'), 'not through Serva\n', 'utf8');
+    await git.stagePaths(['outside.txt'], w.path);
+    await git.commit('outside Serva', w.path);
+
+    const report = await reconcileWorkspaces({ store, git, workspaces: mgr, clock: deps.clock });
+    const kinds = report.divergences.map((d) => d.kind);
+    expect(
+      kinds.includes(DivergenceKind.BRANCH_MOVED) ||
+        kinds.includes(DivergenceKind.WORKTREE_HEAD_MOVED),
+    ).toBe(true);
+  });
+
+  it('every declared kind is reachable from the detector', () => {
+    /*
+     * The structural property, so a kind added later cannot quietly become vocabulary again.
+     * Read from the source rather than from a list a test maintains beside it.
+     */
+    const source = readFileSync('src/engineering/reconcile.ts', 'utf8');
+    for (const kind of Object.values(DivergenceKind)) {
+      const emitted = source.includes('kind: DivergenceKind.' + kind);
+      expect(emitted, kind + ' is declared but never emitted').toBe(true);
+    }
   });
 });

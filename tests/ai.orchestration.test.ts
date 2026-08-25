@@ -662,3 +662,65 @@ describe('a write-capable step is queued only when this machine can contain one'
     ).toEqual([]);
   });
 });
+
+/* ====== HIGH: a plan that asks for the owner must not queue itself ====== */
+
+describe('owner-decision signals are read, not merely carried', () => {
+  /*
+   * SPEC: 04 §3.4, §7; HIGH finding CONVERSATION-GOVERNANCE/F1.
+   *
+   * The classification schema carries `ownerDecisionRequired`, the plan schema carries
+   * `ownerDecisionsRequired` and `unresolved`, and `MIN_CLASSIFICATION_CONFIDENCE` is
+   * documented as "below this, a classification is not acted on without owner input".
+   *
+   * None of the three were read anywhere. `route()` branched only on run outcome, schema
+   * parsing and the meta-class short-circuit; `validateExecutionPlan()` never referenced any
+   * of them. So a classification or plan that the AI ITSELF flagged as needing the owner
+   * reached QUEUED and dispatched — the company deciding on the owner's behalf precisely when
+   * it had just written down that it should not.
+   *
+   * These fields existing and being ignored is worse than their absence: the schema documents
+   * a safeguard, and a reader has no reason to check whether anything consumes it.
+   */
+  it('halts when the classification says the owner must decide', () => {
+    const v = validateExecutionPlan(PLAN, {
+      ...opts,
+      classification: { ...CLASSIFICATION, ownerDecisionRequired: true },
+    });
+    expect(v.accepted).toBe(false);
+    expect(v.findings.map((f) => f.kind)).toContain(PlanFindingKind.OWNER_ACTION_DELEGATED);
+  });
+
+  it('halts when the plan itself lists owner decisions it needs', () => {
+    const v = validateExecutionPlan(
+      { ...PLAN, ownerDecisionsRequired: ['whether deposits are taken'] },
+      opts,
+    );
+    expect(v.accepted).toBe(false);
+    expect(JSON.stringify(v.findings)).toContain('deposits');
+  });
+
+  it('halts when the plan records unresolved items', () => {
+    const v = validateExecutionPlan(
+      { ...PLAN, unresolved: ['the refund window is unstated'] },
+      opts,
+    );
+    expect(v.accepted).toBe(false);
+    expect(JSON.stringify(v.findings)).toContain('refund window');
+  });
+
+  it('halts when the classification records unresolved items', () => {
+    const v = validateExecutionPlan(PLAN, {
+      ...opts,
+      classification: { ...CLASSIFICATION, unresolved: ['which currency'] },
+    });
+    expect(v.accepted).toBe(false);
+    expect(JSON.stringify(v.findings)).toContain('currency');
+  });
+
+  it('a plan with none of these still passes', () => {
+    /* The safeguard must not become a blanket refusal: the ordinary case is unchanged. */
+    const v = validateExecutionPlan(PLAN, opts);
+    expect(v.accepted, JSON.stringify(v.findings)).toBe(true);
+  });
+});

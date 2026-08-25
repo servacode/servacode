@@ -7,7 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { Store } from '../src/store/store.js';
 import { FixedClock } from '../src/core/clock.js';
 import { SequentialIdSource } from '../src/core/ids.js';
@@ -896,5 +896,162 @@ describe('the doctor inspects, and never reports READY for something it could no
     expect(rendered).toContain('Sandbox (recipes)');
     expect(rendered).toContain('ACTION_REQUIRED');
     expect(rendered).toContain('→ Sandbox (recipes):');
+  });
+});
+
+/* ================= a bundle is INPUT, and projectId is part of the bundle ================= */
+
+describe('a crafted projectId cannot reach outside the destination root', () => {
+  /*
+   * SPEC: §32; CRITICAL finding INSTALL-UPDATE-ROLLBACK/SEC-1 from the independent review.
+   *
+   * Every FILE path in a bundle went through `safeBundlePath`/`resolveInside`, and the module
+   * header states the rule plainly: "A BACKUP IS INPUT... every path is checked for traversal."
+   * The project's own id never was. `inspectRestore` computed
+   * `join(destinationRoot, p.projectId)` and `performRestore` then drove `rmSync`,
+   * `mkdirSync` and `renameSync` from that path — including displacing whatever it found there.
+   *
+   * So the entries were guarded and the directory they all live in was not, which is the kind
+   * of gap that survives review precisely because the neighbouring code looks careful.
+   */
+  function craftedBundle(projectId: string): string {
+    const seeded = seedProject();
+    const bundle = join(tmp(), 'bundle');
+    createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination: bundle,
+      },
+    );
+    /*
+     * Craft AFTER writing, and RE-SIGN. A hostile bundle is one somebody hands you, not one you
+     * made — and `manifestDigest` is exported, so recomputing it is exactly what an attacker
+     * building a bundle from scratch would do. The digest proves a bundle is self-consistent;
+     * it was never evidence that its contents are safe to act on.
+     */
+    const manifestPath = join(bundle, MANIFEST_NAME);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown> & {
+      projects: { projectId: string }[];
+      integrityDigest?: string;
+    };
+    manifest.projects[0]!.projectId = projectId;
+    delete manifest.integrityDigest;
+    manifest.integrityDigest = manifestDigest(manifest as never);
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    return bundle;
+  }
+
+  it('refuses a traversal projectId, and inspection says so before anything runs', () => {
+    const bundle = craftedBundle('../../escaped');
+    const destinationRoot = tmp();
+    const inspection = inspectRestore({ bundlePath: bundle, destinationRoot });
+    expect(inspection.ok).toBe(false);
+    expect(JSON.stringify(inspection)).toContain('escape');
+  });
+
+  it('refuses an absolute projectId', () => {
+    const bundle = craftedBundle(process.platform === 'win32' ? 'C:\Windows\Temp' : '/tmp/x');
+    const destinationRoot = tmp();
+    expect(inspectRestore({ bundlePath: bundle, destinationRoot }).ok).toBe(false);
+  });
+
+  it('refuses a projectId that walks back out after walking in', () => {
+    /* `a/../../b` normalizes outside the root even though no segment starts with `..`. */
+    const bundle = craftedBundle('a/../../b');
+    const destinationRoot = tmp();
+    expect(inspectRestore({ bundlePath: bundle, destinationRoot }).ok).toBe(false);
+  });
+
+  it('MUTATES NOTHING when it refuses', () => {
+    /*
+     * The property that actually matters. A refusal that happens after the first `rmSync` is
+     * not a refusal — and `performRestore` reaches rmSync before it reaches anything else.
+     */
+    const bundle = craftedBundle('../../escaped');
+    const destinationRoot = tmp();
+    const outside = dirname(dirname(destinationRoot));
+    const before = readdirSync(outside).sort();
+
+    expect(() => performRestore({ bundlePath: bundle, destinationRoot })).toThrow();
+
+    expect(readdirSync(outside).sort()).toEqual(before);
+    expect(readdirSync(destinationRoot)).toEqual([]);
+  });
+
+  it('a nested projectId is legitimate and still restores', () => {
+    /* Confinement is not a ban on structure: `team/project` stays inside the root. */
+    const bundle = craftedBundle('team/rahalgo');
+    const destinationRoot = tmp();
+    const result = performRestore({ bundlePath: bundle, destinationRoot });
+    expect(result.restored).toHaveLength(1);
+    const target = String(result.restored[0]?.destination);
+    expect(resolve(target).startsWith(resolve(destinationRoot))).toBe(true);
+    expect(existsSync(join(target, '.serva'))).toBe(true);
+  });
+
+  it('an ordinary restore is unchanged', () => {
+    const bundle = craftedBundle('PRJ-1');
+    const destinationRoot = tmp();
+    const result = performRestore({ bundlePath: bundle, destinationRoot });
+    expect(result.restored).toHaveLength(1);
+    expect(existsSync(join(destinationRoot, 'PRJ-1', '.serva'))).toBe(true);
+  });
+});
+
+/* ====== HIGH: "the content is scanned before it is written" must actually hold ====== */
+
+describe('a credential in a large file does not travel in a backup', () => {
+  /*
+   * SPEC: §32; HIGH finding BACKUP-RESTORE/SEC-1.
+   *
+   * `createBackup` scanned only files of 2MB or less. Anything larger was copied into the
+   * bundle and listed in the inventory with no content scan at all — while the comment
+   * directly above the check said "THE CONTENT IS SCANNED, NOT ONLY THE PATH" and the module
+   * header promised the content is scanned before it is written.
+   *
+   * A log, a dump or a bundled config is exactly where a pasted key ends up, and exactly the
+   * kind of file that exceeds 2MB. The cutoff protected the scan's running time at the cost of
+   * the guarantee the scan exists to provide.
+   */
+  it('scans a file well over the old 2MB cutoff', () => {
+    const seeded = seedProject();
+    /* A believable large artifact: mostly noise, one key in the middle. */
+    const filler = 'x'.repeat(1024 * 1024);
+    writeFileSync(
+      join(seeded.root, 'debug.log'),
+      filler + '\nAKIAIOSFODNN7EXAMPLE\n' + filler + filler,
+      'utf8',
+    );
+
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+
+    const excluded = result.manifest.excluded.find((e) => e.path.endsWith('debug.log'));
+    expect(excluded, 'a 3MB file carrying a key was not excluded').toBeDefined();
+    expect(excluded?.reason).toBe('SENSITIVE');
+    /* And it is genuinely absent from the bundle, not merely annotated in the manifest. */
+    expect(result.manifest.inventory.some((e) => e.path.endsWith('debug.log'))).toBe(false);
+  });
+
+  it('a large file with nothing sensitive in it still travels', () => {
+    /* The guarantee is about credentials, not about size. */
+    const seeded = seedProject();
+    writeFileSync(join(seeded.root, 'big.txt'), 'y'.repeat(3 * 1024 * 1024), 'utf8');
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+    expect(result.manifest.inventory.some((e) => e.path.endsWith('big.txt'))).toBe(true);
   });
 });
