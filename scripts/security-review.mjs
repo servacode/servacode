@@ -27,7 +27,7 @@ const { ServaRuntime } = await import('../dist/app/runtime.js');
 const { buildAiLayer } = await import('../dist/app/ai.js');
 const { repositoryIdentity } = await import('../dist/acceptance/status.js');
 const { PROOF_DIR, ProofStatus, VerificationType } = await import('../dist/acceptance/proof.js');
-const { ReviewVerdict, resolveSecurityReview } =
+const { REQUIRED_SCOPE, ReviewVerdict, resolveSecurityReview } =
   await import('../dist/acceptance/securityReview.js');
 const { DEFAULT_SECURITY_REVIEWER, runSecurityReview } =
   await import('../dist/acceptance/securityReviewRun.js');
