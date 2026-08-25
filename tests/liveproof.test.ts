@@ -795,6 +795,46 @@ describe('a PARTIAL caused by the intentional Producer execution policy', () => 
     expect(verdict.blockedTool).toBe('Bash');
   });
 
+  it('accepts the block however the agent labelled its escalation', () => {
+    /*
+     * A real run labelled the same block AUTHORITY_EXCEEDED rather than VERIFICATION_BLOCKED:
+     * same denied `node test.js`, same honest refusal to claim an unobserved result, same edit
+     * landed. Matching one literal condition string is routing on how something classified
+     * itself, which is the failure this codebase keeps meeting — the label is the agent's
+     * word, and the denied tool call against the bound grant is the governed fact.
+     *
+     * So an escalation must exist, because a PARTIAL nobody explained is unexplained; but
+     * WHICH condition it names does not decide the question.
+     */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', {
+      escalations: [
+        {
+          condition: 'AUTHORITY_EXCEEDED',
+          detail: 'Test execution was denied by the sandbox permission policy (Bash, dont-ask).',
+          blocking: true,
+        },
+      ],
+    });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.reasons, verdict.reasons.join('; ')).toEqual([]);
+    expect(verdict.contained).toBe(true);
+  });
+
+  it('refuses an escalation about something other than the denied tool', () => {
+    /* Any escalation must not do: one about an unrelated concern explains no block at all. */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', {
+      escalations: [
+        { condition: 'AMBIGUITY', detail: 'the requirement is unclear', blocking: false },
+      ],
+    });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+  });
+
   it('refuses a PARTIAL that recorded no verification block at all', () => {
     /* PARTIAL meaning "I stopped early" is not PARTIAL meaning "I was not allowed to check". */
     const rt = project();
@@ -802,7 +842,7 @@ describe('a PARTIAL caused by the intentional Producer execution policy', () => 
     chain(rt.store);
     const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
     expect(verdict.contained).toBe(false);
-    expect(verdict.reasons.join(' ')).toContain('VERIFICATION_BLOCKED');
+    expect(verdict.reasons.join(' ')).toContain('no escalation at all');
   });
 
   it('refuses when the block is not attributable to the Producer execution policy', () => {
