@@ -14,7 +14,13 @@ import type { InvocationRequest } from '../types.js';
 
 export const CLAUDE_BIN = 'claude';
 
-/** Flags that would defeat the governance boundary. Never emitted, and asserted in tests. */
+/**
+ * Flags that would defeat the governance boundary.
+ *
+ * Enforced by ABSENCE: `buildArgv` constructs its argv explicitly and never adds one of these,
+ * and `ai.security.test.ts` proves it for every flag in the list. There is deliberately no
+ * runtime filter — a filter would imply something upstream might legitimately ask for one.
+ */
 export const FORBIDDEN_FLAGS: readonly string[] = Object.freeze([
   '--dangerously-skip-permissions',
   '--allow-dangerously-skip-permissions',

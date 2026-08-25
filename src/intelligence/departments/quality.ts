@@ -16,7 +16,7 @@ import {
 } from '../artifacts/quality.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
-import { supportedVerdict } from './verdictSupport.js';
+import { VerdictFamily, supportedVerdict, verdictIsAffirmative } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -249,7 +249,10 @@ export const qaVerificationDepartment: DepartmentConfig<typeof QAOutputSchema> =
       judgements: [
         {
           criterionRef: 'QA-1',
-          met: output.verdict === VerificationVerdict.PASS,
+          met: verdictIsAffirmative(output.verdict, {
+            examined: output.criteriaCovered.length,
+            family: VerdictFamily.VERIFICATION,
+          }),
           by: QA_AGENT,
           note: output.summary,
           subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.ACCEPTANCE_CRITERION])],
@@ -358,7 +361,11 @@ export const accessibilityVerificationDepartment: DepartmentConfig<
         createdAt: at,
         /* Serva computes this: a success that ran no check checked nothing. */
         verdict: supportedVerdict(output.verdict, {
-          exercised: output.automatedChecks.length + output.findings.length,
+          /*
+           * The CHECKS RUN, not the findings raised: a clean accessibility pass legitimately
+           * finds nothing, and counting findings would treat that as having looked at nothing.
+           */
+          exercised: output.automatedChecks.length,
           notVerified: output.notVerified.length,
         }),
         subjectRef: subjectRef(ctx),
@@ -386,7 +393,10 @@ export const accessibilityVerificationDepartment: DepartmentConfig<
       judgements: [
         {
           criterionRef: 'QA-3',
-          met: output.verdict === VerificationVerdict.PASS,
+          met: verdictIsAffirmative(output.verdict, {
+            examined: output.automatedChecks.length,
+            family: VerdictFamily.VERIFICATION,
+          }),
           by: A11Y_AGENT,
           note: output.summary,
           subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.ACCESSIBILITY_SPEC])],
@@ -549,7 +559,10 @@ export const securityVerificationDepartment: DepartmentConfig<typeof SecurityTes
       judgements: [
         {
           criterionRef: 'SEC-1',
-          met: output.verdict === VerificationVerdict.PASS,
+          met: verdictIsAffirmative(output.verdict, {
+            examined: output.threatsExercised.length,
+            family: VerdictFamily.VERIFICATION,
+          }),
           by: SECURITY_AGENT,
           note: output.summary,
           subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.THREAT_MODEL])],

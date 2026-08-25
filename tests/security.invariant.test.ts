@@ -7,7 +7,10 @@ import {
   actorRefusal,
   resolveActor,
 } from '../src/core/actorAuthority.js';
-import { supportedVerdict } from '../src/intelligence/departments/verdictSupport.js';
+import {
+  supportedVerdict,
+  verdictIsAffirmative,
+} from '../src/intelligence/departments/verdictSupport.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -342,5 +345,190 @@ describe('a verification verdict is downgraded when nothing was actually exercis
     /* The helper only ever makes a verdict weaker. */
     expect(supportedVerdict('FAIL', { exercised: 5, notVerified: 0 })).toBe('FAIL');
     expect(supportedVerdict('NOT_VERIFIED', { exercised: 5, notVerified: 0 })).toBe('NOT_VERIFIED');
+  });
+});
+
+/* ====== CLASS 1: a declared safeguard must have an enforcement consumer ====== */
+
+describe('every declared safeguard is consumed by something that enforces it', () => {
+  /*
+   * SPEC: Phase 6 targeted hardening, class 1.
+   *
+   * `MIN_CLASSIFICATION_CONFIDENCE` shipped for months carrying the sentence "below this, a
+   * classification is not acted on without owner input", read by nothing. Two separate review
+   * rounds named it, and the round that fixed the identical shape for `ownerDecisionRequired`
+   * walked past it in the same function.
+   *
+   * A declared safeguard nothing consumes is worse than none: the constant documents a
+   * protection, and a reader has no reason to check that anything reads it. So the check is
+   * structural — an exported constant whose comment CLAIMS enforcement must be referenced by
+   * production code outside its own declaration.
+   *
+   * Deliberately narrow. This is not an unused-export sweep: it fires only on constants whose
+   * own documentation asserts that something is refused, required, or not acted on.
+   */
+  const CLAIMS_ENFORCEMENT =
+    /\b(must not|may not|is not acted on|is refused|refuses|never|required|forbidden|only .* may)\b/i;
+
+  interface Declared {
+    readonly file: string;
+    readonly name: string;
+    readonly claim: string;
+  }
+
+  function declaredSafeguards(): readonly Declared[] {
+    const files = execSync('git ls-files src', { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map((f) => f.trim())
+      .filter((f) => f.endsWith('.ts'));
+
+    const found: Declared[] = [];
+    for (const file of files) {
+      const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+      for (const [i, line] of lines.entries()) {
+        const declaration = /^export const ([A-Z][A-Z0-9_]{3,})\s*[:=]/.exec(line);
+        if (declaration === null) continue;
+        const name = declaration[1] as string;
+
+        /* The doc comment immediately above, however it is written. */
+        const comment: string[] = [];
+        for (let j = i - 1; j >= 0 && j > i - 12; j -= 1) {
+          const above = (lines[j] ?? '').trim();
+          if (above === '' || above.startsWith('*/')) continue;
+          if (above.startsWith('*') || above.startsWith('/**') || above.startsWith('/*')) {
+            comment.unshift(above.replace(/^[/*]+/, '').trim());
+            if (above.startsWith('/**') || above.startsWith('/*')) break;
+            continue;
+          }
+          break;
+        }
+        const claim = comment.join(' ');
+        if (claim === '') continue;
+        /*
+         * A constant may honestly be enforced by ABSENCE (nothing constructs it) or be purely
+         * INFORMATIONAL. Both are fine — but each has to say so, in those words, so the
+         * exemption is a sentence somebody wrote on purpose rather than a silence.
+         */
+        if (/enforced by absence|informational/i.test(claim)) continue;
+        if (CLAIMS_ENFORCEMENT.test(claim)) found.push({ file, name, claim });
+      }
+    }
+    return found;
+  }
+
+  it('finds the safeguards it is supposed to be checking', () => {
+    /* A structural test that matched nothing would pass forever while proving nothing. */
+    expect(declaredSafeguards().length).toBeGreaterThan(3);
+  });
+
+  it('every safeguard claiming enforcement is read by production code', () => {
+    const files = execSync('git ls-files src', { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map((f) => f.trim())
+      .filter((f) => f.endsWith('.ts'));
+    const sources = new Map(files.map((f) => [f, readFileSync(f, 'utf8')]));
+
+    const unenforced: string[] = [];
+    for (const safeguard of declaredSafeguards()) {
+      let consumers = 0;
+      for (const [file, source] of sources) {
+        for (const line of source.split(/\r?\n/)) {
+          if (!line.includes(safeguard.name)) continue;
+          /* Its own declaration, and its own doc comment, do not count as consumption. */
+          if (/^export const/.test(line.trim())) continue;
+          if (line.trim().startsWith('*') || line.trim().startsWith('//')) continue;
+          consumers += 1;
+          void file;
+        }
+      }
+      if (consumers === 0) {
+        unenforced.push(
+          safeguard.file + '  ' + safeguard.name + '\n    claims: ' + safeguard.claim.slice(0, 120),
+        );
+      }
+    }
+
+    expect(
+      unenforced,
+      'these constants document a protection that nothing enforces. Either wire them into the ' +
+        'code that should refuse, or rewrite the comment to stop claiming they do:\n' +
+        unenforced.join('\n'),
+    ).toEqual([]);
+  });
+});
+
+/* ====== CLASS 2: one verdict resolver, whatever enum a department speaks ====== */
+
+describe('a decision-bearing verdict is resolved, never read raw from a document', () => {
+  /*
+   * SPEC: Phase 6 targeted hardening, class 2; finding
+   * ORGANIZATIONAL-LEARNING-DEPARTMENTS-A/F2.
+   *
+   * `supportedVerdict` closed this for the PASS/FAIL family and the review immediately found
+   * the same hole one enum over: four reviewer departments persist `met: output.verdict ===
+   * 'ACCEPTABLE'` with a `findings` array that is `.default([])` and has no `minItems`. A
+   * reviewer returning `{verdict: 'ACCEPTABLE', findings: []}` records a met judgement having
+   * examined nothing.
+   *
+   * My own comment claimed the fix applied "by every department, so the next one written
+   * cannot quietly omit it". It did not, because it only understood one vocabulary. One
+   * resolver now takes both.
+   */
+  it('FORGED VERDICT: a value outside the family is not a pass', () => {
+    expect(verdictIsAffirmative('TOTALLY_FINE', { examined: 5 })).toBe(false);
+    expect(verdictIsAffirmative('', { examined: 5 })).toBe(false);
+  });
+
+  it('UNSUPPORTED VERDICT: ACCEPTABLE having examined nothing is not a pass', () => {
+    expect(verdictIsAffirmative('ACCEPTABLE', { examined: 0 })).toBe(false);
+  });
+
+  it('MISMATCHED ENUM FAMILY: PASS is not an answer to an ACCEPTABLE question', () => {
+    /*
+     * Both families are understood, and each is only affirmative in its own terms — so a
+     * department cannot launder a verdict by answering in the other vocabulary.
+     */
+    expect(verdictIsAffirmative('PASS', { examined: 5, family: 'REVIEW' })).toBe(false);
+    expect(verdictIsAffirmative('ACCEPTABLE', { examined: 5, family: 'VERIFICATION' })).toBe(false);
+  });
+
+  it('a supported verdict in its own family is affirmative', () => {
+    expect(verdictIsAffirmative('ACCEPTABLE', { examined: 3, family: 'REVIEW' })).toBe(true);
+    expect(verdictIsAffirmative('PASS', { examined: 3, family: 'VERIFICATION' })).toBe(true);
+  });
+
+  it('a negative verdict is never upgraded, however much was examined', () => {
+    expect(verdictIsAffirmative('NOT_ACCEPTABLE', { examined: 99 })).toBe(false);
+    expect(verdictIsAffirmative('FAIL', { examined: 99 })).toBe(false);
+  });
+
+  it('PASS_WITH_QUALIFICATION is affirmative only when something was examined', () => {
+    expect(verdictIsAffirmative('PASS_WITH_QUALIFICATION', { examined: 3 })).toBe(true);
+    expect(verdictIsAffirmative('PASS_WITH_QUALIFICATION', { examined: 0 })).toBe(false);
+  });
+
+  it('every reviewer department routes its judgement through the resolver', () => {
+    /*
+     * The structural half. A department added later cannot quietly compare a raw verdict
+     * string again, which is exactly how this class survived the first fix.
+     */
+    const files = execSync('git ls-files src/intelligence/departments', { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map((f) => f.trim())
+      .filter((f) => f.endsWith('.ts'));
+
+    const raw: string[] = [];
+    for (const file of files) {
+      for (const [i, line] of readFileSync(file, 'utf8').split(/\r?\n/).entries()) {
+        if (/met:\s*output\.verdict\s*===/.test(line)) {
+          raw.push(file + ':' + String(i + 1) + '  ' + line.trim());
+        }
+      }
+    }
+    expect(
+      raw,
+      'these compare a raw verdict from a document; route them through verdictIsAffirmative:\n' +
+        raw.join('\n'),
+    ).toEqual([]);
   });
 });

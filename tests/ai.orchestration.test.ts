@@ -724,3 +724,47 @@ describe('owner-decision signals are read, not merely carried', () => {
     expect(v.accepted, JSON.stringify(v.findings)).toBe(true);
   });
 });
+
+/* ====== CLASS 1: a declared safeguard that nothing consumes is not a safeguard ====== */
+
+describe('low classifier confidence stops a request rather than annotating it', () => {
+  /*
+   * SPEC: 04 §3.4; HIGH findings AI-RUNTIME/F2 and CONVERSATION-GOVERNANCE/CONVGOV-1.
+   *
+   * `MIN_CLASSIFICATION_CONFIDENCE` was exported with the comment "below this, a
+   * classification is not acted on without owner input" and read by nothing. A classification
+   * the AI itself marked LOW went through planning to QUEUED unless it happened ALSO to set
+   * ownerDecisionRequired or list an unresolved item.
+   *
+   * The round that fixed exactly this for those two fields left confidence behind — the same
+   * "declared safeguard nothing consumes" shape, in the same function, one field over.
+   */
+  it('halts a LOW-confidence classification', () => {
+    const v = validateExecutionPlan(PLAN, {
+      ...opts,
+      classification: { ...CLASSIFICATION, confidence: 'LOW' },
+    });
+    expect(v.accepted).toBe(false);
+    expect(JSON.stringify(v.findings)).toMatch(/confidence/i);
+  });
+
+  it('allows MEDIUM and HIGH, which is what the floor means', () => {
+    for (const confidence of ['MEDIUM', 'HIGH'] as const) {
+      const v = validateExecutionPlan(PLAN, {
+        ...opts,
+        classification: { ...CLASSIFICATION, confidence },
+      });
+      expect(v.accepted, confidence).toBe(true);
+    }
+  });
+
+  it('names the owner as the remedy, not a retry', () => {
+    /* A low-confidence classification is a question for the owner, not a prompt to try again. */
+    const v = validateExecutionPlan(PLAN, {
+      ...opts,
+      classification: { ...CLASSIFICATION, confidence: 'LOW' },
+    });
+    const finding = v.findings.find((f) => /confidence/i.test(f.detail));
+    expect(finding?.kind).toBe(PlanFindingKind.OWNER_ACTION_DELEGATED);
+  });
+});

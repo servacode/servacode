@@ -162,6 +162,7 @@ export async function retrieveForResearch(
     return false;
   });
 
+  const retriever = deps.retriever ?? OFFLINE_RETRIEVER;
   if (deps.retriever === undefined) {
     return {
       outcome: RetrievalOutcome.UNAVAILABLE,
@@ -190,7 +191,7 @@ export async function retrieveForResearch(
   for (const url of capped) {
     let page: RetrievedPage;
     try {
-      page = await deps.retriever.fetch(url, o.timeoutMs ?? 20_000);
+      page = await retriever.fetch(url, o.timeoutMs ?? 20_000);
     } catch (e) {
       refusals.push(
         'retrieval failed for ' + url + ': ' + String(e instanceof Error ? e.message : e),
@@ -263,7 +264,14 @@ export async function retrieveForResearch(
   return { outcome: RetrievalOutcome.CAPTURED, captures, refusals };
 }
 
-/** A retriever that refuses. The default, so nothing reaches the network by accident. */
+/**
+ * A retriever that refuses, used wherever none is configured.
+ *
+ * The comment here used to claim this WAS the default while nothing referenced it — the
+ * absent-retriever case was handled separately at the check below. The behaviour was right
+ * and the explanation was false, which is its own kind of defect: a reader auditing the
+ * network boundary would have looked here and found a constant that did nothing.
+ */
 export const OFFLINE_RETRIEVER: Retriever = {
   fetch: async (url: string): Promise<RetrievedPage> => ({
     url,

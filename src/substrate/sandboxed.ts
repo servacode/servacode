@@ -146,11 +146,11 @@ export const PRODUCER_REQUIRED_BINARIES: readonly GuestBinary[] = Object.freeze(
 export const GUEST_REQUIRED_BINARIES = RECIPE_REQUIRED_BINARIES;
 
 /**
- * The seccomp filter package.
+ * The seccomp filter package, for readers tracing where the sandbox comes from.
  *
- * Detected, never assumed. The previous implementation hard-coded this prerequisite as
- * unsatisfied, which made the substrate permanently unqualifiable and — worse — would
- * have kept reporting it as missing on a machine where it had been installed.
+ * Informational: detection happens against what the guest reports, not against this name, so
+ * nothing here refuses anything. It says so plainly rather than implying a check it does not
+ * perform.
  */
 export const SECCOMP_PACKAGE = '@anthropic-ai/sandbox-runtime';
 

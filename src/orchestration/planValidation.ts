@@ -1,4 +1,5 @@
 import { MAGNITUDE_ORDER, Magnitude } from '../vocab/index.js';
+import { MIN_CLASSIFICATION_CONFIDENCE } from './orchestrator.js';
 import { getCatalogues } from '../catalogue/index.js';
 import { capabilityLevelFor, CapabilityLevel } from '../agents/toolPolicy.js';
 import type { ContractRegistry } from '../agents/registry.js';
@@ -107,6 +108,23 @@ function magnitudeRank(m: Magnitude): number {
   return MAGNITUDE_ORDER.indexOf(m);
 }
 
+/**
+ * Confidence, ordered, so a threshold can be compared rather than enumerated.
+ *
+ * A list rather than a `<` on strings: 'HIGH' < 'LOW' lexically, which is the kind of quiet
+ * inversion this codebase has been finding all week.
+ */
+const CONFIDENCE_ORDER: readonly string[] = ['LOW', 'MEDIUM', 'HIGH'];
+
+/** Is this classification at or below the floor the spec says needs owner input? */
+function belowConfidenceFloor(confidence: string): boolean {
+  const floor = CONFIDENCE_ORDER.indexOf(MIN_CLASSIFICATION_CONFIDENCE);
+  const actual = CONFIDENCE_ORDER.indexOf(confidence);
+  /* An unrecognised value is not evidence of confidence, so it fails closed. */
+  if (actual === -1) return true;
+  return actual <= floor;
+}
+
 /** Read the M-level out of a ceiling string such as "M4 (process decisions only)". */
 export function ceilingRank(ceiling: string): number {
   const m = ceiling.match(/M([0-4])/);
@@ -151,6 +169,32 @@ export function validateExecutionPlan(
    * Refusing here rather than in `route()` is deliberate. This is the deterministic gate, it
    * already rejects rather than sanitizes, and a caller cannot reach dispatch around it.
    */
+  /*
+   * A CLASSIFICATION THE AI DOES NOT BELIEVE IS NOT A BASIS FOR ACTING.
+   *
+   * SPEC: 04 §3.4; findings AI-RUNTIME/F2 and CONVERSATION-GOVERNANCE/CONVGOV-1.
+   *
+   * `MIN_CLASSIFICATION_CONFIDENCE` was exported carrying the sentence "below this, a
+   * classification is not acted on without owner input", and read by nothing. The round that
+   * fixed exactly this shape for `ownerDecisionRequired` and `unresolved` left confidence
+   * behind — the same defect, in the same function, one field over.
+   *
+   * The floor is the LOWEST ACCEPTABLE value rather than a forbidden one, so the comparison
+   * lives here and the constant stays the single place the threshold is written down.
+   */
+  if (belowConfidenceFloor(opts.classification.confidence)) {
+    add({
+      kind: PlanFindingKind.OWNER_ACTION_DELEGATED,
+      detail:
+        'The classifier reported ' +
+        opts.classification.confidence +
+        ' confidence in what this request is, which is at or below the floor (' +
+        MIN_CLASSIFICATION_CONFIDENCE +
+        '). Acting on a reading nobody is confident in is a decision for the owner, not a retry.',
+      specRef: '04 §3.4',
+    });
+  }
+
   if (opts.classification.ownerDecisionRequired) {
     add({
       kind: PlanFindingKind.OWNER_ACTION_DELEGATED,

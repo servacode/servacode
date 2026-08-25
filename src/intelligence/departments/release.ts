@@ -13,6 +13,7 @@ import { AcceptanceVerdictSchema, VerificationVerdict } from '../artifacts/quali
 import { RollbackSpecSchema, ObservabilitySpecSchema } from '../artifacts/operations.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
+import { VerdictFamily, supportedVerdict, verdictIsAffirmative } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -520,7 +521,11 @@ export const operationalReadinessDepartment: DepartmentConfig<typeof OpsReadines
     ).put(tx, {
       id,
       createdAt: at,
-      verdict: output.verdict,
+      /* Serva computes this: a readiness verdict that ran no check verified nothing. */
+      verdict: supportedVerdict(output.verdict, {
+        exercised: output.checks.length,
+        notVerified: output.notVerified.length,
+      }),
       releaseRef: { id: release?.id ?? ctx.workItemId },
       summary: output.summary,
       checks: output.checks,
@@ -536,7 +541,11 @@ export const operationalReadinessDepartment: DepartmentConfig<typeof OpsReadines
       judgements: [
         {
           criterionRef: 'RL-4',
-          met: output.verdict === VerificationVerdict.PASS,
+          /* A readiness PASS that ran no check is not readiness. */
+          met: verdictIsAffirmative(output.verdict, {
+            examined: output.checks.length,
+            family: VerdictFamily.VERIFICATION,
+          }),
           by: OPS_READINESS_VERIFIER,
           note: output.summary,
           subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.RUNBOOK])],

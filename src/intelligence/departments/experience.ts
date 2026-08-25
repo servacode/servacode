@@ -30,6 +30,7 @@ import {
 } from '../artifacts/admin.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
+import { reviewJudgement } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -390,7 +391,10 @@ export const uxReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
       judgements: [
         {
           criterionRef: 'UX-2',
-          met: output.verdict === 'ACCEPTABLE',
+          met: reviewJudgement(
+            output.verdict,
+            currentSubjects(ctx.store, [ARTIFACT_TYPES.FLOW, ARTIFACT_TYPES.STATE_COVERAGE]),
+          ),
           by: UX_REVIEWER,
           note: output.summary,
           subjects: currentSubjects(ctx.store, [
@@ -826,7 +830,13 @@ export const designReviewDepartment: DepartmentConfig<typeof ReviewOutput> = {
       judgements: [
         {
           criterionRef: 'DS-1',
-          met: output.verdict === 'ACCEPTABLE',
+          met: reviewJudgement(
+            output.verdict,
+            currentSubjects(ctx.store, [
+              ARTIFACT_TYPES.DESIGN_TOKEN_SET,
+              ARTIFACT_TYPES.COMPONENT_SPEC,
+            ]),
+          ),
           by: DESIGN_REVIEWER,
           note: output.summary,
           subjects: currentSubjects(ctx.store, [

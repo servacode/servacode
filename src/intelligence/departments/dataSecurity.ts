@@ -22,6 +22,7 @@ import {
 } from '../artifacts/security.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
+import { reviewJudgement } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -372,7 +373,10 @@ export const dataReviewDepartment: DepartmentConfig<typeof DataReviewOutputSchem
       judgements: [
         {
           criterionRef: 'DA-1',
-          met: output.verdict === 'ACCEPTABLE',
+          met: reviewJudgement(
+            output.verdict,
+            currentSubjects(ctx.store, [ARTIFACT_TYPES.DATA_MODEL]),
+          ),
           by: DATA_REVIEWER,
           note: output.summary,
           subjects: currentSubjects(ctx.store, [ARTIFACT_TYPES.DATA_MODEL]),

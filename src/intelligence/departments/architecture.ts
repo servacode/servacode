@@ -20,6 +20,7 @@ import {
 } from '../artifacts/architecture.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
+import { reviewJudgement } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -889,7 +890,14 @@ export const architectureReviewDepartment: DepartmentConfig<typeof ArchitectureR
         judgements: [
           {
             criterionRef: 'AR-2',
-            met: output.verdict === 'ACCEPTABLE',
+            met: reviewJudgement(
+              output.verdict,
+              currentSubjects(ctx.store, [
+                ARTIFACT_TYPES.ARCHITECTURE_MODEL,
+                ARTIFACT_TYPES.ADR,
+                ARTIFACT_TYPES.COMPLEXITY_JUSTIFICATION,
+              ]),
+            ),
             by: REVIEWER,
             note: output.summary,
             subjects: currentSubjects(ctx.store, [

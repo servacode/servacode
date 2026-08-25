@@ -12,6 +12,7 @@ import {
 } from '../artifacts/requirements.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
+import { reviewJudgement } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -463,7 +464,14 @@ export const requirementsVerifierDepartment: DepartmentConfig<typeof VerifierOut
       judgements: [
         {
           criterionRef: 'RQ-4',
-          met: output.verdict === 'ACCEPTABLE',
+          met: reviewJudgement(
+            output.verdict,
+            currentSubjects(ctx.store, [
+              ARTIFACT_TYPES.REQUIREMENT,
+              ARTIFACT_TYPES.NFR,
+              ARTIFACT_TYPES.ACCEPTANCE_CRITERION,
+            ]),
+          ),
           by: VERIFIER_AGENT,
           note: output.summary,
           subjects: currentSubjects(ctx.store, [
