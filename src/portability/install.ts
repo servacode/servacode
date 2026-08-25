@@ -205,10 +205,26 @@ export function planSwitch(
    */
   const tooNew: string[] = [];
   for (const projectRoot of projectRoots) {
+    /*
+     * AN UNREADABLE SCHEMA MARKER FAILS CLOSED.
+     *
+     * SPEC: finding INSTALL-UPDATE-ROLLBACK/SEC-INST-1.
+     *
+     * A missing file was `continue`d and unparseable content fell through `Number.isFinite`,
+     * so either state was silently treated as compatible and the rollback proceeded READY.
+     * This is the check the file's own header calls the reason rollback happens before
+     * anything moves — "ROLLBACK IS REFUSED WHEN IT WOULD LOSE DATA" — and it failed OPEN on
+     * exactly the corrupt-store case that most needs it.
+     */
     const schemaFile = storePaths(projectRoot).schemaVersion;
-    if (!existsSync(schemaFile)) continue;
+    if (!existsSync(schemaFile)) {
+      tooNew.push(projectRoot + ' (no store schema marker, so its version is unknown)');
+      continue;
+    }
     const schema = Number.parseInt(readFileSync(schemaFile, 'utf8').trim(), 10);
-    if (Number.isFinite(schema) && schema > target.storeSchema) {
+    if (!Number.isFinite(schema)) {
+      tooNew.push(projectRoot + ' (store schema marker is unreadable, so its version is unknown)');
+    } else if (schema > target.storeSchema) {
       tooNew.push(projectRoot + ' (store schema ' + String(schema) + ')');
     }
   }

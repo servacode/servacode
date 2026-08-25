@@ -464,8 +464,27 @@ function gitIdentity(root: string): { head?: string; branch?: string; present: b
     if (headRaw.startsWith('ref: ')) {
       const ref = headRaw.slice(5).trim();
       const branch = ref.split('/').slice(2).join('/');
-      const refPath = join(gitDir, ...ref.split('/'));
-      const head = existsSync(refPath) ? readFileSync(refPath, 'utf8').trim() : undefined;
+      /*
+       * A REF IS FILE CONTENT, SO IT IS INPUT.
+       *
+       * SPEC: §32; finding BACKUP-RESTORE/BACKUP-RESTORE-F1.
+       *
+       * This was the one place in the file that built a filesystem path out of content it had
+       * just read, with no confinement. `join` collapses `..`, so a crafted
+       * `ref: ../../../../secrets.txt` put that file's contents verbatim into `git.head` — a
+       * field `credentialScan` never sees, because the scan runs over copied content only.
+       *
+       * `safeBundlePath` is the same predicate every other path here goes through, and a
+       * commit id is all this field was ever meant to hold: anything that does not look like
+       * one is dropped rather than shipped.
+       */
+      const safeRef = safeBundlePath(ref);
+      const refPath = safeRef === undefined ? undefined : join(gitDir, ...safeRef.split('/'));
+      const raw =
+        refPath !== undefined && existsSync(refPath)
+          ? readFileSync(refPath, 'utf8').trim()
+          : undefined;
+      const head = raw !== undefined && /^[0-9a-f]{7,40}$/i.test(raw) ? raw : undefined;
       return { present: true, branch, ...(head === undefined ? {} : { head }) };
     }
     return { present: true, head: headRaw };

@@ -182,7 +182,6 @@ export function inspectRestore(o: RestoreOptions): RestoreInspection {
     ok: blocking.length === 0 && problems.length === 0,
     manifest,
     compatibility: compat.reason,
-    ...(problems.length === 0 ? {} : { problems }),
     ...(migration === undefined ? {} : { migration }),
     projects,
     /*
@@ -198,26 +197,41 @@ export function inspectRestore(o: RestoreOptions): RestoreInspection {
         .slice(0, 3)
         .map((e) => e.path + ' — ' + e.detail),
     ],
-    problems: blocking.map(
-      (p) =>
-        p.destination +
-        ' already contains ' +
-        (p.conflict === RestoreConflict.DIFFERENT_PROJECT
-          ? 'a DIFFERENT Serva project'
-          : p.conflict === RestoreConflict.SAME_PROJECT
-            ? 'this project'
-            : 'files') +
-        '. Restoring over it needs explicit confirmation.',
-    ),
+    /*
+     * BOTH KINDS OF PROBLEM, IN ONE ARRAY.
+     *
+     * SPEC: finding MIGRATION/MIGR-SEC-1.
+     *
+     * This literal set `problems` twice — escaping project ids first, destination conflicts
+     * second — and the later key silently won. With no conflicts present the escaping-id
+     * warnings vanished and the summary read "ready to restore" for a crafted bundle.
+     */
+    problems: [
+      ...problems,
+      ...blocking.map(
+        (p) =>
+          p.destination +
+          ' already contains ' +
+          (p.conflict === RestoreConflict.DIFFERENT_PROJECT
+            ? 'a DIFFERENT Serva project'
+            : p.conflict === RestoreConflict.SAME_PROJECT
+              ? 'this project'
+              : 'files') +
+          '. Restoring over it needs explicit confirmation.',
+      ),
+    ],
     summary:
       String(projects.length) +
       ' project(s), ' +
       String(manifest.inventory.length) +
       ' file(s), ' +
       formatBytes(manifest.totalBytes) +
-      (blocking.length === 0
-        ? ' — ready to restore'
-        : ' — blocked by ' + String(blocking.length) + ' conflict(s)'),
+      /* The summary reports the same answer `ok` does, including the refused-bundle case. */
+      (problems.length > 0
+        ? ' — REFUSED: ' + String(problems.length) + ' problem(s) with this bundle'
+        : blocking.length === 0
+          ? ' — ready to restore'
+          : ' — blocked by ' + String(blocking.length) + ' conflict(s)'),
   };
 }
 

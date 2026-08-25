@@ -946,6 +946,26 @@ describe('a crafted projectId cannot reach outside the destination root', () => 
     expect(JSON.stringify(inspection)).toContain('escape');
   });
 
+  it('SAYS SO in problems, not merely in ok:false', () => {
+    /*
+     * SPEC: HIGH finding MIGRATION/MIGR-SEC-1 — a regression in this very fix.
+     *
+     * The returned literal set `problems` twice: once with the escaping-id warnings and again,
+     * later, with destination conflicts. The later key wins, so with no conflicts present the
+     * escaping-id text was discarded entirely and the summary read "ready to restore" for the
+     * single most dangerous class of bundle.
+     *
+     * `performRestore` refuses independently, so nothing could be written — but any surface
+     * showing an owner what inspection found would have reported a crafted bundle as safe,
+     * which is precisely what "SAID BEFORE, NOT DISCOVERED AFTER" exists to prevent.
+     */
+    const bundle = craftedBundle('../../escaped');
+    const destinationRoot = tmp();
+    const inspection = inspectRestore({ bundlePath: bundle, destinationRoot });
+    expect(inspection.problems.join(' ')).toContain('escape');
+    expect(inspection.summary).not.toContain('ready to restore');
+  });
+
   it('refuses an absolute projectId', () => {
     const bundle = craftedBundle(process.platform === 'win32' ? 'C:\Windows\Temp' : '/tmp/x');
     const destinationRoot = tmp();
@@ -1122,5 +1142,50 @@ describe('nothing machine-bound travels, as the writer promises', () => {
       },
     );
     expect(result.manifest.inventory.length).toBeGreaterThan(0);
+  });
+});
+
+/* ====== SWEEP: two more paths that trusted content they had just read ====== */
+
+describe('a crafted .git/HEAD cannot pull an arbitrary file into the manifest', () => {
+  /*
+   * SPEC: §32; HIGH finding BACKUP-RESTORE/BACKUP-RESTORE-F1.
+   *
+   * `gitIdentity()` read `.git/HEAD`, and for a `ref: <path>` line built
+   * `join(gitDir, ...ref.split('/'))` and read whatever that resolved to — the only place in
+   * the file that builds a filesystem path out of file CONTENT without confining it. `join`
+   * collapses `..`, so `ref: ../../../../secrets.txt` put that file's contents verbatim into
+   * `git.head`, which `credentialScan` never sees because it only runs over copied content.
+   */
+  it('refuses a ref that escapes the git directory', () => {
+    const seeded = seedProject();
+    const secret = join(seeded.root, '..', 'outside-secret.txt');
+    writeFileSync(secret, 'ANTHROPIC_API_KEY=sk-ant-not-a-real-key\n', 'utf8');
+    writeFileSync(join(seeded.root, '.git', 'HEAD'), 'ref: ../../outside-secret.txt\n', 'utf8');
+
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+
+    const head = result.manifest.projects[0]?.git?.head ?? '';
+    expect(head, 'a file outside the git directory reached the manifest').not.toContain('sk-ant-');
+  });
+
+  it('an ordinary branch ref still records its commit', () => {
+    const seeded = seedProject();
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+    expect(result.manifest.projects[0]?.git?.present).toBe(true);
   });
 });
