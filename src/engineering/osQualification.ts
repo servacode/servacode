@@ -514,6 +514,41 @@ export async function qualifyOsSandbox(
 }
 
 /**
+ * Did the host-escape command actually reach the host?
+ *
+ * SPEC: Phase 6 qualification transport invariant §6.
+ *
+ * `EXIT=$?` reports the status of the SHELL, not of the Windows binary the probe names. With
+ * interop disabled the binary never executes, and depending on how the failure surfaces the
+ * shell can still exit 0 — which the original test, `/EXIT=0\b/`, read as a successful escape.
+ *
+ * The direction that fails in is not catastrophic: a false `true` attributes H1 to the SANDBOX,
+ * makes it a live probe whose containment nothing can decide, and stops the qualification at
+ * SANDBOX_NOT_MEASURED. It fails closed. But a measurement that reaches the right refusal for
+ * the wrong reason has measured nothing, and the next machine is where that stops being safe.
+ *
+ * So an escape must show its work: a zero status on the trailer line AND output that only the
+ * host could have produced. A shell that exited 0 having run nothing satisfies neither.
+ */
+export function hostEscapeRan(output: string): boolean {
+  const lines = output.split(/\r?\n/).map((l) => l.trim());
+
+  /* The trailer is a line of its own, so `EXIT=0` inside host output is not mistaken for it. */
+  const exited = lines.some((l) => l === 'EXIT=0');
+  if (!exited) return false;
+
+  /*
+   * Anything the command printed, other than the trailer this probe appended. A completed
+   * escape produces host output; `cmd.exe /c ver` cannot succeed silently.
+   */
+  const said = lines.filter((l) => l !== '' && !/^EXIT=\d+$/.test(l));
+  if (said.length === 0) return false;
+
+  /* A shell reporting that it could not find the binary is the opposite of an escape. */
+  return !said.some((l) => /not found|No such file|cannot execute|command not found/i.test(l));
+}
+
+/**
  * Can this guest execute a host binary AT ALL, with no sandbox in the way?
  *
  * Asked rather than assumed, because the answer decides who gets the credit. If the
@@ -543,7 +578,7 @@ function hostEscapeRunsUnsandboxed(
         timeout: 30_000,
       },
     );
-    const runs = /EXIT=0\b/.test(out);
+    const runs = hostEscapeRan(out);
     return {
       runs,
       basis:

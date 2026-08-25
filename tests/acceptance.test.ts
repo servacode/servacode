@@ -684,3 +684,148 @@ describe('LIVE-ENGINEERING accepts a contained EVIDENCE_VIOLATION, and nothing e
     expect(resolved.refusals.join(' ')).toContain('EVIDENCE_VIOLATION');
   });
 });
+
+/* ========= LIVE-ENGINEERING: an honest PARTIAL is not an unfinished change ========= */
+
+describe('LIVE-ENGINEERING accepts a contained PARTIAL, and nothing else does', () => {
+  /*
+   * SPEC: Phase 6 LIVE-ENGINEERING PARTIAL semantics (locked).
+   *
+   * The Producer is denied `Bash` by design so that `SC-RTC-012` — "the one whose result a
+   * Producer cannot assert" — is what verifies a change. A Producer that hits that boundary
+   * and refuses to claim an unobserved test result ends PARTIAL. Refusing its acceptance would
+   * punish exactly the behaviour the trust model exists to reward.
+   *
+   * The exception is confined the same way the EVIDENCE_VIOLATION one is, and for the same
+   * reason: containment is re-derived canonically, never read from the proof.
+   */
+  const LIVE_RUN = { runId: 'SC-RUN-000002', agentId: 'SC-AGENT-150', storePath: '.serva-live' };
+
+  function liveProof(root: string, requirementId = 'LIVE-ENGINEERING'): void {
+    writeProof(root, {
+      requirementId,
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: LIVE_RUN,
+    });
+  }
+
+  const blocked = () => ({ contained: true, producerOutcome: 'PARTIAL', reasons: [] });
+  const unfinished = (why: string) => () => ({
+    contained: false,
+    producerOutcome: 'PARTIAL',
+    reasons: [why],
+  });
+
+  function resolveWith(
+    root: string,
+    outcome: string,
+    assessContainment?: () => { contained: boolean; producerOutcome: string; reasons: string[] },
+    requirementId = 'LIVE-ENGINEERING',
+  ) {
+    return resolveProof(requirementId, {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome }),
+      ...(assessContainment === undefined ? {} : { assessContainment }),
+    });
+  }
+
+  it('a contained VERIFICATION_BLOCKED PARTIAL resolves', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(root, 'PARTIAL', blocked);
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+  });
+
+  it('a PARTIAL from unfinished implementation refuses', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(
+      root,
+      'PARTIAL',
+      unfinished('the run records no file the Producer was allowed to change'),
+    );
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('no file');
+  });
+
+  it('a PARTIAL with no independent verification refuses', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(
+      root,
+      'PARTIAL',
+      unfinished('no SC-RTC-012 measurement is bound to SC-CS-000001'),
+    );
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('SC-RTC-012');
+  });
+
+  it('a PARTIAL with a contradicted claim refuses', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(
+      root,
+      'PARTIAL',
+      unfinished('1 Producer claim(s) were contradicted by the runtime'),
+    );
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('contradicted');
+  });
+
+  it('a PARTIAL with failing measured checks refuses', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(
+      root,
+      'PARTIAL',
+      unfinished('independent measurement did not pass: SC-RTC-012 FAIL'),
+    );
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('FAIL');
+  });
+
+  it('a PARTIAL with no containment assessment available refuses', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(root, 'PARTIAL');
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('containment is unproven');
+  });
+
+  it('a containment verdict for a DIFFERENT outcome cannot license this one', () => {
+    /*
+     * An assessor answering about EVIDENCE_VIOLATION is answering a different question. Left
+     * unchecked, one outcome's containment would silently license another's.
+     */
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveWith(root, 'PARTIAL', () => ({
+      contained: true,
+      producerOutcome: 'EVIDENCE_VIOLATION',
+      reasons: [],
+    }));
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('assessed for EVIDENCE_VIOLATION');
+  });
+
+  it('LIVE-SERVA does not inherit the PARTIAL exception', () => {
+    const root = pkg();
+    liveProof(root, 'LIVE-SERVA');
+    const resolved = resolveWith(root, 'PARTIAL', blocked, 'LIVE-SERVA');
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('PARTIAL');
+  });
+
+  it('other terminal outcomes stay refused even offered a contained verdict', () => {
+    for (const outcome of ['FAILED', 'REFUSED', 'BLOCKED', 'ESCALATED', 'INVALID_OUTPUT']) {
+      const root = pkg();
+      liveProof(root);
+      const resolved = resolveWith(root, outcome, blocked);
+      expect(resolved.status, outcome).toBe(ProofStatus.NOT_VERIFIED);
+      expect(resolved.refusals.join(' '), outcome).toContain(outcome);
+    }
+  });
+});

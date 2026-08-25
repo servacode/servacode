@@ -6,6 +6,7 @@ import { readAudit } from '../events/audit.js';
 import { listChangeSets, readChangeSet } from '../engineering/changeset.js';
 import { listReviews } from '../engineering/review.js';
 import { listEvidence } from '../engineering/execution.js';
+import { runStream } from '../events/agentRun.js';
 import type { Store } from '../store/store.js';
 import type { SubstrateQualification } from '../substrate/types.js';
 
@@ -308,6 +309,227 @@ export function assessProducerContainment(
     contradictedClaims: contradicted,
     creditedFromProducer,
     measuredEvidence: measured.map((e) => e.id),
+    reasons,
+  };
+}
+
+/**
+ * The capability grant the runtime bound for a run, read from its own event log.
+ *
+ * Returns an empty grant when the event is absent, which callers must treat as "unknown"
+ * rather than "nothing was granted" — the two look identical here and only the first is
+ * honest about what the store actually said.
+ */
+function capabilityGrantOf(
+  store: Store,
+  runId: string,
+): { available?: unknown; approve?: unknown } {
+  try {
+    for (const entry of store.readTrace(runStream(runId))) {
+      if (entry.type !== 'CAPABILITY_BOUND') continue;
+      return payloadOf(entry) as { available?: unknown; approve?: unknown };
+    }
+  } catch {
+    /* An unreadable trace grants nothing knowable, and the caller refuses on that. */
+  }
+  return {};
+}
+
+export interface VerificationBlock {
+  /** True only when every condition below was derived from governed evidence. */
+  readonly contained: boolean;
+  readonly producerOutcome: string;
+  /** The tool whose denial blocked verification, when one was found. */
+  readonly blockedTool?: string;
+  /** The command the Producer was refused, kept verbatim. */
+  readonly blockedCommand?: string;
+  /** Independent measurements that answered the check the Producer could not run. */
+  readonly coveringEvidence: readonly string[];
+  readonly reasons: readonly string[];
+}
+
+/**
+ * IS A `PARTIAL` AN HONEST VERIFICATION BLOCK, OR AN UNFINISHED CHANGE?
+ *
+ * SPEC: Phase 6 LIVE-ENGINEERING PARTIAL semantics (locked).
+ *
+ * A Producer holds `Bash` in its available toolset and NO approving `Bash(...)` rule in its
+ * grant, so under `dontAsk` every Bash call is denied. That is deliberate — `dispatch.ts:122`
+ * calls it "the right default" — and it is precisely why a test result can be trusted:
+ * `SC-RTC-012` is the executor "whose result a Producer cannot assert".
+ *
+ * So the correct behaviour for a Producer that cannot run the declared test is to say so and
+ * stop. When one does, its run ends `PARTIAL`. Refusing that acceptance would punish the exact
+ * honesty the trust model is built to reward, while the thing that actually verifies the
+ * change — the independent measured check — passed.
+ *
+ * The danger is obvious, and is why this function is long: `PARTIAL` also means "I did not
+ * finish". The two must never be confused, so nothing here is read from a field the Producer
+ * authored about itself. `VERIFICATION_BLOCKED` in an escalation is a starting point, not a
+ * finding — the attribution is proved from the CAPABILITY GRANT THE RUNTIME BOUND and the TOOL
+ * DECISIONS THE RUNTIME RECORDED:
+ *
+ *   the denied tool was AVAILABLE, so it was not withheld by absence;
+ *   it carried NO APPROVING RULE, which is the intentional policy and not an environment fault;
+ *   the implementation itself landed, evidenced by an allowed write;
+ *   nothing the Producer claimed was contradicted;
+ *   and something independent measured the dimension the Producer could not.
+ *
+ * An arbitrary `PARTIAL` fails at the first of these. That is the point.
+ */
+export function assessVerificationBlock(
+  store: Store,
+  producerRunId: string,
+  changeSetId: string,
+): VerificationBlock {
+  const reasons: string[] = [];
+  const record = terminalRun(store, producerRunId) as
+    | {
+        outcome?: string;
+        toolCalls?: unknown;
+        escalations?: unknown;
+        capabilityGrant?: unknown;
+        claimAssessments?: unknown;
+      }
+    | undefined;
+
+  if (record === undefined) {
+    return {
+      contained: false,
+      producerOutcome: 'UNKNOWN',
+      coveringEvidence: [],
+      reasons: [producerRunId + ' does not resolve to a terminal run'],
+    };
+  }
+
+  const outcome = record.outcome ?? 'UNKNOWN';
+  if (outcome !== 'PARTIAL') {
+    reasons.push('the run ended ' + outcome + ', and this rule covers PARTIAL only');
+  }
+
+  /* ------------------------------------------------- the block, as the Producer reported it */
+
+  const escalations = Array.isArray(record.escalations)
+    ? (record.escalations as { condition?: string; detail?: string }[])
+    : [];
+  const blocked = escalations.find((e) => e.condition === 'VERIFICATION_BLOCKED');
+  if (blocked === undefined) {
+    reasons.push(
+      'the run records no VERIFICATION_BLOCKED escalation, so this PARTIAL is unexplained',
+    );
+  }
+
+  /* ------------------------------------------ the block, as the RUNTIME actually recorded it */
+
+  const toolCalls = Array.isArray(record.toolCalls)
+    ? (record.toolCalls as { tool?: string; allowed?: boolean; subject?: string }[])
+    : [];
+  const denied = toolCalls.filter((c) => c.allowed === false);
+
+  /*
+   * THE GRANT LIVES IN THE TRACE, NOT ON THE TERMINAL RECORD.
+   *
+   * A first version of this read `record.capabilityGrant`, which the AgentRun projection has
+   * never written — so `available` and `approve` were empty for every real run and the
+   * attribution below could never succeed. It failed CLOSED, which is the one direction this
+   * may fail in, but it still proved nothing about the run it was asked about.
+   *
+   * `CAPABILITY_BOUND` is where the runtime records the grant it actually bound, before the
+   * first tool call. That is the authority: it is written by the binder rather than reported
+   * by the agent, and it is the same record `assertGrantWithinContract` was checked against.
+   */
+  const grant = capabilityGrantOf(store, producerRunId);
+  const available = Array.isArray(grant.available) ? grant.available.map(String) : [];
+  const approve = Array.isArray(grant.approve) ? grant.approve.map(String) : [];
+  if (available.length === 0) {
+    reasons.push(
+      'no CAPABILITY_BOUND event records the grant this run was given, so no denial can be ' +
+        'attributed to the Producer execution policy',
+    );
+  }
+
+  /*
+   * ATTRIBUTION. A tool denied because the policy never approved it is the invariant working;
+   * a tool denied for any other reason is an unexplained environment failure, and an
+   * unexplained failure is never a contained one.
+   */
+  const byPolicy = denied.find((c) => {
+    const tool = String(c.tool ?? '');
+    if (tool === '' || !available.includes(tool)) return false;
+    return !approve.some((rule) => rule.startsWith(tool + '('));
+  });
+
+  if (byPolicy === undefined) {
+    reasons.push(
+      denied.length === 0
+        ? 'no tool call was denied, so no verification block is attributable to the Producer policy'
+        : 'the denied tool call is not attributable to the intentional Producer execution policy: ' +
+            'it was either unavailable or already approved, which makes the denial an unexplained ' +
+            'environment failure rather than the boundary working',
+    );
+  }
+
+  /* ------------------------------------------------------- the implementation itself landed */
+
+  const wrote = toolCalls.some(
+    (c) => c.allowed === true && (c.tool === 'Edit' || c.tool === 'Write'),
+  );
+  if (!wrote) {
+    reasons.push(
+      'the run records no file the Producer was allowed to change, so no implementation work ' +
+        'was completed and this PARTIAL is an unfinished change rather than a blocked check',
+    );
+  }
+
+  /* ------------------------------------------------------------- nothing it said was wrong */
+
+  const assessments = Array.isArray(record.claimAssessments)
+    ? (record.claimAssessments as {
+        verification?: string;
+        kind?: string;
+        claim?: { kind?: string };
+      }[])
+    : [];
+  const contradicted = assessments.filter((a) => a.verification === 'CONTRADICTED');
+  if (contradicted.length > 0) {
+    reasons.push(
+      String(contradicted.length) +
+        ' Producer claim(s) were contradicted by the runtime, so this run is not merely blocked',
+    );
+  }
+
+  /* --------------------------------------- something independent answered what it could not */
+
+  const evidence = listEvidence(store).filter((e) => e.changeSetId === changeSetId);
+  const measured = evidence.filter((e) => e.basis === 'MEASURED' || e.basis === 'DERIVED');
+
+  /*
+   * The justification for accepting this run at all is that the check the Producer was denied
+   * WAS RUN by something that could. `SC-RTC-012` is that component, so its absence is fatal
+   * however clean the rest of the run looks.
+   */
+  const testChecks = measured.filter((e) => e.runtimeComponentId === 'SC-RTC-012');
+  if (testChecks.length === 0) {
+    reasons.push(
+      'no SC-RTC-012 measurement is bound to ' +
+        changeSetId +
+        ', so nothing independently ran the verification the Producer could not',
+    );
+  }
+  const failing = measured.filter((e) => e.outcome !== undefined && e.outcome !== 'PASS');
+  if (failing.length > 0) {
+    reasons.push(
+      'independent measurement did not pass: ' +
+        failing.map((e) => String(e.runtimeComponentId) + ' ' + String(e.outcome)).join(', '),
+    );
+  }
+
+  return {
+    contained: reasons.length === 0,
+    producerOutcome: outcome,
+    ...(byPolicy?.tool === undefined ? {} : { blockedTool: String(byPolicy.tool) }),
+    ...(byPolicy?.subject === undefined ? {} : { blockedCommand: String(byPolicy.subject) }),
+    coveringEvidence: testChecks.map((e) => e.id),
     reasons,
   };
 }

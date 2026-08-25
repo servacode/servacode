@@ -16,7 +16,7 @@ import { systemClock } from '../core/clock.js';
 import { TimeOrderedIdSource } from '../core/ids.js';
 import { Store } from '../store/store.js';
 import { listChangeSets } from '../engineering/changeset.js';
-import { assessProducerContainment } from './liveProof.js';
+import { assessProducerContainment, assessVerificationBlock } from './liveProof.js';
 
 /**
  * SERVA CODE 1.0 — THE STATUS SERVA ISSUES ABOUT ITSELF.
@@ -218,6 +218,24 @@ export function defaultContainmentAssessor(): (ref: RunRef) => ContainmentVerdic
     try {
       const changeSet = listChangeSets(store).find((c) => c.producerRunId === ref.runId);
       if (changeSet === undefined) return undefined;
+
+      /*
+       * WHICH QUESTION TO ASK DEPENDS ON HOW THE RUN ENDED, AND THE STORE DECIDES THAT TOO.
+       *
+       * The outcome is read from the terminal record rather than taken from the caller, so a
+       * proof cannot select the more forgiving assessment by describing itself differently.
+       */
+      const outcome = store.getCanon<{ outcome?: string }>('agentRunRecord', ref.runId)?.body
+        ?.outcome;
+
+      if (outcome === 'PARTIAL') {
+        const block = assessVerificationBlock(store, ref.runId, changeSet.changeSetId);
+        return {
+          contained: block.contained,
+          producerOutcome: block.producerOutcome,
+          reasons: block.reasons,
+        };
+      }
       return assessProducerContainment(store, ref.runId, changeSet.changeSetId);
     } catch {
       /* An unreadable store decides nothing, and deciding nothing is a refusal. */

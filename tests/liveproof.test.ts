@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { EnforcementClass } from '../src/vocab/index.js';
 import { ExecutionAvailability, QualificationAttempt } from '../src/substrate/types.js';
-import { resolveLiveEngineering, resolveLiveServa } from '../src/acceptance/liveProof.js';
+import {
+  assessVerificationBlock,
+  resolveLiveEngineering,
+  resolveLiveServa,
+} from '../src/acceptance/liveProof.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { CHANGESET_CANON_TYPE } from '../src/engineering/changeset.js';
 import { REVIEW_CANON_TYPE } from '../src/engineering/review.js';
+import { appendRunEvent } from '../src/events/agentRun.js';
 import { audit } from '../src/events/audit.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { SubstrateQualification } from '../src/substrate/types.js';
@@ -694,5 +699,229 @@ describe('an evidence violation may be accepted only when it is contained', () =
     } finally {
       rt.close();
     }
+  });
+});
+
+/* ========== PARTIAL: an honest verification block is not an incomplete change ========== */
+
+describe('a PARTIAL caused by the intentional Producer execution policy', () => {
+  /*
+   * SPEC: Phase 6 LIVE-ENGINEERING PARTIAL semantics (locked).
+   *
+   * The Producer holds `Bash` in its available toolset and NO approving `Bash(...)` rule in
+   * its grant, so under `dontAsk` every Bash call is denied. That is deliberate — the comment
+   * at `dispatch.ts:122` calls it "the right default" — and it is the whole reason a test
+   * result is trustworthy: `SC-RTC-012` is documented as "the one whose result a Producer
+   * cannot assert."
+   *
+   * So the correct behaviour for a Producer that cannot run the test is to say so. When one
+   * does, it ends PARTIAL, and refusing the acceptance would punish the exact honesty the
+   * trust model is built to reward — while the thing that actually verifies the change, the
+   * independent measured check, passed.
+   *
+   * This is NOT a general tolerance for PARTIAL. Every condition below is re-derived from
+   * governed evidence, and a PARTIAL that means "I did not finish the work" still refuses.
+   */
+
+  /** The grant the runtime actually bound: Bash available, Bash never approved. */
+  const POLICY_GRANT = {
+    available: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
+    approve: ['Read(**)', 'Glob(**)', 'Grep(**)', 'Edit(**)', 'Write(**)'],
+    deny: ['Bash(git push*)', 'Bash(curl*)'],
+  };
+
+  /** A Producer run that fixed the defect and was denied the test command. */
+  function seedBlockedProducer(
+    store: Store,
+    runId: string,
+    over: Record<string, unknown> = {},
+  ): void {
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', runId, {
+      runId,
+      agentId: PRODUCER,
+      outcome: 'PARTIAL',
+      workItemId: 'SC-WI-000900',
+      toolCalls: [
+        { tool: 'Edit', allowed: true, subject: 'src/total.js' },
+        { tool: 'Bash', allowed: false, subject: 'node test.js; echo "exit=$?"' },
+      ],
+      escalations: [
+        {
+          condition: 'VERIFICATION_BLOCKED',
+          detail: 'the Bash call was denied; I will not claim a test result I did not observe',
+          blocking: false,
+        },
+      ],
+      claimAssessments: [
+        { kind: 'FILE_WRITTEN', statement: 'edited src/total.js', verification: 'CORROBORATED' },
+        {
+          kind: 'COMMAND_RUN',
+          statement: 'attempted node test.js; the call was refused',
+          verification: 'UNVERIFIED',
+        },
+      ],
+      evidenceRefs: [],
+      ...over,
+    });
+    /*
+     * The grant goes in the TRACE, because that is where the runtime writes it. Seeding it
+     * onto the terminal record instead would make these tests pass against a field no real
+     * run has ever carried.
+     */
+    appendRunEvent(tx, runId, {
+      type: 'CAPABILITY_BOUND',
+      payload: (over['capabilityGrant'] ?? POLICY_GRANT) as Record<string, unknown>,
+    });
+    tx.commit();
+  }
+
+  function chain(store: Store, producerRunId = 'SC-RUN-000004'): Record<string, unknown> {
+    seedChangeSet(store, { producerRunId });
+    seedReview(store);
+    seedEvidence(store);
+    seedEvidence(store, 'SC-CS-000002', 'SC-EEV-000002', { runtimeComponentId: 'SC-RTC-005' });
+    return {};
+  }
+
+  it('resolves when the block is attributable to the policy and everything else holds', () => {
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004');
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.reasons, verdict.reasons.join('; ')).toEqual([]);
+    expect(verdict.contained).toBe(true);
+    expect(verdict.blockedTool).toBe('Bash');
+  });
+
+  it('refuses a PARTIAL that recorded no verification block at all', () => {
+    /* PARTIAL meaning "I stopped early" is not PARTIAL meaning "I was not allowed to check". */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', { escalations: [] });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('VERIFICATION_BLOCKED');
+  });
+
+  it('refuses when the block is not attributable to the Producer execution policy', () => {
+    /*
+     * The distinguishing fact is canonical: the denied tool is AVAILABLE and carries no
+     * approving rule. A tool denied for any other reason is an unexplained environment
+     * failure, and an unexplained failure is never a contained one.
+     */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', {
+      capabilityGrant: {
+        ...POLICY_GRANT,
+        approve: [...POLICY_GRANT.approve, 'Bash(node test.js)'],
+      },
+    });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('policy');
+  });
+
+  it('refuses when the implementation itself is unfinished', () => {
+    /* A blocked check on work that was never done is not an honest verification gap. */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', {
+      toolCalls: [{ tool: 'Bash', allowed: false, subject: 'node test.js' }],
+    });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('no file');
+  });
+
+  it('refuses when a Producer claim was contradicted', () => {
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', {
+      claimAssessments: [
+        { kind: 'TEST_RESULT', statement: 'the tests pass', verification: 'CONTRADICTED' },
+      ],
+    });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('contradicted');
+  });
+
+  it('refuses when nothing independently measured the blocked verification', () => {
+    /*
+     * The whole justification is that the check the Producer could not run was run by
+     * something that could. Without it there is no verification, only a gap.
+     */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004');
+    seedChangeSet(rt.store, { producerRunId: 'SC-RUN-000004' });
+    seedReview(rt.store);
+    seedEvidence(rt.store, 'SC-CS-000002', 'SC-EEV-000002', { runtimeComponentId: 'SC-RTC-005' });
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('SC-RTC-012');
+  });
+
+  it('refuses when the independent measured check FAILED', () => {
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004');
+    seedChangeSet(rt.store, { producerRunId: 'SC-RUN-000004' });
+    seedReview(rt.store);
+    seedEvidence(rt.store, 'SC-CS-000002', 'SC-EEV-000001', { outcome: 'FAIL' });
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('FAIL');
+  });
+  it('refuses a terminal outcome that is not PARTIAL', () => {
+    for (const outcome of ['FAILED', 'REFUSED', 'BLOCKED', 'SCOPE_VIOLATION']) {
+      const rt = project();
+      seedBlockedProducer(rt.store, 'SC-RUN-000004', { outcome });
+      chain(rt.store);
+      const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+      expect(verdict.contained, outcome).toBe(false);
+      expect(verdict.reasons.join(' '), outcome).toContain(outcome);
+    }
+  });
+
+  it('refuses a run that does not resolve at all', () => {
+    const rt = project();
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-NOPE', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+  });
+
+  it('reads the grant from CAPABILITY_BOUND, not from the terminal record', () => {
+    /*
+     * The AgentRun projection has never written `capabilityGrant` onto the terminal record. A
+     * first version of this assessor read exactly that, so `available` was empty for every
+     * real run and no denial could ever be attributed. It failed closed — the safe direction —
+     * but it proved nothing about the run it was asked about, which is its own kind of wrong.
+     */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004');
+    chain(rt.store);
+    expect(assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002').contained).toBe(true);
+
+    /* With no CAPABILITY_BOUND event the answer is a refusal, never a silent pass. */
+    const bare = project();
+    const tx = bare.store.begin();
+    tx.putCanon('agentRunRecord', 'SC-RUN-000004', {
+      runId: 'SC-RUN-000004',
+      agentId: PRODUCER,
+      outcome: 'PARTIAL',
+      toolCalls: [
+        { tool: 'Edit', allowed: true, subject: 'src/total.js' },
+        { tool: 'Bash', allowed: false, subject: 'node test.js' },
+      ],
+      escalations: [{ condition: 'VERIFICATION_BLOCKED', detail: 'denied', blocking: false }],
+      claimAssessments: [],
+      evidenceRefs: [],
+    });
+    tx.commit();
+    chain(bare.store);
+    const verdict = assessVerificationBlock(bare.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.contained).toBe(false);
+    expect(verdict.reasons.join(' ')).toContain('CAPABILITY_BOUND');
   });
 });

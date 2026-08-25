@@ -231,6 +231,28 @@ export interface ResolveOptions {
  * assessor satisfies it directly. Deliberately narrow: nothing here can be constructed from
  * a proof document, only from the store the run happened in.
  */
+/**
+ * Terminal outcomes a LIVE-ENGINEERING run may survive, given canonical containment.
+ *
+ * SPEC: Phase 6 Producer evidence-violation semantics; LIVE-ENGINEERING PARTIAL semantics.
+ *
+ * Both entries encode the same principle from opposite directions, and neither is a
+ * relaxation: **a Producer's own account is not the verification mechanism — independent
+ * measured evidence is.**
+ *
+ *   EVIDENCE_VIOLATION  the Producer said something the runtime contradicted. Its word is
+ *                       worthless, which changes nothing, because its word was never what
+ *                       the acceptance rested on.
+ *
+ *   PARTIAL             the Producer was DENIED the verification command by the intentional
+ *                       execution policy and refused to claim a result it had not observed.
+ *                       Punishing that would punish the honesty the model is built to reward.
+ *
+ * Every other terminal outcome stays refused, and containment for these two is always
+ * re-derived from governed evidence rather than read from the proof.
+ */
+const CONTAINABLE_OUTCOMES: ReadonlySet<string> = new Set(['EVIDENCE_VIOLATION', 'PARTIAL']);
+
 export interface ContainmentVerdict {
   readonly contained: boolean;
   readonly producerOutcome: string;
@@ -466,7 +488,7 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
          * judgement is not a containment judgement.
          */
         const eligible =
-          requirementId === 'LIVE-ENGINEERING' && run.outcome === 'EVIDENCE_VIOLATION';
+          requirementId === 'LIVE-ENGINEERING' && CONTAINABLE_OUTCOMES.has(String(run.outcome));
 
         if (!eligible) {
           refusals.push('live run ' + live.runId + ' ended ' + String(run.outcome));
@@ -474,8 +496,9 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
           refusals.push(
             'live run ' +
               live.runId +
-              ' ended EVIDENCE_VIOLATION and no canonical containment assessment was available, ' +
-              'so containment is unproven',
+              ' ended ' +
+              String(run.outcome) +
+              ' and no canonical containment assessment was available, so containment is unproven',
           );
         } else {
           const containment = o.assessContainment(live);
@@ -483,13 +506,31 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
             refusals.push(
               'live run ' +
                 live.runId +
-                ' ended EVIDENCE_VIOLATION and containment could not be assessed from the store',
+                ' ended ' +
+                String(run.outcome) +
+                ' and containment could not be assessed from the store',
+            );
+          } else if (containment.producerOutcome !== run.outcome) {
+            /*
+             * The assessment must be about THIS run's outcome. An assessor answering for a
+             * different terminal state is answering a different question, and a mismatch here
+             * would let a containment verdict for one outcome license another.
+             */
+            refusals.push(
+              'live run ' +
+                live.runId +
+                ' ended ' +
+                String(run.outcome) +
+                ' but containment was assessed for ' +
+                containment.producerOutcome,
             );
           } else if (!containment.contained) {
             refusals.push(
               'live run ' +
                 live.runId +
-                ' ended EVIDENCE_VIOLATION and the violation is not contained: ' +
+                ' ended ' +
+                String(run.outcome) +
+                ' and it is not contained: ' +
                 (containment.reasons[0] ?? 'no reason recorded'),
             );
           }
