@@ -268,15 +268,20 @@ export const DEFAULT_SECURITY_REVIEWER = 'SC-AGENT-220';
 
 const AREA_TASK =
   'Perform an independent security review of ONE AREA of this implementation, at the exact ' +
-  'commit given to you, using only the source you were given. ' +
-  'Decide whether the boundary this area names actually holds in the code you can read, and ' +
-  'record what you looked at. Report findings with severities, and give a verdict that follows ' +
-  'from them: ACCEPTED if you found no CRITICAL and no HIGH finding in this area, BLOCKED if ' +
-  'you did, NOT_VERIFIED if you could not review it with what you were given. ' +
+  'commit given to you. ' +
+  'THE SOURCE IS SUPPLIED TO YOU AS CONTEXT — you hold no tools and you are not reading files. ' +
+  'Analyse only the text you were given. ' +
+  'Decide whether the boundary this area names actually holds in that code, and say what you ' +
+  'concluded from which part of it. Report findings with severities, and give a verdict that ' +
+  'follows from them: ACCEPTED if you found no CRITICAL and no HIGH finding in this area, ' +
+  'BLOCKED if you did, NOT_VERIFIED if the supplied source does not let you decide. ' +
   'Put the area name in `scope`. ' +
-  'Do not modify anything — you hold no write authority, and a reviewer that changes what it ' +
+  'DESCRIBE YOUR WORK ACCURATELY: say "analysed" or "the supplied source shows", never ' +
+  '"I read src/x.ts" or "I ran". A claim to have performed an action you did not perform is ' +
+  'contradicted by the runtime and invalidates the whole review — and it would be untrue. ' +
+  'Do not modify anything: you hold no write authority, and a reviewer that changes what it ' +
   'reviews has reviewed nothing. ' +
-  'Do not report a finding you cannot point at: cite file:line from the source you were given. ' +
+  'Do not report a finding you cannot point at: cite file:line from the supplied source. ' +
   'An unsupported finding wastes the same attention a real one needs.';
 
 const TASK =
@@ -482,6 +487,12 @@ export async function runScopedSecurityReview(
         },
       ],
       maxContextChars: 400_000,
+      /*
+       * Reading 200KB of unfamiliar source and judging it takes longer than the 180s default,
+       * and every FAILED area in the first real run was `terminated: TIMEOUT`. A review cut off
+       * mid-thought is not a fast review; it is an unreviewed area wearing a run id.
+       */
+      budget: { maxWallTimeMs: 900_000, maxTurns: 6 },
     });
 
     const parsed =

@@ -777,6 +777,35 @@ describe('the review is scoped by area, because one reviewer cannot read the who
     expect(source.omitted).toEqual(['src/store/b.ts']);
   });
 
+  it('tells the reviewer it holds no tools, so it cannot claim to have read files', async () => {
+    /*
+     * The first real run lost seven areas to EVIDENCE_VIOLATION. The reviewer wrote "Read
+     * src/gates/authority.ts and analysed..." and the runtime contradicted it correctly: no
+     * tool call happened in that run, because this grant deliberately provides none.
+     *
+     * The reviewer was not lying so much as describing analysis in the idiom of reading, and
+     * the prompt invited it. A claim to have performed an action nothing observed is exactly
+     * what claim assessment exists to catch, so the prompt now says plainly where the source
+     * came from and how to describe working on it.
+     */
+    const rt = project();
+    const { seen, runtime } = areaRuntime(clean);
+    await scoped(rt, runtime);
+    const task = String(seen[0]?.request['taskDefinition']);
+    expect(task).toContain('SUPPLIED TO YOU AS CONTEXT');
+    expect(task).toContain('you hold no tools');
+    expect(task.toLowerCase()).toContain('never');
+  });
+
+  it('gives each area long enough to actually read its source', async () => {
+    /* Every FAILED area in the first real run was `terminated: TIMEOUT` at the 180s default. */
+    const rt = project();
+    const { seen, runtime } = areaRuntime(clean);
+    await scoped(rt, runtime);
+    const budget = seen[0]?.request['budget'] as { maxWallTimeMs?: number } | undefined;
+    expect(budget?.maxWallTimeMs ?? 0).toBeGreaterThan(180_000);
+  });
+
   it('maps every required area to real source', () => {
     /* An area matching nothing is a hole in the table, and would review nothing at all. */
     for (const area of REQUIRED_SCOPE) {
