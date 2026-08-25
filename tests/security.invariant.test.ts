@@ -7,6 +7,7 @@ import {
   actorRefusal,
   resolveActor,
 } from '../src/core/actorAuthority.js';
+import { supportedVerdict } from '../src/intelligence/departments/verdictSupport.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -292,5 +293,54 @@ describe('the invariant holds across the codebase, not only where it was last en
       expect(typeof value).toBe('string');
     }
     expect(Object.values(ActorAuthority).length).toBeGreaterThan(0);
+  });
+});
+
+/* ============ THE SAME CLASS, IN VERDICTS: a self-reported PASS is not a measurement ======= */
+
+describe('a verification verdict is downgraded when nothing was actually exercised', () => {
+  /*
+   * SPEC: Phase 6 security invariant sweep; HIGH findings
+   * ORGANIZATIONAL-LEARNING-DEPARTMENTS-B/F1 and F2.
+   *
+   * This is the authority defect in a second costume. There the question was "who says you may
+   * act"; here it is "who says the work was checked" — and the answer was the same: the agent
+   * itself, believed.
+   *
+   * Two departments computed the honest answer (`unjudged.length > 0 && verdict === PASS =>
+   * NOT_VERIFIED`, with a comment reading "Serva computes this"). Three others —
+   * qaVerification, accessibilityVerification, securityVerification — wrote `verdict:
+   * output.verdict` straight through. An agent could report PASS for the SECURITY stage with
+   * `threatsExercised: []` and every threat in `notVerified`, and Serva persisted a clean PASS.
+   *
+   * And where the downgrade did exist it tested `=== PASS` only, so PASS_WITH_QUALIFICATION
+   * bypassed it entirely — while the Release department reads exactly that field to decide
+   * RECOMMEND or HOLD.
+   */
+  it('downgrades a PASS that exercised nothing', () => {
+    expect(supportedVerdict('PASS', { exercised: 0, notVerified: 3 })).toBe('NOT_VERIFIED');
+  });
+
+  it('downgrades PASS_WITH_QUALIFICATION too, which the original check let through', () => {
+    expect(supportedVerdict('PASS_WITH_QUALIFICATION', { exercised: 0, notVerified: 3 })).toBe(
+      'NOT_VERIFIED',
+    );
+  });
+
+  it('leaves an honest PASS alone', () => {
+    expect(supportedVerdict('PASS', { exercised: 5, notVerified: 0 })).toBe('PASS');
+  });
+
+  it('leaves a PASS with some coverage and some gaps alone', () => {
+    /* Partial coverage is what PASS_WITH_QUALIFICATION and `notVerified` are FOR. */
+    expect(supportedVerdict('PASS_WITH_QUALIFICATION', { exercised: 5, notVerified: 2 })).toBe(
+      'PASS_WITH_QUALIFICATION',
+    );
+  });
+
+  it('never upgrades a FAIL', () => {
+    /* The helper only ever makes a verdict weaker. */
+    expect(supportedVerdict('FAIL', { exercised: 5, notVerified: 0 })).toBe('FAIL');
+    expect(supportedVerdict('NOT_VERIFIED', { exercised: 5, notVerified: 0 })).toBe('NOT_VERIFIED');
   });
 });

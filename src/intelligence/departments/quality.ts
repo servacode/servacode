@@ -16,6 +16,7 @@ import {
 } from '../artifacts/quality.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { contextFrom, currentSubjects, derived } from './shared.js';
+import { supportedVerdict } from './verdictSupport.js';
 import type {
   DepartmentConfig,
   DepartmentContext,
@@ -216,7 +217,11 @@ export const qaVerificationDepartment: DepartmentConfig<typeof QAOutputSchema> =
     repository(ctx.store, ARTIFACT_TYPES.QA_VERDICT, QAVerdictSchema).put(tx, {
       id: verdictId,
       createdAt: at,
-      verdict: output.verdict,
+      /* Serva computes this: a success that covered no criterion checked nothing. */
+      verdict: supportedVerdict(output.verdict, {
+        exercised: output.criteriaCovered.length,
+        notVerified: output.notVerified.length,
+      }),
       subjectRef: subjectRef(ctx),
       subjects: [
         ...currentSubjects(ctx.store, [
@@ -351,7 +356,11 @@ export const accessibilityVerificationDepartment: DepartmentConfig<
       {
         id,
         createdAt: at,
-        verdict: output.verdict,
+        /* Serva computes this: a success that ran no check checked nothing. */
+        verdict: supportedVerdict(output.verdict, {
+          exercised: output.automatedChecks.length + output.findings.length,
+          notVerified: output.notVerified.length,
+        }),
         subjectRef: subjectRef(ctx),
         subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.ACCESSIBILITY_SPEC])],
         summary: output.summary,
@@ -504,7 +513,15 @@ export const securityVerificationDepartment: DepartmentConfig<typeof SecurityTes
     repository(ctx.store, ARTIFACT_TYPES.SECURITY_VERDICT, SecurityVerdictSchema).put(tx, {
       id: verdictId,
       createdAt: at,
-      verdict: output.verdict,
+      /*
+       * Serva computes this. An agent reporting PASS with `threatsExercised: []` and every
+       * threat in `notVerified` was persisting a clean bill of health for a security stage
+       * that exercised nothing — the exact failure this department's own task text forbids.
+       */
+      verdict: supportedVerdict(output.verdict, {
+        exercised: output.threatsExercised.length,
+        notVerified: output.notVerified.length,
+      }),
       subjectRef: subjectRef(ctx),
       subjects: [
         ...currentSubjects(ctx.store, [ARTIFACT_TYPES.THREAT_MODEL, ARTIFACT_TYPES.ABUSE_CASE]),
@@ -631,11 +648,22 @@ export const performanceVerificationDepartment: DepartmentConfig<typeof Performa
     repository(ctx.store, ARTIFACT_TYPES.PERFORMANCE_VERDICT, PerformanceVerdictSchema).put(tx, {
       id,
       createdAt: at,
-      /* Any unmeasured target makes the whole verdict NOT_VERIFIED at best. */
-      verdict:
+      /*
+       * Any unmeasured target makes the whole verdict NOT_VERIFIED at best.
+       *
+       * The `=== PASS` form let PASS_WITH_QUALIFICATION through with nothing measured at all,
+       * and the Release department reads exactly this field to choose RECOMMEND or HOLD.
+       * `supportedVerdict` covers both, so the two conditions cannot drift apart again.
+       */
+      verdict: supportedVerdict(
         unmeasured.length > 0 && output.verdict === VerificationVerdict.PASS
           ? VerificationVerdict.NOT_VERIFIED
           : output.verdict,
+        {
+          exercised: measurements.filter((m) => m.measured !== undefined).length,
+          notVerified: unmeasured.length,
+        },
+      ),
       subjectRef: subjectRef(ctx),
       subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.NFR])],
       summary: output.summary,
@@ -776,10 +804,12 @@ export const acceptanceVerificationDepartment: DepartmentConfig<typeof Acceptanc
        * them becomes NOT_VERIFIED. Serva computes this; a verdict that says PASS while
        * half the criteria were never looked at is the failure acceptance exists to catch.
        */
-      verdict:
+      verdict: supportedVerdict(
         unjudged.length > 0 && output.verdict === VerificationVerdict.PASS
           ? VerificationVerdict.NOT_VERIFIED
           : output.verdict,
+        { exercised: judged.length, notVerified: unjudged.length },
+      ),
       subjectRef: subjectRef(ctx),
       subjects: [...currentSubjects(ctx.store, [ARTIFACT_TYPES.ACCEPTANCE_CRITERION])],
       summary: output.summary,
