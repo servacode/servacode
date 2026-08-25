@@ -29,7 +29,7 @@ const { repositoryIdentity } = await import('../dist/acceptance/status.js');
 const { PROOF_DIR, ProofStatus, VerificationType } = await import('../dist/acceptance/proof.js');
 const { REQUIRED_SCOPE, ReviewVerdict, resolveSecurityReview } =
   await import('../dist/acceptance/securityReview.js');
-const { DEFAULT_SECURITY_REVIEWER, runSecurityReview } =
+const { DEFAULT_SECURITY_REVIEWER, runScopedSecurityReview } =
   await import('../dist/acceptance/securityReviewRun.js');
 const { execSync } = await import('node:child_process');
 
