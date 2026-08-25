@@ -283,7 +283,7 @@ const CAPABILITY_IMPLYING_TOOLS: Readonly<Record<string, 'fsWrite' | 'exec'>> = 
 });
 
 /** Never available to a governed run, whatever else it was granted. */
-const NEVER_AVAILABLE: readonly string[] = Object.freeze([
+export const NEVER_AVAILABLE: readonly string[] = Object.freeze([
   'Agent',
   'Task',
   'WebFetch',

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { REQUIRED_SCOPE, ReviewVerdict, Severity } from './securityReview.js';
 import type { SecurityReview } from './securityReview.js';
 import type { AgentRunResult, AgentRuntime } from '../agents/runtime.js';
+import { ALWAYS_DENY_TOOLS, NEVER_AVAILABLE } from '../agents/toolPolicy.js';
 import type { ToolPolicy } from '../engine/types.js';
 
 /**
@@ -128,17 +129,20 @@ function readOnlyGrant(): ToolPolicy {
   };
 }
 
-/** Denied whatever else is granted, so a widened grant later cannot quietly reach these. */
+/**
+ * Denied whatever else is granted.
+ *
+ * Derived from the canonical lists rather than restated, because a second hand-maintained copy
+ * drifts from the first and the drift is silent — `assertGrantWithinContract` refused this
+ * grant for omitting `Monitor`, which a literal list had simply never heard of.
+ */
 const NEVER_GRANTED: readonly string[] = Object.freeze([
+  ...ALWAYS_DENY_TOOLS,
+  ...NEVER_AVAILABLE,
   'Bash',
   'PowerShell',
   'Edit',
   'Write',
-  'NotebookEdit',
-  'Agent',
-  'Task',
-  'WebFetch',
-  'WebSearch',
 ]);
 
 export interface SecurityReviewRunInput {

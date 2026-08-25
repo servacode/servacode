@@ -8,6 +8,7 @@ import {
   Severity,
   resolveSecurityReview,
 } from '../src/acceptance/securityReview.js';
+import { ALWAYS_DENY_TOOLS, NEVER_AVAILABLE } from '../src/agents/toolPolicy.js';
 import { runSecurityReview } from '../src/acceptance/securityReviewRun.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -578,6 +579,28 @@ describe('the reviewer runs read-only, and the grant says so', () => {
     const policy = (seen.request?.['capability'] as { policy: { deny: string[] } }).policy;
     for (const tool of ['Bash', 'PowerShell', 'Edit', 'Write', 'WebFetch']) {
       expect(policy.deny, tool + ' must be denied outright').toContain(tool);
+    }
+  });
+
+  it('denies every tool the canonical lists forbid, without restating them', async () => {
+    /*
+     * A hand-written deny list drifts from the canonical one, and the drift is silent until
+     * something refuses. `assertGrantWithinContract` rejected an earlier version of this grant
+     * for omitting `Monitor` — a tool the literal list had simply never heard of.
+     */
+    const rt = project();
+    const { seen, runtime } = capture();
+    await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+    const policy = (seen.request?.['capability'] as { policy: { deny: string[] } }).policy;
+    for (const tool of [...ALWAYS_DENY_TOOLS, ...NEVER_AVAILABLE]) {
+      expect(policy.deny, tool).toContain(tool);
     }
   });
 });
