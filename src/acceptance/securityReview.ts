@@ -3,7 +3,14 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { IsoSchema } from '../domain/schemas.js';
 import type { RepositoryIdentity } from './proof.js';
+import type { ContractRegistry } from '../agents/registry.js';
 import type { Store } from '../store/store.js';
+import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
+
+/** One scope name, reduced to its identity. Case-folded and trimmed, and nothing more. */
+export function normalizeScope(name: string): string {
+  return name.trim().toLowerCase();
+}
 
 /**
  * THE INDEPENDENT SECURITY REVIEW, AS TYPED EVIDENCE.
@@ -132,6 +139,13 @@ export interface ResolveSecurityInput {
   readonly openStore?: (storePath: string) => Store | undefined;
   /** Authorities that count as a verifier's rather than a producer's. */
   readonly verifierAuthorities?: ReadonlySet<string>;
+  /**
+   * The registry that issues agent contracts.
+   *
+   * Required to resolve at all: without it the reviewer's authority is unknown, and an
+   * unknown authority is a refusal rather than a default.
+   */
+  readonly registry?: ContractRegistry;
 }
 
 const DEFAULT_VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
@@ -226,27 +240,98 @@ export function resolveSecurityReview(input: ResolveSecurityInput): SecurityReso
 
   /* ------------------------------------------------------------- the authority */
 
+  /*
+   * NEITHER OF THESE FACTS COMES FROM THE DOCUMENT.
+   *
+   * SPEC: finding SSA-3 (MEDIUM), from the independent security review.
+   *
+   * This block used to read `review.reviewerAuthority` and
+   * `review.independence.implementationProducers` straight out of the parsed file. A
+   * hand-authored review naming a real completed run could therefore declare an empty producer
+   * set and `VERIFY`, and satisfy both checks — inside the module written to enforce that a
+   * file cannot certify itself. EVIDENCE FILE TEXT IS NOT AUTHORITY, including here.
+   *
+   * The authority now comes from the contract registry that issues it, and the producer set
+   * from the governed execution history in the store. The document may still RECORD both, and
+   * a disagreement between what it recorded and what the world says is itself a refusal: a
+   * review describing a different reality than the one it was resolved against is not a review
+   * of this implementation.
+   */
   const verifiers = input.verifierAuthorities ?? DEFAULT_VERIFIER_AUTHORITIES;
-  if (!verifiers.has(review.reviewerAuthority.toUpperCase())) {
+
+  if (input.registry === undefined) {
     refusals.push(
-      'the reviewer holds ' +
-        review.reviewerAuthority +
-        ', which is not a verifier authority; an agent that can produce cannot certify',
+      'no contract registry was supplied, so ' +
+        review.reviewerAgentId +
+        " could not be shown to hold a verifier's authority",
     );
+  } else {
+    const authority = reviewerAuthorityOf(review.reviewerAgentId, input.registry);
+    if (authority === undefined) {
+      refusals.push(
+        review.reviewerAgentId + ' holds no contract, so it holds no authority to certify',
+      );
+    } else {
+      if (!verifiers.has(authority.toUpperCase())) {
+        refusals.push(
+          'the reviewer holds ' +
+            authority +
+            ', which is not a verifier authority; an agent that can produce cannot certify',
+        );
+      }
+      if (authority.toUpperCase() !== review.reviewerAuthority.toUpperCase()) {
+        refusals.push(
+          'the review claims authority ' +
+            review.reviewerAuthority +
+            ' and the contract grants ' +
+            authority,
+        );
+      }
+    }
   }
 
-  if (review.independence.implementationProducers.includes(review.reviewerAgentId)) {
-    refusals.push(
-      review.reviewerAgentId +
-        ' produced the work it reviewed, so this is not an independent review',
-    );
+  if (store !== undefined) {
+    const produced = implementationProducersFrom(store);
+    if (produced.has(review.reviewerAgentId)) {
+      refusals.push(
+        review.reviewerAgentId +
+          ' produced the work it reviewed, so this is not an independent review',
+      );
+    }
+
+    /*
+     * A document that under-reports the producers is describing a world that is not this one.
+     * Recorded producers the store does not know about are harmless — the check is one-way,
+     * because the danger is a review that hides who built what it certifies.
+     */
+    const declared = new Set(review.independence.implementationProducers);
+    const missing = [...produced].filter((p) => !declared.has(p)).sort();
+    if (missing.length > 0) {
+      refusals.push(
+        'the review omits ' +
+          missing.join(', ') +
+          ' from the producers it claims independence from, and the store records them producing',
+      );
+    }
   }
 
   /* ---------------------------------------------------------------- the scope */
 
-  const missing = REQUIRED_SCOPE.filter(
-    (area) => !review.scope.some((s) => s.toLowerCase().includes(area.toLowerCase().slice(0, 8))),
-  );
+  /*
+   * EXACT IDENTITY, NOT AN EIGHT-CHARACTER SUBSTRING.
+   *
+   * SPEC: finding SSA-4 (LOW).
+   *
+   * This matched `s.toLowerCase().includes(area.toLowerCase().slice(0, 8))`, so any scope
+   * entry containing an area's first eight lowercased characters counted as covering it:
+   * "backup/r" covered "backup/restore", and so did "backup/rubbish". A coverage test that
+   * accepts a coincidence is not a coverage test.
+   *
+   * Normalization is stated rather than emergent — case-folded and trimmed, nothing else — so
+   * two names are the same area exactly when they are the same name.
+   */
+  const covered = new Set(review.scope.map(normalizeScope));
+  const missing = REQUIRED_SCOPE.filter((area) => !covered.has(normalizeScope(area)));
   if (missing.length > 0) {
     refusals.push('the review did not cover: ' + missing.join(', '));
   }

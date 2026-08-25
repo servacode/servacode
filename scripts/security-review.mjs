@@ -12,10 +12,10 @@ import { dirname, join } from 'node:path';
  * any file, and dispatches a real governed run of SC-AGENT-220 — a VERIFIER whose contract
  * grants it no write authority and no network.
  *
- * The judgement it returns is not accepted here. It is written out, then re-resolved by
- * `resolveSecurityReview` against the repository and the store, and the JUDGED proof is minted
- * only if that resolution is clean. This script can therefore produce a BLOCKED verdict and
- * no proof, which is the correct outcome for a commit with a real finding in it — and the one
+ * Each area's judgement is persisted before anything else can happen, then the verdict is
+ * AGGREGATED from those persisted records rather than from this process's own recollection of
+ * them. So a review that dies partway leaves its findings behind, and a BLOCKED verdict mints
+ * no proof at all — the correct outcome for a commit with a real finding in it, and the one
  * outcome a script that trusted its own reviewer could never reach.
  */
 
@@ -27,8 +27,9 @@ const { ServaRuntime } = await import('../dist/app/runtime.js');
 const { buildAiLayer } = await import('../dist/app/ai.js');
 const { repositoryIdentity } = await import('../dist/acceptance/status.js');
 const { PROOF_DIR, ProofStatus, VerificationType } = await import('../dist/acceptance/proof.js');
-const { REQUIRED_SCOPE, ReviewVerdict, resolveSecurityReview } =
-  await import('../dist/acceptance/securityReview.js');
+const { REQUIRED_SCOPE } = await import('../dist/acceptance/securityReview.js');
+const { aggregateSecurityReview } = await import('../dist/acceptance/securityAggregate.js');
+const { ContractRegistry } = await import('../dist/agents/registry.js');
 const { DEFAULT_SECURITY_REVIEWER, runScopedSecurityReview } =
   await import('../dist/acceptance/securityReviewRun.js');
 const { execSync } = await import('node:child_process');
@@ -101,6 +102,8 @@ const outcome = await runScopedSecurityReview({
   agentId: DEFAULT_SECURITY_REVIEWER,
   allFiles,
   readFile: (f) => readFileSync(join(root, ...f.split('/')), 'utf8'),
+  /* SSA-5: every attempt is written down before this process can exit. */
+  store: rt.store,
   onArea: (a) => {
     console.log(
       '  ' +
@@ -115,43 +118,45 @@ const outcome = await runScopedSecurityReview({
   },
 });
 
-if (outcome.review === undefined) {
+/*
+ * THE IN-MEMORY OUTCOME IS A PROGRESS REPORT, NOT THE ANSWER.
+ *
+ * SPEC: findings SSA-3 and SSA-5. Whatever just happened is now on disk, so the verdict is
+ * resolved from the persisted scope records rather than from this process's own recollection
+ * of them. That is what makes the review re-checkable by someone who did not run it.
+ */
+const aggregated = aggregateSecurityReview({
+  store: rt.store,
+  repository,
+  registry: ContractRegistry.shared(),
+  reviewedAt: new Date().toISOString(),
+  storePath: storeRoot,
+});
+
+console.log('');
+if (aggregated.review === undefined) {
+  console.error('security-review: the review does not aggregate, so no proof is minted:');
+  for (const r of aggregated.refusals) console.error('  - ' + r);
   console.error('');
-  console.error('security-review: the review did not complete, so no proof is minted:');
-  for (const r of outcome.refusals) console.error('  - ' + r);
+  console.error(
+    '  ' +
+      String(outcome.areas.filter((a) => a.refusal === undefined).length) +
+      ' of ' +
+      String(outcome.areas.length) +
+      ' scoped reviews completed. Every attempt is persisted in ' +
+      storeRoot +
+      ' and can be re-resolved without re-running the model.',
+  );
   process.exit(1);
 }
 
 const reviewPath = join(root, ...REVIEW_OUT.split('/'));
 mkdirSync(dirname(reviewPath), { recursive: true });
-writeFileSync(reviewPath, JSON.stringify(outcome.review, null, 2) + '\n', 'utf8');
-console.log('security-review: verdict ' + outcome.review.verdict);
-for (const f of outcome.review.findings) {
-  console.log('  ' + f.severity.padEnd(8) + f.area + ' — ' + f.statement);
-}
+writeFileSync(reviewPath, JSON.stringify(aggregated.review, null, 2) + '\n', 'utf8');
 
-/*
- * THE REVIEW IS NOT TRUSTED BECAUSE THIS SCRIPT PRODUCED IT.
- *
- * Re-resolved against Git and the store, exactly as it would be by anyone auditing the
- * package later. If the reviewer named a commit it did not review, ended in a run that did not
- * complete, or declared ACCEPTED over a HIGH finding, this is where it stops.
- */
-const resolution = resolveSecurityReview({
-  root,
-  repository,
-  openStore: (path) => (path === storeRoot ? rt.store : undefined),
-});
-
-if (!resolution.resolved) {
-  console.error('');
-  console.error('security-review: the review does not resolve, so no proof is minted:');
-  for (const r of resolution.refusals) console.error('  - ' + r);
-  if (outcome.review.verdict === ReviewVerdict.BLOCKED) {
-    console.error('');
-    console.error('  This is a real finding, not a tooling failure. Fix it and review again.');
-  }
-  process.exit(1);
+console.log('security-review: verdict ' + aggregated.review.verdict);
+for (const f of aggregated.review.findings) {
+  console.log('  ' + f.severity.padEnd(8) + f.area + ' — ' + f.statement.slice(0, 100));
 }
 
 const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -164,10 +169,10 @@ const proof = {
   treeDigest: repository.tree,
   producedAt: new Date().toISOString(),
   producer: { kind: 'TOOL', id: 'scripts/security-review.mjs' },
-  scope: outcome.review.scope,
+  scope: aggregated.review.scope,
   reviewerRunRef: {
-    runId: outcome.review.reviewerRunId,
-    agentId: outcome.review.reviewerAgentId,
+    runId: aggregated.review.reviewerRunId,
+    agentId: aggregated.review.reviewerAgentId,
     storePath: storeRoot,
   },
   evidence: [
@@ -175,32 +180,26 @@ const proof = {
       kind: 'FILE',
       ref: REVIEW_OUT,
       digest: digest(reviewPath),
-      note: 'the review as the reviewer left it, re-resolved rather than read',
+      note: 'the aggregate, re-resolved from persisted scope records rather than summarised',
     },
-    ...outcome.areas
-      .filter((a) => a.runId !== '')
-      .map((a) => ({
-        kind: 'AGENT_RUN',
-        ref: a.runId,
-        note:
-          outcome.review.reviewerAgentId +
-          ' reviewed "' +
-          a.area +
-          '" across ' +
-          String(a.filesReviewed.length) +
-          ' file(s) — VERIFIER, write = NONE, network = NONE',
-      })),
+    ...aggregated.scopeRunIds.map((runId) => ({
+      kind: 'AGENT_RUN',
+      ref: runId,
+      note: 'one scoped review — VERIFIER, write = NONE, network = NONE',
+    })),
     { kind: 'COMMIT', ref: repository.commit, note: 'the exact implementation reviewed' },
   ],
   notes:
-    'Independent review by ' +
-    outcome.review.reviewerAgentId +
-    ' at ' +
+    'Independent review of ' +
     repository.commit.slice(0, 12) +
-    ': ' +
-    String(outcome.review.findings.length) +
+    ' across ' +
+    String(REQUIRED_SCOPE.length) +
+    ' required areas in ' +
+    String(aggregated.scopeRunIds.length) +
+    ' governed runs: ' +
+    String(aggregated.review.findings.length) +
     ' finding(s), verdict ' +
-    outcome.review.verdict +
+    aggregated.review.verdict +
     '. No CRITICAL or HIGH finding remains unresolved.',
 };
 

@@ -4,6 +4,13 @@ import type { SecurityFinding, SecurityReview } from './securityReview.js';
 import type { AgentRunResult, AgentRuntime } from '../agents/runtime.js';
 import { ALWAYS_DENY_TOOLS, NEVER_AVAILABLE } from '../agents/toolPolicy.js';
 import type { ToolPolicy } from '../engine/types.js';
+import type { Store } from '../store/store.js';
+import {
+  ScopeCoverage,
+  recordScopeReview,
+  scopeIdOf,
+  type ScopeReviewInput,
+} from './scopeReview.js';
 
 /**
  * THE INDEPENDENT SECURITY REVIEW, PERFORMED RATHER THAN WRITTEN DOWN.
@@ -189,6 +196,132 @@ export const AREA_SOURCES: Readonly<Record<string, readonly string[]>> = Object.
   'Serva self-acceptance authority': ['src/acceptance/'],
 });
 
+/**
+ * AREAS THAT ARE TOO LARGE TO REVIEW IN ONE SITTING, SPLIT DETERMINISTICALLY.
+ *
+ * SPEC: Phase 6 final acceptance sequence §7.
+ *
+ * `organizational learning` maps to the whole intelligence tree — seventy files — and the
+ * reviewer returned NOT_VERIFIED with forty-one of them omitted. It was right to: a partial
+ * view is not coverage, and rounding it up would be the worst possible answer.
+ *
+ * The fix is not one enormous budget. A reviewer given seventy files at once skims all of
+ * them; the point of scoping is that each run can actually read what it is judging. So an
+ * oversized area is partitioned into named sub-scopes that between them cover every path the
+ * area maps to, each reviewed in its own governed run.
+ *
+ * The area is covered only when EVERY sub-scope is, which is what keeps the split honest —
+ * splitting a thing you cannot finish does not make it finished, it just makes the gap easier
+ * to see. `REQUIRED_SCOPE` is unchanged: this is how an area is reviewed, not which areas are.
+ */
+export interface SubScope {
+  readonly prefixes: readonly string[];
+  /**
+   * Paths this sub-scope leaves to another one.
+   *
+   * `src/intelligence/` is a prefix of every directory beneath it, so the unit that reviews
+   * the tree's own files has to say which subtrees belong elsewhere. Without this the
+   * partition overlaps, one unit inherits the whole area again, and the split achieves
+   * nothing — which is exactly what the first version did.
+   */
+  readonly except?: readonly string[];
+}
+
+export const AREA_SUBSCOPES: Readonly<Record<string, Readonly<Record<string, SubScope>>>> =
+  Object.freeze({
+    'organizational learning': Object.freeze({
+      'organizational learning — artifacts': { prefixes: ['src/intelligence/artifacts/'] },
+      'organizational learning — departments A': {
+        prefixes: ['src/intelligence/departments/'],
+        except: [
+          'src/intelligence/departments/quality',
+          'src/intelligence/departments/release',
+          'src/intelligence/departments/research',
+          'src/intelligence/departments/dataSecurity',
+        ],
+      },
+      'organizational learning — departments B': {
+        prefixes: [
+          'src/intelligence/departments/quality',
+          'src/intelligence/departments/release',
+          'src/intelligence/departments/research',
+          'src/intelligence/departments/dataSecurity',
+        ],
+      },
+      'organizational learning — execution and research': {
+        prefixes: ['src/intelligence/execution/', 'src/intelligence/research/'],
+      },
+      'organizational learning — gates, checks and views': {
+        prefixes: [
+          'src/intelligence/gates/',
+          'src/intelligence/checks/',
+          'src/intelligence/views/',
+        ],
+      },
+      'organizational learning — core': {
+        prefixes: ['src/intelligence/', 'src/learning/'],
+        except: [
+          'src/intelligence/artifacts/',
+          'src/intelligence/departments/',
+          'src/intelligence/execution/',
+          'src/intelligence/research/',
+          'src/intelligence/gates/',
+          'src/intelligence/checks/',
+          'src/intelligence/views/',
+        ],
+      },
+    }),
+  });
+
+/**
+ * The units one required area is actually reviewed in.
+ *
+ * A single unit named for the area itself, unless it is partitioned above. Every unit carries
+ * the area it belongs to, so coverage is always decided against `REQUIRED_SCOPE`.
+ */
+export interface ReviewUnit {
+  readonly area: string;
+  readonly unit: string;
+  readonly prefixes: readonly string[];
+  readonly except: readonly string[];
+}
+
+export function reviewUnitsFor(area: string): readonly ReviewUnit[] {
+  const split = AREA_SUBSCOPES[area];
+  if (split === undefined) {
+    return [{ area, unit: area, prefixes: AREA_SOURCES[area] ?? [], except: [] }];
+  }
+  return Object.entries(split).map(([unit, sub]) => ({
+    area,
+    unit,
+    prefixes: sub.prefixes,
+    except: sub.except ?? [],
+  }));
+}
+
+/**
+ * Every file an area maps to, and every file its sub-scopes cover.
+ *
+ * Used to prove a partition leaves nothing behind: a split that quietly dropped a directory
+ * would turn an honest NOT_VERIFIED into a false ACCEPTED, which is the one outcome worse than
+ * the problem it was meant to solve.
+ */
+export function partitionGap(area: string, allFiles: readonly string[]): readonly string[] {
+  const whole = AREA_SOURCES[area] ?? [];
+  const inArea = allFiles.filter((f) => whole.some((prefix) => f.startsWith(prefix)));
+  const units = reviewUnitsFor(area);
+  const covered = new Set(
+    inArea.filter((f) =>
+      units.some(
+        (u) =>
+          u.prefixes.some((prefix) => f.startsWith(prefix)) &&
+          !u.except.some((prefix) => f.startsWith(prefix)),
+      ),
+    ),
+  );
+  return inArea.filter((f) => !covered.has(f));
+}
+
 export interface AreaSource {
   readonly area: string;
   readonly content: string;
@@ -208,9 +341,17 @@ export function reviewAreaFiles(
   allFiles: readonly string[],
   readFile: (path: string) => string,
   budgetChars = 260_000,
+  /** Overrides the area's own prefixes, so one sub-scope can be gathered on its own. */
+  prefixOverride?: readonly string[],
+  /** Paths belonging to a sibling sub-scope, so a partition does not overlap itself. */
+  except: readonly string[] = [],
 ): AreaSource {
-  const prefixes = AREA_SOURCES[area] ?? [];
-  const matched = allFiles.filter((f) => prefixes.some((prefix) => f.startsWith(prefix)));
+  const prefixes = prefixOverride ?? AREA_SOURCES[area] ?? [];
+  const matched = allFiles.filter(
+    (f) =>
+      prefixes.some((prefix) => f.startsWith(prefix)) &&
+      !except.some((prefix) => f.startsWith(prefix)),
+  );
 
   const parts: string[] = [];
   const included: string[] = [];
@@ -279,6 +420,10 @@ const AREA_TASK =
   'DESCRIBE YOUR WORK ACCURATELY: say "analysed" or "the supplied source shows", never ' +
   '"I read src/x.ts" or "I ran". A claim to have performed an action you did not perform is ' +
   'contradicted by the runtime and invalidates the whole review — and it would be untrue. ' +
+  'This applies to the KIND of any evidence claim you record as much as to its wording: ' +
+  'analysing text that was supplied to you is kind OTHER. It is NOT FILE_READ, TOOL_EXECUTION, ' +
+  'COMMAND_RUN, FILE_WRITTEN or TEST_RESULT — you completed no tool call, so a claim of any of ' +
+  'those kinds is contradicted however carefully its statement is worded. ' +
   'Do not modify anything: you hold no write authority, and a reviewer that changes what it ' +
   'reviews has reviewed nothing. ' +
   'Do not report a finding you cannot point at: cite file:line from the supplied source. ' +
@@ -386,6 +531,13 @@ export interface AreaReviewOutcome {
 }
 
 export interface ScopedReviewInput extends Omit<SecurityReviewRunInput, 'canon'> {
+  /**
+   * Where each attempt is persisted, before this function can return or die.
+   *
+   * SPEC: finding SSA-5. Required rather than optional: a scoped review that cannot record
+   * what it found is not a cheaper review, it is an unrecorded one.
+   */
+  readonly store: Store;
   /** Every source file in the repository, repository-relative POSIX paths. */
   readonly allFiles: readonly string[];
   readonly readFile: (path: string) => string;
@@ -397,6 +549,35 @@ export interface ScopedReviewOutcome {
   readonly areas: readonly AreaReviewOutcome[];
   readonly review?: SecurityReview;
   readonly refusals: readonly string[];
+}
+
+/**
+ * Write one attempt down, and never let a write failure lose the review that produced it.
+ *
+ * SPEC: finding SSA-5. Persistence is best-effort by design: if the store refuses, the caller
+ * still gets its in-memory result and the console still shows the findings. Throwing here
+ * would turn a storage problem into the exact evidence loss this exists to prevent.
+ */
+function persist(
+  input: ScopedReviewInput,
+  area: string,
+  fields: Omit<
+    ScopeReviewInput,
+    'scopeId' | 'scopeName' | 'implementationCommit' | 'treeDigest' | 'reviewedAt'
+  >,
+): void {
+  try {
+    recordScopeReview(input.store, {
+      ...fields,
+      scopeId: scopeIdOf(area),
+      scopeName: area,
+      implementationCommit: input.repository.commit,
+      treeDigest: input.repository.tree,
+      reviewedAt: input.reviewedAt,
+    });
+  } catch {
+    /* Recorded nowhere is bad; crashing and recording nowhere is worse. */
+  }
 }
 
 /**
@@ -423,15 +604,36 @@ export async function runScopedSecurityReview(
   const findings: SecurityFinding[] = [];
   const covered: string[] = [];
 
-  for (const area of REQUIRED_SCOPE) {
-    const source = reviewAreaFiles(area, input.allFiles, input.readFile);
+  /*
+   * Iterating UNITS rather than areas. Most areas are one unit; an oversized one is split into
+   * deterministic sub-scopes that between them cover everything the area maps to. Coverage is
+   * still decided against REQUIRED_SCOPE — an area counts only when all of its units do.
+   */
+  const units = REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area));
+  const unitsByArea = new Map<string, number>();
+  for (const u of units) unitsByArea.set(u.area, (unitsByArea.get(u.area) ?? 0) + 1);
+  const completedByArea = new Map<string, number>();
+
+  for (const { area, unit, prefixes, except } of units) {
+    const source = reviewAreaFiles(area, input.allFiles, input.readFile, 260_000, prefixes, except);
 
     if (source.files.length === 0) {
       /* An area with no source is a hole in AREA_SOURCES, not a clean result. */
-      const refusal = 'no source is mapped for the area "' + area + '", so it was not reviewed';
+      const refusal = 'no source is mapped for "' + unit + '", so it was not reviewed';
       refusals.push(refusal);
+      persist(input, unit, {
+        reviewerRunId: 'NOT-RUN-' + scopeIdOf(unit),
+        reviewerAgentId: agentId,
+        coverage: ScopeCoverage.NOT_REVIEWED,
+        filesReviewed: [],
+        filesOmitted: [...source.omitted],
+        findings: [],
+        verdict: ReviewVerdict.NOT_VERIFIED,
+        terminalOutcome: 'NOT_RUN',
+        refusal,
+      });
       areas.push({
-        area,
+        area: unit,
         runId: '',
         outcome: 'NOT_RUN',
         findings: [],
@@ -449,7 +651,7 @@ export async function runScopedSecurityReview(
       taskDefinition:
         AREA_TASK +
         '\n\nArea under review: ' +
-        area +
+        unit +
         '\nCommit under review: ' +
         input.repository.commit +
         '\nFiles you were given (' +
@@ -465,7 +667,7 @@ export async function runScopedSecurityReview(
             '\nDo not report on these, and do not assume anything about them.'),
       scopeBoundary:
         'Review the area "' +
-        area +
+        unit +
         '" at commit ' +
         input.repository.commit +
         ', using only the source you were given. Read-only: do not write, do not execute, do ' +
@@ -475,7 +677,7 @@ export async function runScopedSecurityReview(
       capability: {
         policy: readOnlyGrant(),
         cwd: input.storePath,
-        basis: 'independent security review of ' + area + ': read-only judgement',
+        basis: 'independent security review of ' + unit + ': read-only judgement',
       },
       canon: [
         {
@@ -501,13 +703,29 @@ export async function runScopedSecurityReview(
     if (parsed?.success !== true) {
       const refusal =
         'the review of "' +
-        area +
+        unit +
         '" ended ' +
         String(run.outcome) +
         ', so that area is unreviewed';
       refusals.push(refusal);
+      /*
+       * A refused attempt is persisted FIRST, and with everything it had. This is the case the
+       * finding was about: the run that produced real findings and then died is exactly the one
+       * whose evidence must not evaporate.
+       */
+      persist(input, unit, {
+        reviewerRunId: run.runId,
+        reviewerAgentId: agentId,
+        coverage: ScopeCoverage.NOT_REVIEWED,
+        filesReviewed: [...source.files],
+        filesOmitted: [...source.omitted],
+        findings: [],
+        verdict: ReviewVerdict.NOT_VERIFIED,
+        terminalOutcome: String(run.outcome),
+        refusal,
+      });
       const outcome: AreaReviewOutcome = {
-        area,
+        area: unit,
         runId: run.runId,
         outcome: String(run.outcome),
         findings: [],
@@ -527,14 +745,30 @@ export async function runScopedSecurityReview(
      */
     const areaFindings = parsed.data.findings.map((f) => ({
       ...f,
-      id: area.replace(/[^A-Za-z0-9]+/g, '-').toUpperCase() + '/' + f.id,
+      id: unit.replace(/[^A-Za-z0-9]+/g, '-').toUpperCase() + '/' + f.id,
       area,
     }));
     findings.push(...areaFindings);
-    covered.push(area);
+
+    /* The AREA is covered only once every one of its units has completed. */
+    const done = (completedByArea.get(area) ?? 0) + 1;
+    completedByArea.set(area, done);
+    if (done === unitsByArea.get(area)) covered.push(area);
+
+    persist(input, unit, {
+      reviewerRunId: run.runId,
+      reviewerAgentId: agentId,
+      /* Omitted files mean PARTIAL, whatever verdict the reviewer reached on what it saw. */
+      coverage: source.omitted.length === 0 ? ScopeCoverage.COMPLETE : ScopeCoverage.PARTIAL,
+      filesReviewed: [...source.files],
+      filesOmitted: [...source.omitted],
+      findings: areaFindings.map((f) => ({ ...f, resolved: false })),
+      verdict: parsed.data.verdict,
+      terminalOutcome: String(run.outcome),
+    });
 
     const outcome: AreaReviewOutcome = {
-      area,
+      area: unit,
       runId: run.runId,
       outcome: String(run.outcome),
       findings: areaFindings,

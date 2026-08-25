@@ -222,7 +222,22 @@ export interface ResolveOptions {
    * undecided containment question is never a contained one.
    */
   readonly assessContainment?: (ref: RunRef) => ContainmentVerdict | undefined;
+  /**
+   * The authority an agent actually holds, from the contract that binds it.
+   *
+   * SPEC: finding SSA-1 (HIGH).
+   *
+   * The JUDGED branch checked that a reviewer was not a producer and never checked that it
+   * held a verifier's authority at all — so an agent with no certifying power could satisfy a
+   * requirement whose text demands "a governed independent reviewer". Injected for the same
+   * reason `resolveRun` is: this module refuses to load contracts, and the answer is a fact
+   * about the registry rather than about a document.
+   */
+  readonly reviewerAuthority?: (agentId: string) => string | undefined;
 }
+
+/** Authorities that are a verifier's rather than a producer's. */
+const VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
 
 /**
  * The part of a canonical containment assessment this resolver is entitled to act on.
@@ -447,6 +462,36 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
             reviewer.agentId +
               ' produced the implementation being reviewed, so this is not an independent review',
           );
+        }
+
+        /*
+         * AND IT MUST BE ABLE TO CERTIFY AT ALL.
+         *
+         * SPEC: finding SSA-1 (HIGH). Not producing the work is only half of independence;
+         * the other half is holding a verifier's authority, which this branch never asked
+         * about. With no resolver supplied the answer is unknown, and unknown is a refusal —
+         * a JUDGED proof whose reviewer's authority nobody can establish is not judged.
+         */
+        if (o.reviewerAuthority === undefined) {
+          refusals.push(
+            'no authority resolver was supplied, so ' +
+              reviewer.agentId +
+              " could not be shown to hold a verifier's authority",
+          );
+        } else {
+          const authority = o.reviewerAuthority(reviewer.agentId);
+          if (authority === undefined) {
+            refusals.push(
+              reviewer.agentId + ' holds no contract, so it holds no authority to certify',
+            );
+          } else if (!VERIFIER_AUTHORITIES.has(authority.toUpperCase())) {
+            refusals.push(
+              reviewer.agentId +
+                ' holds ' +
+                authority +
+                ', which is not a verifier authority; an agent that can produce cannot certify',
+            );
+          }
         }
       }
     }

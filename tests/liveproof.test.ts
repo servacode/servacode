@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { EnforcementClass } from '../src/vocab/index.js';
 import { ExecutionAvailability, QualificationAttempt } from '../src/substrate/types.js';
 import {
+  assessProducerContainment,
   assessVerificationBlock,
   resolveLiveEngineering,
   resolveLiveServa,
@@ -923,5 +924,75 @@ describe('a PARTIAL caused by the intentional Producer execution policy', () => 
     const verdict = assessVerificationBlock(bare.store, 'SC-RUN-000004', 'SC-CS-000002');
     expect(verdict.contained).toBe(false);
     expect(verdict.reasons.join(' ')).toContain('CAPABILITY_BOUND');
+  });
+});
+
+/* ============ SSA-2: the self-certification filter that erased its own JUDGED branch ============ */
+
+describe('evidence that credits the Producer, including agent-judged evidence', () => {
+  /*
+   * SPEC: finding SSA-2 (MEDIUM), from the independent security review.
+   *
+   * The filter read
+   *
+   *   .filter((e) => e.runRef === producerRunId || e.basis === 'JUDGED')
+   *   .filter((e) => e.runRef === producerRunId)
+   *
+   * and the second line deletes the first line's JUDGED clause entirely. The comment above it
+   * says "Any at all is the Producer certifying itself", so the code and its documented intent
+   * had drifted apart — and the narrower behaviour is the dangerous direction: agent-opinion
+   * evidence not tied to the producer run was never counted as self-certification at all.
+   *
+   * This is the failure mode this codebase keeps meeting. A filter that reads the wrong thing
+   * does not error; it quietly agrees with you.
+   */
+  function chainWith(rt: ServaRuntime, evidence: Record<string, unknown>[]): void {
+    seedRun(rt.store, 'SC-RUN-000004', PRODUCER, 'EVIDENCE_VIOLATION', [
+      contradicted('FILE_WRITTEN'),
+    ]);
+    seedChangeSet(rt.store, { producerRunId: 'SC-RUN-000004' });
+    seedReview(rt.store);
+    for (const [i, over] of evidence.entries()) {
+      seedEvidence(rt.store, 'SC-CS-000002', 'SC-EEV-00000' + String(i + 1), over);
+    }
+  }
+
+  it('counts evidence produced by the Producer run itself', () => {
+    const rt = project();
+    chainWith(rt, [{ runRef: 'SC-RUN-000004', basis: 'MEASURED' }]);
+    const c = assessProducerContainment(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(c.creditedFromProducer).toContain('SC-EEV-000001');
+    expect(c.contained).toBe(false);
+  });
+
+  it('counts JUDGED evidence as self-certifying even from another run', () => {
+    /*
+     * The clause the second filter deleted. Agent opinion is not measurement whoever produced
+     * it, and crediting it would let a second agent vouch for the first.
+     */
+    const rt = project();
+    chainWith(rt, [
+      { runRef: 'SC-RUN-000009', basis: 'JUDGED' },
+      { id: 'SC-EEV-000002', runtimeComponentId: 'SC-RTC-005', basis: 'MEASURED' },
+    ]);
+    const c = assessProducerContainment(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(c.creditedFromProducer).toContain('SC-EEV-000001');
+  });
+
+  it('leaves independently measured evidence uncredited, so it still counts as measurement', () => {
+    const rt = project();
+    chainWith(rt, [{ runRef: 'SC-RUN-RUNTIME', basis: 'MEASURED' }]);
+    const c = assessProducerContainment(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(c.creditedFromProducer).toEqual([]);
+    expect(c.measuredEvidence).toContain('SC-EEV-000001');
+  });
+
+  it('does not widen what counts as measured evidence', () => {
+    /* The fix must not turn JUDGED evidence into something that can support an acceptance. */
+    const rt = project();
+    chainWith(rt, [{ runRef: 'SC-RUN-000009', basis: 'JUDGED' }]);
+    const c = assessProducerContainment(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(c.measuredEvidence).toEqual([]);
+    expect(c.reasons.join(' ')).toContain('no independently measured evidence');
   });
 });

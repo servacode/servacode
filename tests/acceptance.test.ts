@@ -10,6 +10,8 @@ import {
   resolveProof,
 } from '../src/acceptance/proof.js';
 import { REQUIREMENTS } from '../src/acceptance/requirements.js';
+import { reviewerAuthorityOf } from '../src/acceptance/reviewAuthority.js';
+import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { AcceptanceProof, RepositoryIdentity } from '../src/acceptance/proof.js';
@@ -303,6 +305,9 @@ describe('a JUDGED proof needs a governed reviewer run that actually exists', ()
     const resolved = resolve(root, 'SECURITY-INDEPENDENT', {
       resolveRun: () => ({ agentId: 'SC-AGENT-200', outcome: 'COMPLETED' }),
       implementationProducers: ['SC-AGENT-150'],
+      /* SC-AGENT-200 is a VERIFIER by contract; the resolver is asked rather than assumed. */
+      reviewerAuthority: (agentId: string) =>
+        reviewerAuthorityOf(agentId, ContractRegistry.shared()),
     });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });
@@ -827,5 +832,94 @@ describe('LIVE-ENGINEERING accepts a contained PARTIAL, and nothing else does', 
       expect(resolved.status, outcome).toBe(ProofStatus.NOT_VERIFIED);
       expect(resolved.refusals.join(' '), outcome).toContain(outcome);
     }
+  });
+});
+
+/* ============ SSA-1: independence must hold on the path nobody passes options to ============ */
+
+describe('the default readiness path enforces reviewer independence by itself', () => {
+  /*
+   * SPEC: Phase 6 final acceptance sequence §7; finding SSA-1 (HIGH).
+   *
+   * The independent security review found this, and it found it because every test that
+   * existed passed `implementationProducers` explicitly. `resolveProof` refused a
+   * non-independent reviewer only when that list arrived, `acceptanceStatus` never supplied
+   * one, and so the guard gating READY FOR OWNER USE was inert on the only path anyone runs.
+   *
+   * A guard that works in tests and not in production is worse than no guard: it produces the
+   * documentation and the confidence of a check without the check.
+   *
+   * So these tests call `acceptanceStatus` the way the CLI does — a root and nothing else.
+   */
+  function seedRun(
+    store: ServaRuntime['store'],
+    runId: string,
+    agentId: string,
+    roleInTask?: string,
+  ): void {
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', runId, {
+      runId,
+      agentId,
+      outcome: 'COMPLETED',
+      ...(roleInTask === undefined ? {} : { roleInTask }),
+      claimAssessments: [],
+      evidenceRefs: [],
+    });
+    tx.commit();
+  }
+
+  function project(): ServaRuntime {
+    const root = tempRoot();
+    roots.push(root);
+    return ServaRuntime.init('RahalGo', 'Stop losing phone orders', { root });
+  }
+
+  function judgedProof(root: string, reviewerAgentId: string, storePath: string): void {
+    writeProof(root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      producer: { kind: 'TOOL', id: 'scripts/security-review.mjs' },
+      reviewerRunRef: { runId: 'SC-RUN-REVIEW', agentId: reviewerAgentId, storePath },
+    });
+  }
+
+  it('refuses a reviewer that produced the implementation, with no options passed', () => {
+    const rt = project();
+    /* Governed history says SC-AGENT-200 produced here, whatever its contract archetype is. */
+    seedRun(rt.store, 'SC-RUN-PROD', 'SC-AGENT-200', 'PRODUCER');
+    seedRun(rt.store, 'SC-RUN-REVIEW', 'SC-AGENT-200');
+    judgedProof(rt.root, 'SC-AGENT-200', rt.root);
+
+    const status = acceptanceStatus({ root: rt.root, repository: REPOSITORY });
+    const req = status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT');
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toContain('produced');
+  });
+
+  it('accepts a genuinely independent verifier, with no options passed', () => {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-PROD', 'SC-AGENT-150', 'PRODUCER');
+    seedRun(rt.store, 'SC-RUN-REVIEW', 'SC-AGENT-220');
+    judgedProof(rt.root, 'SC-AGENT-220', rt.root);
+
+    const status = acceptanceStatus({ root: rt.root, repository: REPOSITORY });
+    const req = status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT');
+    /*
+     * The proof still fails other checks in this synthetic package — what matters here is that
+     * it is NOT refused for independence, which is the guard under test.
+     */
+    expect(req?.resolution.refusals.join(' ')).not.toContain('produced');
+  });
+
+  it('refuses a reviewer holding no verifier authority, with no options passed', () => {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-REVIEW', 'SC-AGENT-150');
+    judgedProof(rt.root, 'SC-AGENT-150', rt.root);
+
+    const status = acceptanceStatus({ root: rt.root, repository: REPOSITORY });
+    const req = status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT');
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toContain('authority');
   });
 });

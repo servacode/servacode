@@ -263,12 +263,27 @@ export function assessProducerContainment(
   const evidence = listEvidence(store).filter((e) => e.changeSetId === changeSetId);
 
   /*
-   * Evidence traceable to the Producer's own run. Any at all is the Producer certifying
-   * itself, which is exactly what an evidence violation makes unusable.
+   * EVIDENCE THAT CREDITS THE PRODUCER'S OWN ACCOUNT, IN EITHER OF ITS TWO FORMS.
+   *
+   * SPEC: finding SSA-2 (MEDIUM), from the independent security review.
+   *
+   * This read `.filter(runRef === producerRunId || basis === 'JUDGED').filter(runRef ===
+   * producerRunId)`, and the second call deleted the first one's JUDGED clause outright — so
+   * the comment above described a check the code had stopped performing. The drift went in the
+   * dangerous direction: agent-judged evidence not tied to the producer run was never counted
+   * as self-certification at all.
+   *
+   * Both forms belong here, for the same reason:
+   *
+   *   evidence from the Producer's own run is the Producer vouching for itself;
+   *   JUDGED evidence is an agent's opinion, whoever produced it, and crediting that would let
+   *   a second agent vouch for the first — self-certification with an extra step.
+   *
+   * Widening this narrows what may be accepted, never the reverse: nothing here can turn
+   * JUDGED evidence into measurement, which `measured` below still decides on its own.
    */
   const creditedFromProducer = evidence
     .filter((e) => e.runRef === producerRunId || e.basis === 'JUDGED')
-    .filter((e) => e.runRef === producerRunId)
     .map((e) => e.id);
   if (creditedFromProducer.length > 0) {
     reasons.push(

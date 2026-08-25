@@ -12,9 +12,15 @@ import { ALWAYS_DENY_TOOLS, NEVER_AVAILABLE } from '../src/agents/toolPolicy.js'
 import {
   AREA_SOURCES,
   reviewAreaFiles,
+  partitionGap,
+  reviewUnitsFor,
   runScopedSecurityReview,
   runSecurityReview,
 } from '../src/acceptance/securityReviewRun.js';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { ContractRegistry } from '../src/agents/registry.js';
+import { ScopeCoverage, listScopeReviews } from '../src/acceptance/scopeReview.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { RepositoryIdentity } from '../src/acceptance/proof.js';
@@ -40,6 +46,8 @@ const COMMIT = 'a'.repeat(40);
 const TREE = 'b'.repeat(40);
 const REPOSITORY: RepositoryIdentity = { commit: COMMIT, tree: TREE };
 const REVIEWER = 'SC-AGENT-220';
+/** A VERIFIER by contract, used where the test needs authority without independence. */
+const REVIEWER_VERIFIER = 'SC-AGENT-200';
 const PRODUCER = 'SC-AGENT-150';
 
 function project(): ServaRuntime {
@@ -85,11 +93,20 @@ function pkg(body?: unknown): string {
   return root;
 }
 
+/** Write a review into an existing project root. */
+function write(root: string, body: unknown): void {
+  const path = join(root, ...REVIEW_PATH.split('/'));
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, JSON.stringify(body, null, 2), 'utf8');
+}
+
 function resolve(root: string, store?: Store, over: Record<string, unknown> = {}) {
   return resolveSecurityReview({
     root,
     repository: REPOSITORY,
     openStore: () => store,
+    /* Every real caller supplies this; without it the authority is unknown and refused. */
+    registry: ContractRegistry.shared(),
     ...over,
   });
 }
@@ -168,13 +185,27 @@ describe('a producer cannot certify its own work', () => {
   it('refuses a reviewer that produced the implementation', () => {
     const rt = project();
     try {
-      seedRun(rt.store, 'SC-RUN-000100', PRODUCER);
+      /*
+       * Independence is now decided by governed history rather than by the document, so the
+       * store must actually record this agent producing. SC-AGENT-200 is a VERIFIER by
+       * contract — which is the point: holding the authority does not make you independent of
+       * work you did yourself.
+       */
+      const tx = rt.store.begin();
+      tx.putCanon('agentRunRecord', 'SC-RUN-PRODUCED', {
+        runId: 'SC-RUN-PRODUCED',
+        agentId: REVIEWER_VERIFIER,
+        roleInTask: 'PRODUCER',
+        outcome: 'COMPLETED',
+      });
+      tx.commit();
+      seedRun(rt.store, 'SC-RUN-000100', REVIEWER_VERIFIER);
       const result = resolve(
         pkg(
           review({
-            reviewerAgentId: PRODUCER,
+            reviewerAgentId: REVIEWER_VERIFIER,
             independence: {
-              implementationProducers: [PRODUCER],
+              implementationProducers: [REVIEWER_VERIFIER],
               statement: 'I reviewed my own work.',
             },
           }),
@@ -193,7 +224,8 @@ describe('a producer cannot certify its own work', () => {
     try {
       seedRun(rt.store, 'SC-RUN-000100', REVIEWER);
       const result = resolve(pkg(review({ reviewerAuthority: 'EXECUTE' })), rt.store);
-      expect(result.refusals.join(' ')).toContain('not a verifier authority');
+      /* The contract grants EXECUTE, whatever the document wrote in its own authority field. */
+      expect(result.refusals.join(' ')).toContain('EXECUTE');
     } finally {
       rt.close();
     }
@@ -410,8 +442,9 @@ describe('the review is performed by a governed run, not authored', () => {
       root: rt.root,
       repository: REPOSITORY,
       openStore: () => rt.store,
+      registry: ContractRegistry.shared(),
     });
-    expect(resolved.refusals).toEqual([]);
+    expect(resolved.refusals, resolved.refusals.join('; ')).toEqual([]);
     expect(resolved.resolved).toBe(true);
   });
 
@@ -628,8 +661,10 @@ describe('the review is scoped by area, because one reviewer cannot read the who
   const FILES = Object.freeze([
     ...new Set(
       REQUIRED_SCOPE.flatMap((area) =>
-        (AREA_SOURCES[area] ?? []).map((prefix) =>
-          prefix.endsWith('/') ? prefix + 'seed.ts' : prefix,
+        reviewUnitsFor(area).flatMap((unit) =>
+          unit.prefixes.map((prefix) =>
+            prefix.endsWith('/') ? prefix + 'seed.ts' : prefix + '.ts',
+          ),
         ),
       ),
     ),
@@ -643,7 +678,8 @@ describe('the review is scoped by area, because one reviewer cannot read the who
       run: (request: Record<string, unknown>) => {
         n += 1;
         const task = String(request['taskDefinition']);
-        const area = REQUIRED_SCOPE.find((a) => task.includes('Area under review: ' + a)) ?? '?';
+        const units = REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a)).map((u) => u.unit);
+        const area = units.find((a) => task.includes('Area under review: ' + a)) ?? '?';
         seen.push({ area, request });
         const r = reply(area);
         return Promise.resolve({
@@ -678,6 +714,7 @@ describe('the review is scoped by area, because one reviewer cannot read the who
       reviewedAt: '2026-08-25T00:00:00.000Z',
       allFiles: FILES,
       readFile: () => 'export const x = 1;',
+      store: rt.store,
     });
   }
 
@@ -687,8 +724,11 @@ describe('the review is scoped by area, because one reviewer cannot read the who
     const outcome = await scoped(rt, runtime);
 
     expect(outcome.refusals).toEqual([]);
-    expect(seen.length).toBe(REQUIRED_SCOPE.length);
-    expect(new Set(seen.map((x) => x.area)).size).toBe(REQUIRED_SCOPE.length);
+    /* One run per UNIT: most areas are one unit, and an oversized one is several. */
+    const units = REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a));
+    expect(seen.length).toBe(units.length);
+    expect(new Set(seen.map((x) => x.area)).size).toBe(units.length);
+    /* Coverage is still reported against REQUIRED_SCOPE, never against the units. */
     expect(outcome.review?.scope).toEqual([...REQUIRED_SCOPE]);
 
     /* Each run is bounded to its own area, so findings cannot drift across scopes. */
@@ -758,7 +798,7 @@ describe('the review is scoped by area, because one reviewer cannot read the who
     }));
     const outcome = await scoped(rt, runtime);
     const ids = outcome.review?.findings.map((f) => f.id) ?? [];
-    expect(ids.length).toBe(REQUIRED_SCOPE.length);
+    expect(ids.length).toBe(REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a)).length);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
@@ -797,6 +837,24 @@ describe('the review is scoped by area, because one reviewer cannot read the who
     expect(task.toLowerCase()).toContain('never');
   });
 
+  it('tells the reviewer which claim kind is honest for analysing supplied text', async () => {
+    /*
+     * Two areas still ended EVIDENCE_VIOLATION after the wording fix, and the reviewer had
+     * actually complied: its statements read "Analysed the supplied text of http.ts...". What
+     * the runtime contradicted was the claim KIND — `FILE_READ` — because a run holding no
+     * tools completed no tool call, so it cannot have read a file.
+     *
+     * The assessor was right both times. The prompt was wrong: it told the reviewer how to
+     * phrase a claim and never told it which kind of claim it was entitled to make.
+     */
+    const rt = project();
+    const { seen, runtime } = areaRuntime(clean);
+    await scoped(rt, runtime);
+    const task = String(seen[0]?.request['taskDefinition']);
+    expect(task).toContain('OTHER');
+    expect(task).toContain('FILE_READ');
+  });
+
   it('gives each area long enough to actually read its source', async () => {
     /* Every FAILED area in the first real run was `terminated: TIMEOUT` at the 180s default. */
     const rt = project();
@@ -806,11 +864,280 @@ describe('the review is scoped by area, because one reviewer cannot read the who
     expect(budget?.maxWallTimeMs ?? 0).toBeGreaterThan(180_000);
   });
 
+  it('persists every area attempt, including the ones that refused', async () => {
+    /*
+     * SPEC: finding SSA-5. The whole point: a review that dies must leave more evidence than
+     * one that passes, so a later resolver never has to pay for the same model calls twice.
+     */
+    const rt = project();
+    const { runtime } = areaRuntime((area) =>
+      area === 'AI Runtime' ? { outcome: 'EVIDENCE_VIOLATION' } : clean(area),
+    );
+    const outcome = await scoped(rt, runtime);
+    expect(outcome.review).toBeUndefined();
+
+    const persisted = listScopeReviews(rt.store);
+    expect(persisted.length).toBe(REQUIRED_SCOPE.flatMap((a) => reviewUnitsFor(a)).length);
+
+    const refused = persisted.find((r) => r.scopeName === 'AI Runtime');
+    expect(refused?.terminalOutcome).toBe('EVIDENCE_VIOLATION');
+    expect(refused?.coverage).toBe(ScopeCoverage.NOT_REVIEWED);
+    expect(refused?.refusal).toBeDefined();
+  });
+
+  it('persists findings from a BLOCKED area, which is the case that lost them', async () => {
+    const rt = project();
+    const { runtime } = areaRuntime((area) =>
+      area === 'Owner authority'
+        ? {
+            outcome: 'COMPLETED',
+            result: {
+              scope: [area],
+              findings: [
+                {
+                  id: 'F-1',
+                  severity: Severity.HIGH,
+                  area,
+                  statement: 'the guard is inert on the default path',
+                  evidence: ['src/acceptance/proof.ts:445'],
+                },
+              ],
+              verdict: ReviewVerdict.BLOCKED,
+              summary: 'blocked',
+            },
+          }
+        : clean(area),
+    );
+    await scoped(rt, runtime);
+
+    const blocked = listScopeReviews(rt.store).find((r) => r.scopeName === 'Owner authority');
+    expect(blocked?.verdict).toBe(ReviewVerdict.BLOCKED);
+    expect(blocked?.findings[0]?.severity).toBe(Severity.HIGH);
+    expect(blocked?.findings[0]?.evidence).toContain('src/acceptance/proof.ts:445');
+    expect(blocked?.findings[0]?.resolved).toBe(false);
+  });
+
+  it('records omitted files as PARTIAL coverage, never as complete', async () => {
+    const rt = project();
+    const { runtime } = areaRuntime(clean);
+    await runScopedSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+      allFiles: FILES,
+      /* Every file is too large for the budget, so every area omits something. */
+      readFile: () => 'x'.repeat(400_000),
+      store: rt.store,
+    });
+    for (const r of listScopeReviews(rt.store)) {
+      expect(r.coverage, r.scopeName).not.toBe(ScopeCoverage.COMPLETE);
+    }
+  });
+
   it('maps every required area to real source', () => {
     /* An area matching nothing is a hole in the table, and would review nothing at all. */
     for (const area of REQUIRED_SCOPE) {
       expect(AREA_SOURCES[area], area + ' has no source mapping').toBeDefined();
       expect((AREA_SOURCES[area] ?? []).length, area).toBeGreaterThan(0);
     }
+  });
+});
+
+/* ====== SSA-3 & SSA-4: the document must not define the facts that authorise it ====== */
+
+describe('a forged review document cannot manufacture independence or authority', () => {
+  /*
+   * SPEC: findings SSA-3 (MEDIUM) and SSA-4 (LOW), from the independent security review.
+   *
+   * `resolveSecurityReview` read `independence.implementationProducers` and
+   * `reviewerAuthority` straight out of the parsed file. A hand-authored review naming a real
+   * completed run could declare an empty producer set and `VERIFY`, and pass both checks — in
+   * the module whose entire purpose is that a file cannot certify itself.
+   *
+   * EVIDENCE FILE TEXT IS NOT AUTHORITY. The document may now REFERENCE these facts; the
+   * store and the contract registry DECIDE them.
+   */
+  function seedProducerRun(store: Store, agentId: string): void {
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', 'SC-RUN-PRODUCED', {
+      runId: 'SC-RUN-PRODUCED',
+      agentId,
+      roleInTask: 'PRODUCER',
+      outcome: 'COMPLETED',
+    });
+    tx.commit();
+  }
+
+  function resolveIt(rt: ServaRuntime) {
+    return resolveSecurityReview({
+      root: rt.root,
+      repository: REPOSITORY,
+      openStore: () => rt.store,
+      registry: ContractRegistry.shared(),
+    });
+  }
+
+  it('refuses a review declaring an empty producer set when the store says otherwise', () => {
+    const rt = project();
+    /* Governed history says SC-AGENT-200 produced. The document says nobody did. */
+    seedProducerRun(rt.store, 'SC-AGENT-200');
+    seedRun(rt.store, 'SC-RUN-000100', 'SC-AGENT-200');
+    write(rt.root, review({ reviewerAgentId: 'SC-AGENT-200', storePath: rt.root }));
+
+    const resolved = resolveIt(rt);
+    expect(resolved.resolved).toBe(false);
+    expect(resolved.refusals.join(' ')).toContain('produced');
+  });
+
+  it('refuses a forged reviewerAuthority the contract does not grant', () => {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-000100', PRODUCER);
+    /* SC-AGENT-150 is a PRODUCER; the document claims it holds VERIFY. */
+    write(
+      rt.root,
+      review({ reviewerAgentId: PRODUCER, reviewerAuthority: 'VERIFY', storePath: rt.root }),
+    );
+
+    const resolved = resolveIt(rt);
+    expect(resolved.resolved).toBe(false);
+    expect(resolved.refusals.join(' ')).toContain('authority');
+  });
+
+  it('refuses a reviewer identity no contract issues', () => {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-000100', 'SC-AGENT-999');
+    write(
+      rt.root,
+      review({ reviewerAgentId: 'SC-AGENT-999', reviewerAuthority: 'VERIFY', storePath: rt.root }),
+    );
+
+    const resolved = resolveIt(rt);
+    expect(resolved.resolved).toBe(false);
+  });
+
+  it('accepts a reviewer the contract and the store both vouch for', () => {
+    const rt = project();
+    seedProducerRun(rt.store, PRODUCER);
+    seedRun(rt.store, 'SC-RUN-000100', REVIEWER);
+    write(rt.root, review({ storePath: rt.root }));
+
+    const resolved = resolveIt(rt);
+    expect(resolved.refusals, resolved.refusals.join('; ')).toEqual([]);
+    expect(resolved.resolved).toBe(true);
+  });
+});
+
+describe('scope coverage is decided by exact identity, not an 8-character prefix', () => {
+  /*
+   * SPEC: finding SSA-4 (LOW).
+   *
+   * Coverage matched `s.toLowerCase().includes(area.toLowerCase().slice(0, 8))`, so any scope
+   * entry containing an area's first eight lowercased characters counted as covering it.
+   * "backup/r" covers "backup/restore"; so does "backup/rubbish".
+   */
+  function resolveWithScope(scope: readonly string[]) {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-000100', REVIEWER);
+    write(rt.root, review({ scope: [...scope], storePath: rt.root }));
+    return resolveSecurityReview({
+      root: rt.root,
+      repository: REPOSITORY,
+      openStore: () => rt.store,
+      registry: ContractRegistry.shared(),
+    });
+  }
+
+  it('the exact required scope resolves', () => {
+    const resolved = resolveWithScope(REQUIRED_SCOPE);
+    expect(resolved.refusals.join(' ')).not.toContain('did not cover');
+  });
+
+  it('a prefix of a required area does not cover it', () => {
+    const resolved = resolveWithScope(REQUIRED_SCOPE.map((a) => a.slice(0, 8)));
+    expect(resolved.refusals.join(' ')).toContain('did not cover');
+  });
+
+  it('a different area sharing the first eight characters does not cover it', () => {
+    const resolved = resolveWithScope(
+      REQUIRED_SCOPE.map((a) => (a === 'backup/restore' ? 'backup/rubbish' : a)),
+    );
+    expect(resolved.refusals.join(' ')).toContain('backup/restore');
+  });
+
+  it('normalization is explicit: case and surrounding space do not change identity', () => {
+    /* Deterministic and stated, rather than emergent from a substring test. */
+    const resolved = resolveWithScope(REQUIRED_SCOPE.map((a) => '  ' + a.toUpperCase() + '  '));
+    expect(resolved.refusals.join(' ')).not.toContain('did not cover');
+  });
+
+  it('a scope entry that merely contains a required area does not cover it', () => {
+    const resolved = resolveWithScope(
+      REQUIRED_SCOPE.map((a) => (a === 'migration' ? 'not really migration at all' : a)),
+    );
+    expect(resolved.refusals.join(' ')).toContain('migration');
+  });
+});
+
+describe('an area too large for one sitting is split, and the split must lose nothing', () => {
+  /*
+   * SPEC: Phase 6 final acceptance sequence §7.
+   *
+   * `organizational learning` mapped to seventy files; the reviewer returned NOT_VERIFIED with
+   * forty-one omitted, which was the correct answer to a question nobody could answer as
+   * asked. The fix is not a bigger budget — a reviewer handed seventy files skims all of them.
+   *
+   * The risk in splitting is that a partition quietly drops a directory and turns an honest
+   * NOT_VERIFIED into a false ACCEPTED. That is the one outcome worse than the original
+   * problem, so it is what these tests are mostly about.
+   */
+  const REAL_FILES = execSync('git ls-files src extension/src', { encoding: 'utf8' })
+    .split(/\r?\n/)
+    .map((f) => f.trim())
+    .filter((f) => f.endsWith('.ts'));
+
+  it('every required area yields at least one review unit', () => {
+    for (const area of REQUIRED_SCOPE) {
+      expect(reviewUnitsFor(area).length, area).toBeGreaterThan(0);
+    }
+  });
+
+  it('an unsplit area is exactly one unit named for itself', () => {
+    const units = reviewUnitsFor('Reconciliation');
+    expect(units.length).toBe(1);
+    expect(units[0]?.unit).toBe('Reconciliation');
+  });
+
+  it('the split area covers every file the whole area maps to', () => {
+    /* The property that makes splitting safe rather than merely convenient. */
+    for (const area of REQUIRED_SCOPE) {
+      expect(partitionGap(area, REAL_FILES), area + ' loses files in its partition').toEqual([]);
+    }
+  });
+
+  it('each sub-scope of the split area fits in a single review budget', () => {
+    const area = 'organizational learning';
+    for (const unit of reviewUnitsFor(area)) {
+      const source = reviewAreaFiles(
+        area,
+        REAL_FILES,
+        (f) => readFileSync(f, 'utf8'),
+        260_000,
+        unit.prefixes,
+        unit.except,
+      );
+      expect(source.files.length, unit.unit).toBeGreaterThan(0);
+      expect(source.omitted, unit.unit + ' still omits files').toEqual([]);
+    }
+  });
+
+  it('the whole area does NOT fit, which is why it is split', () => {
+    /* Pins the reason. If this ever passes, the split has become unnecessary rather than wrong. */
+    const source = reviewAreaFiles('organizational learning', REAL_FILES, (f) =>
+      readFileSync(f, 'utf8'),
+    );
+    expect(source.omitted.length).toBeGreaterThan(0);
   });
 });

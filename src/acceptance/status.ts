@@ -17,6 +17,8 @@ import { TimeOrderedIdSource } from '../core/ids.js';
 import { Store } from '../store/store.js';
 import { listChangeSets } from '../engineering/changeset.js';
 import { assessProducerContainment, assessVerificationBlock } from './liveProof.js';
+import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
+import { ContractRegistry } from '../agents/registry.js';
 
 /**
  * SERVA CODE 1.0 — THE STATUS SERVA ISSUES ABOUT ITSELF.
@@ -87,6 +89,8 @@ export interface StatusOptions {
   readonly repository?: RepositoryIdentity;
   readonly resolveRun?: RunResolver;
   readonly implementationProducers?: readonly string[];
+  /** The project store, when the caller already holds one open. */
+  readonly store?: Store;
   readonly assessContainment?: (ref: RunRef) => ContainmentVerdict | undefined;
 }
 
@@ -244,6 +248,30 @@ export function defaultContainmentAssessor(): (ref: RunRef) => ContainmentVerdic
   };
 }
 
+/**
+ * The agents that produced this project's implementation, from its own governed history.
+ *
+ * Opened read-only and best-effort: a package shipped without its store still resolves every
+ * DETERMINISTIC proof, and a JUDGED one then finds an empty producer set — which is honest.
+ * It does not mean "nobody produced this"; it means this package carries no history to
+ * check against, and the authority check below still has to pass on its own.
+ */
+function producersFromProject(root: string, store?: Store): ReadonlySet<string> {
+  if (store !== undefined) return implementationProducersFrom(store);
+  try {
+    if (!existsSync(join(root, '.serva', 'canon'))) return new Set();
+    const clock = systemClock;
+    const opened = new Store(root, {
+      clock,
+      ids: new TimeOrderedIdSource(clock),
+      actor: 'acceptance',
+    });
+    return implementationProducersFrom(opened);
+  } catch {
+    return new Set();
+  }
+}
+
 function stateOf(resolution: ResolvedProof, expects: string): AcceptanceState {
   if (resolution.status === ProofStatus.FAIL) return AcceptanceState.FAIL;
   if (resolution.status !== ProofStatus.PASS) return AcceptanceState.NOT_VERIFIED;
@@ -265,15 +293,33 @@ export function acceptanceStatus(o: StatusOptions | string = {}): AcceptanceStat
   const resolveRun = opts.resolveRun ?? defaultRunResolver(root);
   const assessContainment = opts.assessContainment ?? defaultContainmentAssessor();
 
+  /*
+   * INDEPENDENCE IS ENFORCED HERE, NOT WHEN A CALLER REMEMBERS TO ASK FOR IT.
+   *
+   * SPEC: finding SSA-1 (HIGH), from the independent security review.
+   *
+   * `resolveProof` refused a non-independent reviewer only when `implementationProducers`
+   * arrived, and this function never sent one. The guard gating READY FOR OWNER USE was
+   * therefore inert on the only path anyone runs, while every test passed because each one
+   * supplied the list by hand.
+   *
+   * A check that works in tests and not in production is worse than no check: it produces the
+   * documentation and the confidence of enforcement without the enforcement. So the producer
+   * set is now DERIVED from governed execution history in this project's own store, and a
+   * caller-supplied list can only narrow the question, never invent an answer.
+   */
+  const implementationProducers = opts.implementationProducers ?? [
+    ...producersFromProject(root, opts.store),
+  ];
+
   const requirements: RequirementStatus[] = REQUIREMENTS.map((r: Requirement) => {
     const base = resolveProof(r.id, {
       root,
       ...(repository === undefined ? {} : { repository }),
       resolveRun,
       assessContainment,
-      ...(opts.implementationProducers === undefined
-        ? {}
-        : { implementationProducers: opts.implementationProducers }),
+      implementationProducers,
+      reviewerAuthority: (agentId) => reviewerAuthorityOf(agentId, ContractRegistry.shared()),
     });
     const wrongKind = base.status === ProofStatus.PASS && base.verificationType !== r.expects;
     const resolution: ResolvedProof = wrongKind
