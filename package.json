@@ -27,6 +27,8 @@
     "serva": "node dist/cli/main.js",
     "contracts": "node scripts/generate-agent-contracts.mjs",
     "prove": "node scripts/prove.mjs",
+    "prove:live": "node scripts/prove-live.mjs",
+    "security-review": "node scripts/security-review.mjs",
     "acceptance": "npm run build && npm run prove && node scripts/acceptance-matrix.mjs",
     "generate": "npm run catalogues && npm run contracts",
     "test:claude": "vitest run --config vitest.live.config.ts",

@@ -189,11 +189,14 @@ export interface RepositoryIdentity {
  * Injected rather than imported, because resolution must work against a package somebody
  * has just unpacked — where the store a run lives in may be anywhere, or absent.
  */
+/** A governed run, named well enough to be found again in a store on disk. */
+export interface RunRef {
+  readonly runId: string;
+  readonly storePath: string;
+}
+
 export interface RunResolver {
-  (ref: {
-    readonly runId: string;
-    readonly storePath: string;
-  }): { readonly agentId?: string; readonly outcome?: string } | undefined;
+  (ref: RunRef): { readonly agentId?: string; readonly outcome?: string } | undefined;
 }
 
 export interface ResolveOptions {
@@ -208,6 +211,30 @@ export interface ResolveOptions {
    * about this module.
    */
   readonly implementationProducers?: readonly string[];
+  /**
+   * Re-derive whether a Producer's evidence violation was contained.
+   *
+   * SPEC: Phase 6 Producer evidence-violation semantics (locked).
+   *
+   * Supplied by the caller for the same reason `resolveRun` is: this module refuses to open
+   * stores, and the answer is a fact about governed evidence rather than about a document.
+   * Returning `undefined` means the question could not be decided, which is a refusal — an
+   * undecided containment question is never a contained one.
+   */
+  readonly assessContainment?: (ref: RunRef) => ContainmentVerdict | undefined;
+}
+
+/**
+ * The part of a canonical containment assessment this resolver is entitled to act on.
+ *
+ * Structurally a subset of `ProducerContainment` from `liveProof.ts`, so the canonical
+ * assessor satisfies it directly. Deliberately narrow: nothing here can be constructed from
+ * a proof document, only from the store the run happened in.
+ */
+export interface ContainmentVerdict {
+  readonly contained: boolean;
+  readonly producerOutcome: string;
+  readonly reasons: readonly string[];
 }
 
 export interface ResolvedProof {
@@ -417,7 +444,56 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
       if (run === undefined) {
         refusals.push('live run ' + live.runId + ' does not resolve in ' + live.storePath);
       } else if (run.outcome !== 'COMPLETED') {
-        refusals.push('live run ' + live.runId + ' ended ' + String(run.outcome));
+        /*
+         * A CONTAINED EVIDENCE VIOLATION IS NOT DISQUALIFYING — FOR LIVE-ENGINEERING ALONE.
+         *
+         * SPEC: Phase 6 Producer evidence-violation semantics (locked).
+         *
+         * `liveProof.ts` already implemented the locked rule: a Producer that misreported its
+         * own work has not thereby invalidated work that deterministic checks measured and an
+         * independent Reviewer judged. This resolver predated it and demanded COMPLETED, so a
+         * single real run was accepted by the chain verifier and refused here.
+         *
+         * The exception is deliberately narrow in three ways, and each matters:
+         *
+         *   it is keyed to LIVE-ENGINEERING, so no other LIVE requirement inherits it;
+         *   it admits EVIDENCE_VIOLATION only — every other terminal outcome stays refused;
+         *   containment is RE-DERIVED by the caller's canonical assessor, never read from the
+         *   proof document. A `contained: true` written into a file is a claim, and claims in
+         *   files are what this whole model exists to refuse.
+         *
+         * With no assessor supplied the answer is NOT_VERIFIED. Absence of a containment
+         * judgement is not a containment judgement.
+         */
+        const eligible =
+          requirementId === 'LIVE-ENGINEERING' && run.outcome === 'EVIDENCE_VIOLATION';
+
+        if (!eligible) {
+          refusals.push('live run ' + live.runId + ' ended ' + String(run.outcome));
+        } else if (o.assessContainment === undefined) {
+          refusals.push(
+            'live run ' +
+              live.runId +
+              ' ended EVIDENCE_VIOLATION and no canonical containment assessment was available, ' +
+              'so containment is unproven',
+          );
+        } else {
+          const containment = o.assessContainment(live);
+          if (containment === undefined) {
+            refusals.push(
+              'live run ' +
+                live.runId +
+                ' ended EVIDENCE_VIOLATION and containment could not be assessed from the store',
+            );
+          } else if (!containment.contained) {
+            refusals.push(
+              'live run ' +
+                live.runId +
+                ' ended EVIDENCE_VIOLATION and the violation is not contained: ' +
+                (containment.reasons[0] ?? 'no reason recorded'),
+            );
+          }
+        }
       }
     }
   }

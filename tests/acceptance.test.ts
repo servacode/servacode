@@ -559,3 +559,128 @@ describe('defaultRunResolver resolves a run the Store really wrote', () => {
     ).toBeUndefined();
   });
 });
+
+/* ============ LIVE-ENGINEERING: a CONTAINED evidence violation is not disqualifying */
+
+describe('LIVE-ENGINEERING accepts a contained EVIDENCE_VIOLATION, and nothing else does', () => {
+  /*
+   * SPEC: Phase 6 Producer evidence-violation semantics (locked).
+   *
+   * `liveProof.ts` already implements the locked rule — `PRODUCED_NOTHING` deliberately
+   * excludes EVIDENCE_VIOLATION, and `assessProducerContainment` decides containment on
+   * evidence. The generic `resolveProof` predated that and demanded COMPLETED, so the same
+   * real run was accepted by the chain verifier and refused by the proof resolver.
+   *
+   * This is a CONSISTENCY REPAIR, not a relaxation. The exception is confined to
+   * LIVE-ENGINEERING, containment is re-derived canonically rather than read from the
+   * document, and every other terminal outcome stays refused.
+   */
+  const LIVE_RUN = { runId: 'SC-RUN-000002', agentId: 'SC-AGENT-150', storePath: '.serva-live' };
+
+  function liveProof(root: string, over: Partial<AcceptanceProof> = {}): void {
+    writeProof(root, {
+      requirementId: 'LIVE-ENGINEERING',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: LIVE_RUN,
+      ...over,
+    });
+  }
+
+  /** Containment as the canonical assessor would report it. */
+  const contained = () => ({ contained: true, producerOutcome: 'EVIDENCE_VIOLATION', reasons: [] });
+  const uncontained = () => ({
+    contained: false,
+    producerOutcome: 'EVIDENCE_VIOLATION',
+    reasons: ['acceptance evidence credits the Producer run'],
+  });
+
+  it('COMPLETED resolves exactly as before', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveProof('LIVE-ENGINEERING', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+    });
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+  });
+
+  it('a CONTAINED evidence violation resolves', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveProof('LIVE-ENGINEERING', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'EVIDENCE_VIOLATION' }),
+      assessContainment: contained,
+    });
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+  });
+
+  it('an UNCONTAINED evidence violation is refused', () => {
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveProof('LIVE-ENGINEERING', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'EVIDENCE_VIOLATION' }),
+      assessContainment: uncontained,
+    });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('credits the Producer run');
+  });
+
+  it('an evidence violation with NO containment assessment available is refused', () => {
+    /*
+     * Rule 3: a naked claim in the document proves nothing. With no canonical assessor the
+     * answer is NOT_VERIFIED, never a pass on the strength of the proof's own prose.
+     */
+    const root = pkg();
+    liveProof(root);
+    const resolved = resolveProof('LIVE-ENGINEERING', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'EVIDENCE_VIOLATION' }),
+    });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('containment');
+  });
+
+  it('a genuinely failed run is still refused, containment or not', () => {
+    for (const outcome of ['FAILED', 'REFUSED', 'BLOCKED', 'SCOPE_VIOLATION', 'INVALID_OUTPUT']) {
+      const root = pkg();
+      liveProof(root);
+      const resolved = resolveProof('LIVE-ENGINEERING', {
+        root,
+        repository: REPOSITORY,
+        resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome }),
+        /* Even offered a contained verdict, a run that produced nothing stays refused. */
+        assessContainment: contained,
+      });
+      expect(resolved.status, outcome + ' resolved').toBe(ProofStatus.NOT_VERIFIED);
+      expect(resolved.refusals.join(' '), outcome).toContain(outcome);
+    }
+  });
+
+  it('another LIVE requirement does NOT inherit the exception', () => {
+    /* The exception is confined by requirement id, so LIVE-SERVA still demands COMPLETED. */
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-SERVA',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: LIVE_RUN,
+    });
+    const resolved = resolveProof('LIVE-SERVA', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'EVIDENCE_VIOLATION' }),
+      assessContainment: contained,
+    });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('EVIDENCE_VIOLATION');
+  });
+});

@@ -8,6 +8,7 @@ import {
   Severity,
   resolveSecurityReview,
 } from '../src/acceptance/securityReview.js';
+import { runSecurityReview } from '../src/acceptance/securityReviewRun.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { RepositoryIdentity } from '../src/acceptance/proof.js';
@@ -325,5 +326,170 @@ describe('the scope must cover what was asked, and the verdict must agree with t
     } finally {
       rt.close();
     }
+  });
+});
+
+/* ================= producing the review, rather than hand-writing it ================= */
+
+describe('the review is performed by a governed run, not authored', () => {
+  /*
+   * SPEC: Phase 6 final acceptance sequence §7.
+   *
+   * Every test above proves the verifier refuses a bad review. None of them proved anything
+   * could produce a good one — the verifier was reachable only from its own tests, so the
+   * only supported way to a green Security Acceptance was to write the JSON by hand. A
+   * verifier whose sole input is a hand-authored file verifies the author's typing.
+   */
+  const REPO = { commit: COMMIT, tree: TREE };
+
+  /** A runtime that returns one prepared result, recording what it was asked. */
+  function fakeRuntime(outcome: string, result: unknown) {
+    const seen: { request?: Record<string, unknown> } = {};
+    return {
+      seen,
+      runtime: {
+        run: (request: Record<string, unknown>) => {
+          seen.request = request;
+          return Promise.resolve({
+            runId: 'SC-RUN-REVIEW',
+            outcome,
+            bundle: {},
+            envelope: { result },
+            claimAssessments: [],
+            attempts: 1,
+            diagnostics: [],
+          });
+        },
+      } as unknown as Parameters<typeof runSecurityReview>[0]['runtime'],
+    };
+  }
+
+  const GOOD = {
+    scope: [...REQUIRED_SCOPE],
+    findings: [
+      {
+        id: 'F-1',
+        severity: Severity.LOW,
+        area: 'Owner authority',
+        statement: 'the refusal message names the gate but not the remedy',
+        evidence: ['src/app/conversation.ts:212'],
+      },
+    ],
+    verdict: ReviewVerdict.ACCEPTED,
+    summary: 'no blocking finding',
+  };
+
+  it('produces a review that the verifier then resolves', async () => {
+    const rt = project();
+    const { runtime } = fakeRuntime('COMPLETED', GOOD);
+    const outcome = await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+
+    expect(outcome.refusals).toEqual([]);
+    expect(outcome.review).toBeDefined();
+
+    /* The produced review must survive the same verifier a hand-written one faces. */
+    seedRun(rt.store, 'SC-RUN-REVIEW', REVIEWER);
+    const path = join(rt.root, ...REVIEW_PATH.split('/'));
+    mkdirSync(join(rt.root, 'evidence', 'acceptance-run'), { recursive: true });
+    writeFileSync(path, JSON.stringify(outcome.review, null, 2), 'utf8');
+
+    const resolved = resolveSecurityReview({
+      root: rt.root,
+      repository: REPOSITORY,
+      openStore: () => rt.store,
+    });
+    expect(resolved.refusals).toEqual([]);
+    expect(resolved.resolved).toBe(true);
+  });
+
+  it('stamps the commit from measured fact, so a reviewer cannot name its own', async () => {
+    /*
+     * A reviewer that could declare which commit it reviewed could review one thing and
+     * certify another, and the staleness check would agree with it.
+     */
+    const rt = project();
+    const { runtime } = fakeRuntime('COMPLETED', {
+      ...GOOD,
+      /* Even offered, an extra commit field is not part of the result contract. */
+    });
+    const outcome = await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+    expect(outcome.review?.implementationCommit).toBe(COMMIT);
+    expect(outcome.review?.treeDigest).toBe(TREE);
+    expect(outcome.review?.reviewerRunId).toBe('SC-RUN-REVIEW');
+    expect(outcome.review?.reviewerAgentId).toBe(REVIEWER);
+  });
+
+  it('asks for every required area by name', async () => {
+    const rt = project();
+    const { runtime, seen } = fakeRuntime('COMPLETED', GOOD);
+    await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+    const task = String(seen.request?.['taskDefinition']);
+    for (const area of REQUIRED_SCOPE) expect(task).toContain(area);
+    /* The reviewer is told it holds no write authority, in the boundary it is bound by. */
+    expect(String(seen.request?.['scopeBoundary']).toLowerCase()).toContain('read-only');
+  });
+
+  it('a run that did not complete produces no review at all', async () => {
+    const rt = project();
+    const { runtime } = fakeRuntime('FAILED', GOOD);
+    const outcome = await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+    expect(outcome.review).toBeUndefined();
+    expect(outcome.refusals.join(' ')).toContain('judged nothing');
+  });
+
+  it('carries the reviewer verdict through unchanged, including BLOCKED', async () => {
+    /* A producer that softened a verdict would be the exact failure §7 exists to prevent. */
+    const rt = project();
+    const { runtime } = fakeRuntime('COMPLETED', {
+      ...GOOD,
+      findings: [
+        {
+          id: 'F-1',
+          severity: Severity.CRITICAL,
+          area: 'Owner authority',
+          statement: 'a gate can be bypassed',
+          evidence: ['src/app/conversation.ts:212'],
+        },
+      ],
+      verdict: ReviewVerdict.BLOCKED,
+    });
+    const outcome = await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+    expect(outcome.review?.verdict).toBe(ReviewVerdict.BLOCKED);
+    expect(outcome.review?.findings[0]?.severity).toBe(Severity.CRITICAL);
   });
 });

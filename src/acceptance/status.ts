@@ -1,11 +1,22 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { SERVA_VERSION } from '../portability/version.js';
 import { ACCEPTANCE_LINES, REQUIREMENTS, requirementsFor } from './requirements.js';
 import { ProofStatus, resolveProof } from './proof.js';
-import type { RepositoryIdentity, ResolvedProof, RunResolver } from './proof.js';
+import type {
+  ContainmentVerdict,
+  RepositoryIdentity,
+  ResolvedProof,
+  RunRef,
+  RunResolver,
+} from './proof.js';
 import type { Requirement } from './requirements.js';
+import { systemClock } from '../core/clock.js';
+import { TimeOrderedIdSource } from '../core/ids.js';
+import { Store } from '../store/store.js';
+import { listChangeSets } from '../engineering/changeset.js';
+import { assessProducerContainment } from './liveProof.js';
 
 /**
  * SERVA CODE 1.0 — THE STATUS SERVA ISSUES ABOUT ITSELF.
@@ -76,6 +87,7 @@ export interface StatusOptions {
   readonly repository?: RepositoryIdentity;
   readonly resolveRun?: RunResolver;
   readonly implementationProducers?: readonly string[];
+  readonly assessContainment?: (ref: RunRef) => ContainmentVerdict | undefined;
 }
 
 /**
@@ -163,6 +175,57 @@ export function defaultRunResolver(root: string): RunResolver {
   };
 }
 
+/**
+ * Open a store somebody else wrote, without touching it.
+ *
+ * Read-only by intent rather than by enforcement: nothing on this path calls `transaction`.
+ * The deps a `Store` requires are only ever consulted on write, so a real clock and id source
+ * are supplied to satisfy the constructor and are never used.
+ */
+function openStoreAt(storePath: string): Store | undefined {
+  const base = isAbsolute(storePath) ? storePath : join(process.cwd(), storePath);
+  for (const root of [base, dirname(base)]) {
+    if (!existsSync(join(root, '.serva', 'canon'))) continue;
+    try {
+      const clock = systemClock;
+      return new Store(root, { clock, ids: new TimeOrderedIdSource(clock), actor: 'acceptance' });
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * RE-DERIVE CONTAINMENT FROM THE STORE, NEVER FROM THE PROOF.
+ *
+ * SPEC: Phase 6 Producer evidence-violation semantics (locked).
+ *
+ * A LIVE-ENGINEERING proof whose Producer ended in an evidence violation may still resolve —
+ * but only on this answer, computed here by the same `assessProducerContainment` the live
+ * chain verifier uses. The proof document's own account of its containment is not read, and
+ * could not be trusted if it were: `"contained": true` in a file is a claim about evidence,
+ * and this whole model exists because claims about evidence are not evidence.
+ *
+ * The ChangeSet is found by the Producer run that produced it. Naming it in the proof would
+ * hand the document a say in which evidence gets assessed, which is the same defect wearing
+ * a different hat.
+ */
+export function defaultContainmentAssessor(): (ref: RunRef) => ContainmentVerdict | undefined {
+  return (ref) => {
+    const store = openStoreAt(ref.storePath);
+    if (store === undefined) return undefined;
+    try {
+      const changeSet = listChangeSets(store).find((c) => c.producerRunId === ref.runId);
+      if (changeSet === undefined) return undefined;
+      return assessProducerContainment(store, ref.runId, changeSet.changeSetId);
+    } catch {
+      /* An unreadable store decides nothing, and deciding nothing is a refusal. */
+      return undefined;
+    }
+  };
+}
+
 function stateOf(resolution: ResolvedProof, expects: string): AcceptanceState {
   if (resolution.status === ProofStatus.FAIL) return AcceptanceState.FAIL;
   if (resolution.status !== ProofStatus.PASS) return AcceptanceState.NOT_VERIFIED;
@@ -182,12 +245,14 @@ export function acceptanceStatus(o: StatusOptions | string = {}): AcceptanceStat
   const root = opts.root ?? process.cwd();
   const repository = opts.repository ?? repositoryIdentity(root);
   const resolveRun = opts.resolveRun ?? defaultRunResolver(root);
+  const assessContainment = opts.assessContainment ?? defaultContainmentAssessor();
 
   const requirements: RequirementStatus[] = REQUIREMENTS.map((r: Requirement) => {
     const base = resolveProof(r.id, {
       root,
       ...(repository === undefined ? {} : { repository }),
       resolveRun,
+      assessContainment,
       ...(opts.implementationProducers === undefined
         ? {}
         : { implementationProducers: opts.implementationProducers }),
