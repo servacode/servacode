@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { canonicalJson, digestOf } from '../core/hash.js';
 import { IsoSchema } from '../domain/schemas.js';
+import { SERVA_DIR } from '../store/paths.js';
 
 /**
  * MACHINE IDENTITY — QUALIFICATION IS LOCAL, AND IT DOES NOT TRAVEL.
@@ -215,3 +216,16 @@ export const MACHINE_BOUND_KEYS: readonly string[] = Object.freeze([
   'engineering.boundary',
   'engineering.osQualification',
 ]);
+
+/** Does this path carry a fact about a machine rather than about a project? */
+export function isMachineBound(relPath: string): boolean {
+  const p = relPath.split('/');
+  if (p[0] !== SERVA_DIR) return false;
+  const joined = p.join('/');
+  return (
+    joined.includes(MACHINE_QUALIFICATION_TYPE) ||
+    joined.includes('machine.identity') ||
+    joined.includes('engineering.boundary') ||
+    joined.includes('engineering.osQualification')
+  );
+}

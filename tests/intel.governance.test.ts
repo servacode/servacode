@@ -46,6 +46,7 @@ import {
   writeOrchestratorRecord,
 } from '../src/intelligence/execution/orchestrator.js';
 import { readLedger } from '../src/lifecycle/stages.js';
+import { downstreamStoreAnswer } from '../src/intelligence/gates/downstream.js';
 import { cleanup, freshStore } from './helpers.js';
 import type { Store } from '../src/store/store.js';
 import type { StoreDeps } from '../src/store/store.js';
@@ -1020,6 +1021,21 @@ describe('learning crosses the boundary only as a generalisation', () => {
   const CURATOR = 'SC-AGENT-290';
 
   /** A completed governed run by the curator, which authority now requires. */
+  /** A completed governed run by the applicability assessor, which authority now requires. */
+  function assessorRun(store: Store, agentId = 'SC-AGENT-291'): string {
+    const id = 'SC-RUN-ASSESSOR-' + agentId;
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', id, {
+      runId: id,
+      agentId,
+      outcome: 'COMPLETED',
+      terminal: true,
+      roleInTask: 'VERIFIER',
+    });
+    tx.commit();
+    return id;
+  }
+
   function curatorRun(store: Store): string {
     const tx = store.begin();
     tx.putCanon('agentRunRecord', 'SC-RUN-CURATOR', {
@@ -1102,6 +1118,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
         confidence: 'HIGH',
         differences: [],
         assessedBy: 'SC-AGENT-291',
+        assessorRunId: assessorRun(f.store, 'SC-AGENT-291'),
       }),
     ).toThrow(/no differences considered/);
 
@@ -1112,6 +1129,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       confidence: 'MEDIUM',
       differences: ['a single operator here, where the earlier project had three'],
       assessedBy: 'SC-AGENT-291',
+      assessorRunId: assessorRun(f.store, 'SC-AGENT-291'),
     });
     expect(patternUsageRefusal(f.store, pattern.id)).toBeUndefined();
     expect(applyPattern(f, { patternId: pattern.id }).status).toBe('APPLIED');
@@ -1142,8 +1160,9 @@ describe('learning crosses the boundary only as a generalisation', () => {
         confidence: 'HIGH',
         differences: ['none worth mentioning'],
         assessedBy: CURATOR,
+        assessorRunId: assessorRun(f.store, CURATOR),
       }),
-    ).toThrow(/assessed by SC-AGENT-291/);
+    ).toThrow(/reserved to SC-AGENT-291/);
 
     /* And an arbitrary third actor is not the assessor either. */
     expect(() =>
@@ -1154,8 +1173,9 @@ describe('learning crosses the boundary only as a generalisation', () => {
         confidence: 'LOW',
         differences: ['a different shop'],
         assessedBy: 'SC-AGENT-070',
+        assessorRunId: assessorRun(f.store, 'SC-AGENT-070'),
       }),
-    ).toThrow(/assessed by SC-AGENT-291/);
+    ).toThrow(/reserved to SC-AGENT-291/);
 
     /* The canonical assessor may. */
     assessApplicability(f, {
@@ -1165,6 +1185,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       confidence: 'MEDIUM',
       differences: ['a single operator, where the earlier project had three'],
       assessedBy: 'SC-AGENT-291',
+      assessorRunId: assessorRun(f.store, 'SC-AGENT-291'),
     });
     expect(patternUsageRefusal(f.store, pattern.id)).toBeUndefined();
   });
@@ -1207,6 +1228,7 @@ describe('learning crosses the boundary only as a generalisation', () => {
       confidence: 'HIGH',
       differences: ['no regulator, no audit obligation'],
       assessedBy: 'SC-AGENT-291',
+      assessorRunId: assessorRun(f.store, 'SC-AGENT-291'),
     });
     expect(patternUsageRefusal(f.store, pattern.id)).toMatch(/NOT applying/);
     expect(() => applyPattern(f, { patternId: pattern.id })).toThrow();
@@ -1357,5 +1379,57 @@ describe('curation authority is proved, never declared', () => {
         curatorRunId: 'SC-RUN-NOPE',
       }),
     ).toThrow(/run|governed/i);
+  });
+});
+
+/* ====== SWEEP: an old approval does not authorise a new release ====== */
+
+describe('release authorisation binds to the release being evaluated', () => {
+  /*
+   * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-GATES-CHECKS-AND-VIEWS/SEC-REV-1.
+   *
+   * RL-1 asked `releases.some((r) => r.approvedByOwnerDecisionRef !== undefined)` across EVERY
+   * release in the store. So one owner approval, ever, satisfied it for every release
+   * afterwards — including one the owner had never seen.
+   *
+   * The comment above it says authorisation to ship "is the one thing in this file that no
+   * agent output can produce", which was true and beside the point: nothing needed to produce
+   * an approval when an old one was accepted in its place.
+   */
+  function seedRelease(store: Store, id: string, approved: boolean): void {
+    const tx = store.begin();
+    tx.putCanon(ARTIFACT_TYPES.RELEASE, id, {
+      id,
+      version: 1,
+      createdAt: '2026-08-25T00:00:00.000Z',
+      name: id,
+      releaseVersion: '1.0.0',
+      state: 'CANDIDATE',
+      ...(approved ? { approvedByOwnerDecisionRef: { id: 'SC-OD-1' } } : {}),
+      meta: {
+        provenance: { marking: 'INFERRED', basis: 'test', confidence: 'HIGH', loadBearing: false },
+        attribution: { at: '2026-08-25T00:00:00.000Z', agentId: 'SC-AGENT-250' },
+      },
+    });
+    tx.commit();
+  }
+
+  it('an earlier approved release does not authorise a later unapproved one', () => {
+    const f = setup();
+    seedRelease(f.store, 'SC-REL-001', true);
+    seedRelease(f.store, 'SC-REL-002', false);
+    expect(downstreamStoreAnswer(f.store, 'RL-1')).toBe(false);
+  });
+
+  it('an approved current release authorises', () => {
+    const f = setup();
+    seedRelease(f.store, 'SC-REL-001', true);
+    expect(downstreamStoreAnswer(f.store, 'RL-1')).toBe(true);
+  });
+
+  it('no release at all answers nothing rather than false', () => {
+    /* Unasked is not refused: a project with no release has not failed this criterion. */
+    const f = setup();
+    expect(downstreamStoreAnswer(f.store, 'RL-1')).toBeUndefined();
   });
 });

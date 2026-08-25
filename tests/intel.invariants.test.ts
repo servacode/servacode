@@ -638,12 +638,62 @@ describe('research is captured, verified, and expires', () => {
       verifiedByRunId: 'SC-RUN-1',
       verifiedByAgentId: 'SC-AGENT-060',
     } as never;
-    expect(verificationRefusal(v, { claimRunId: 'SC-RUN-1', captures: [] })).toMatch(
-      /own homework/,
-    );
-    expect(verificationRefusal(v, { claimAgentId: 'SC-AGENT-060', captures: [] })).toMatch(
-      /same actor/,
-    );
+    expect(
+      verificationRefusal(v, {
+        claimRunId: 'SC-RUN-1',
+        claimAgentId: 'SC-AGENT-999',
+        captures: [],
+      }),
+    ).toMatch(/own homework/);
+    expect(
+      verificationRefusal(v, {
+        claimRunId: 'SC-RUN-9',
+        claimAgentId: 'SC-AGENT-060',
+        captures: [],
+      }),
+    ).toMatch(/same actor/);
+  });
+
+  it('a caller that omits the claimant does not thereby pass the independence check', () => {
+    /*
+     * SPEC: Phase 6 security invariant sweep; HIGH finding RESEARCH-TRUST/F-1.
+     *
+     * `claimRunId` and `claimAgentId` were both optional, so the check the module's own header
+     * calls one of its two structural constraints — "marking your own homework is not
+     * verification" — simply did not run when a caller left them out. The guarantee was
+     * caller discipline wearing the shape of an invariant.
+     *
+     * Not knowing who made the claim is not evidence that somebody else verified it.
+     */
+    const v = {
+      id: 'SC-CV-003',
+      claimRef: { id: 'SC-RF-001' },
+      verdict: ClaimVerdict.SUPPORTED,
+      captureRefs: [{ id: 'SC-SRC-001' }],
+      verifiedByRunId: 'SC-RUN-1',
+      verifiedByAgentId: 'SC-AGENT-060',
+    } as never;
+    /*
+     * The capture is supplied and its digest matches, so any refusal here is about the
+     * INDEPENDENCE question and nothing else.
+     */
+    const capture = {
+      id: 'SC-SRC-001',
+      excerpt: 'the source text',
+      contentDigest: captureDigest('the source text'),
+    } as never;
+    /*
+     * The type now forbids omitting these outright, which is the stronger half of the fix: a
+     * caller cannot skip the question by leaving the fields off. What remains reachable is an
+     * EMPTY claimant — a finding whose attribution recorded no run or agent — and that must
+     * refuse too, because not knowing who made a claim is not evidence somebody else checked it.
+     */
+    const refusal = verificationRefusal(v, {
+      claimRunId: '',
+      claimAgentId: '',
+      captures: [capture],
+    });
+    expect(refusal, 'a verification with no known claimant was accepted').toBeDefined();
   });
 
   it('a claim the source does not support cannot become market truth', () => {
@@ -662,7 +712,13 @@ describe('research is captured, verified, and expires', () => {
       verifiedByRunId: 'SC-RUN-2',
       verifiedByAgentId: 'SC-AGENT-063',
     } as never;
-    expect(verificationRefusal(v, { captures: [] })).toMatch(/not stored/);
+    expect(
+      verificationRefusal(v, {
+        claimRunId: 'SC-RUN-CLAIM',
+        claimAgentId: 'SC-AGENT-CLAIM',
+        captures: [],
+      }),
+    ).toMatch(/not stored/);
   });
 
   it('expired research makes dependent competitive truth stale', () => {

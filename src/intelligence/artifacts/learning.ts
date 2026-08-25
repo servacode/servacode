@@ -87,6 +87,14 @@ export const ApplicabilityAssessmentSchema = artifact({
   /** How this project differs from the one the pattern came from. */
   differences: z.array(z.string().min(1)).default([]),
   assessedBy: z.string().min(1),
+  /**
+   * The governed run that made this assessment.
+   *
+   * Optional only so records written before the invariant sweep still parse; a record without
+   * one cannot satisfy `patternUsageRefusal`, which is the honest treatment of an assessment
+   * nobody can trace to a run.
+   */
+  assessorRunId: z.string().min(1).optional(),
 });
 export type ApplicabilityAssessment = z.output<typeof ApplicabilityAssessmentSchema>;
 

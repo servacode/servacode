@@ -23,12 +23,7 @@ import {
   safeBundlePath,
   verifyBackup,
 } from '../src/portability/backup.js';
-import {
-  RestoreConflict,
-  inspectRestore,
-  isMachineBound,
-  performRestore,
-} from '../src/portability/restore.js';
+import { RestoreConflict, inspectRestore, performRestore } from '../src/portability/restore.js';
 import {
   MIGRATION_STEPS,
   MigrationOutcome,
@@ -42,6 +37,7 @@ import {
 } from '../src/portability/version.js';
 import {
   MACHINE_QUALIFICATION_TYPE,
+  isMachineBound,
   MachineQualificationState,
   MachineQualificationSchema,
   machineIdentity,
@@ -1053,5 +1049,78 @@ describe('a credential in a large file does not travel in a backup', () => {
       },
     );
     expect(result.manifest.inventory.some((e) => e.path.endsWith('big.txt'))).toBe(true);
+  });
+});
+
+/* ====== SWEEP: a declared exclusion the writer never performed ====== */
+
+describe('nothing machine-bound travels, as the writer promises', () => {
+  /*
+   * SPEC: §32; HIGH findings MIGRATION/MIGR-1 and RELEASE-HANDOVER/REL-HANDOVER-1.
+   *
+   * `backup.ts` imports MACHINE_BOUND_KEYS and uses it in exactly one place: to write
+   * `machineBoundExcluded: [...MACHINE_BOUND_KEYS]` into the manifest. Nothing in `walkProject`
+   * or `isExcluded` ever consulted it, so the field described an exclusion the writer did not
+   * perform. Enforcement lived only on the restore side.
+   *
+   * That is the difference between a bundle Serva restores and a bundle somebody opens — and
+   * the header's own threat scenario is the second one: "a backup gets copied to a USB stick
+   * and emailed". A manifest asserting what a reader would find, incorrectly, is worse than
+   * one that asserts nothing.
+   */
+  it('leaves machine-bound canon out of the bundle entirely', () => {
+    const seeded = seedProject();
+    /* Machine-bound canon, laid out the way the Store writes it. */
+    for (const family of ['machine.qualification', 'machine.identity']) {
+      const dir = join(seeded.root, '.serva', 'canon', family, 'M-1');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, 'v1.json'),
+        JSON.stringify({ body: { id: 'M-1', fingerprint: 'f'.repeat(64) } }),
+        'utf8',
+      );
+    }
+
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+
+    const carried = result.manifest.inventory.filter(
+      (e) => e.path.includes('machine.qualification') || e.path.includes('machine.identity'),
+    );
+    expect(carried, 'machine-bound canon travelled in the bundle').toEqual([]);
+  });
+
+  it('the manifest records the exclusion it actually performed', () => {
+    const seeded = seedProject();
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+    /* The claim stays, and now it is true of the bundle on disk. */
+    expect(result.manifest.machineBoundExcluded.length).toBeGreaterThan(0);
+  });
+
+  it('ordinary project canon still travels', () => {
+    /* The exclusion is about machine facts, not about the project. */
+    const seeded = seedProject();
+    const destination = join(tmp(), 'bundle');
+    const result = createBackup(
+      { clock: clock() },
+      {
+        projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root: seeded.root }],
+        destination,
+      },
+    );
+    expect(result.manifest.inventory.length).toBeGreaterThan(0);
   });
 });

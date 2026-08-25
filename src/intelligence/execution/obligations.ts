@@ -320,11 +320,14 @@ function researchEvidence(deps: ObligationDeps, request: ResearchRequest): Resea
 
     let accepted: ClaimVerification | undefined;
     for (const v of forThis) {
+      /*
+       * Passed unconditionally. Spreading these away when the attribution lacked them meant a
+       * finding with no recorded author silently skipped the independence check — the caller
+       * deciding, by omission, not to ask a question the verifier exists to answer.
+       */
       const refusal = verificationRefusal(v, {
-        ...(f.meta.attribution.runId === undefined ? {} : { claimRunId: f.meta.attribution.runId }),
-        ...(f.meta.attribution.agentId === undefined
-          ? {}
-          : { claimAgentId: f.meta.attribution.agentId }),
+        claimRunId: f.meta.attribution.runId ?? '',
+        claimAgentId: f.meta.attribution.agentId ?? '',
         captures: mine,
       });
       if (refusal !== undefined) {

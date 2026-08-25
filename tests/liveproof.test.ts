@@ -1036,3 +1036,67 @@ describe('evidence that credits the Producer, including agent-judged evidence', 
     expect(c.reasons.join(' ')).toContain('no independently measured evidence');
   });
 });
+
+/* ====== SWEEP: the live chain resolves its reviewer like everything else does ====== */
+
+describe('the live chain proves reviewer authority, not merely a different name', () => {
+  /*
+   * SPEC: Phase 6 security invariant sweep; HIGH finding
+   * SERVA-SELF-ACCEPTANCE-AUTHORITY/SSA-REV-1.
+   *
+   * `resolveLiveEngineering` checked `review.reviewerAgentId === producerAgentId` and stopped
+   * there. Any agent with a different id and a persisted review record showing PASS satisfied
+   * the "independent Reviewer" requirement of LIVE-ENGINEERING and LIVE-SERVA — a second
+   * Producer, or an agent holding no verifier contract at all.
+   *
+   * The round that added this check to `proof.ts`'s JUDGED branch and to
+   * `reviewAuthority.ts` never carried it here, which is the pattern this sweep exists to end.
+   */
+  it('refuses a reviewer whose contract grants no verifier authority', () => {
+    const rt = project();
+    /* SC-AGENT-180 is a real agent, genuinely not the producer, and holds EXECUTE. */
+    seedRun(rt.store, 'SC-RUN-000004', PRODUCER);
+    seedRun(rt.store, 'SC-RUN-000005', 'SC-AGENT-180');
+    seedChangeSet(rt.store);
+    seedEvidence(rt.store);
+    seedReview(rt.store, { reviewerAgentId: 'SC-AGENT-180', runRef: 'SC-RUN-000005' });
+    seedAccepted(rt.store);
+
+    const result = resolve(rt);
+    expect(result.resolved).toBe(false);
+    expect(JSON.stringify(result.refusals)).toMatch(/authoris|authority/i);
+  });
+
+  it('refuses a reviewer whose cited run does not resolve', () => {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-000004', PRODUCER);
+    seedChangeSet(rt.store);
+    seedEvidence(rt.store);
+    seedReview(rt.store, { runRef: 'SC-RUN-INVENTED' });
+    seedAccepted(rt.store);
+
+    const result = resolve(rt);
+    expect(result.resolved).toBe(false);
+  });
+
+  it('refuses a reviewer that borrowed a real run made by someone else', () => {
+    const rt = project();
+    seedRun(rt.store, 'SC-RUN-000004', PRODUCER);
+    seedRun(rt.store, 'SC-RUN-000005', 'SC-AGENT-180');
+    seedChangeSet(rt.store);
+    seedEvidence(rt.store);
+    /* The record names the real REVIEWER while citing a run that agent never made. */
+    seedReview(rt.store, { reviewerAgentId: REVIEWER, runRef: 'SC-RUN-000005' });
+    seedAccepted(rt.store);
+
+    const result = resolve(rt);
+    expect(result.resolved).toBe(false);
+  });
+
+  it('accepts a genuine verifier, resolved from its own run', () => {
+    const rt = project();
+    honestChain(rt);
+    const result = resolve(rt);
+    expect(result.resolved, JSON.stringify(result.refusals)).toBe(true);
+  });
+});

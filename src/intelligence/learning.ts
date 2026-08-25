@@ -1,7 +1,7 @@
 import { fail } from '../core/errors.js';
 import { AuditAction, audit } from '../events/audit.js';
-import { readTerminalSnapshot } from '../events/agentRun.js';
-import { RunOutcome } from '../vocab/index.js';
+import { RoleAuthority, actorRefusal, assertActor } from '../core/actorAuthority.js';
+import { ContractRegistry } from '../agents/registry.js';
 import { ARTIFACT_TYPES, repository } from './repository.js';
 import {
   ApplicabilityAssessmentSchema,
@@ -93,63 +93,24 @@ function refuseLeakage(kind: string, fields: readonly string[]): void {
  * GRANTS the permission to.
  */
 function assertCurator(deps: LearningDeps, curatedBy: string, curatorRunId: string): void {
-  if (curatedBy !== KNOWLEDGE_CURATOR) {
-    fail({
-      code: 'E_GATE_AUTHORITY',
-      message:
-        'Only the Knowledge Curator publishes organizational learning: ' +
-        curatedBy +
-        ' is not ' +
-        KNOWLEDGE_CURATOR,
-      remedy:
-        'Generalised knowledge outlives the project it came from, so one declared role owns it.',
-      details: { curatedBy, expected: KNOWLEDGE_CURATOR },
-      specRef: '§32',
-    });
-  }
-
-  const snapshot = readTerminalSnapshot(deps.store, curatorRunId) as
-    { readonly outcome?: string; readonly agentId?: string } | undefined;
-
-  if (snapshot === undefined) {
-    fail({
-      code: 'E_GATE_AUTHORITY',
-      message: 'Curation cites run ' + curatorRunId + ', which does not exist in this store',
-      remedy: 'A caller-supplied actor string is not proof of a governed run. Cite a real one.',
-      details: { curatorRunId },
-      specRef: '§32',
-    });
-  }
-  if (snapshot?.outcome !== RunOutcome.COMPLETED) {
-    fail({
-      code: 'E_GATE_AUTHORITY',
-      message:
-        'Curator run ' +
-        curatorRunId +
-        ' ended ' +
-        String(snapshot?.outcome) +
-        ', so it curated nothing',
-      remedy: 'Only a completed governed run can publish knowledge the company will rely on.',
-      details: { curatorRunId, outcome: snapshot?.outcome },
-      specRef: '§32',
-    });
-  }
-  if (snapshot?.agentId !== curatedBy) {
-    fail({
-      code: 'E_GATE_AUTHORITY',
-      message:
-        'Curator run ' +
-        curatorRunId +
-        ' was made by ' +
-        String(snapshot?.agentId) +
-        ', not the ' +
-        curatedBy +
-        ' this contribution claims',
-      remedy: 'Borrowing a real run does not transfer the authority of the agent that made it.',
-      details: { curatorRunId, actual: snapshot?.agentId, claimed: curatedBy },
-      specRef: '§32',
-    });
-  }
+  assertActor(
+    {
+      store: deps.store,
+      registry: ContractRegistry.shared(),
+      actorRunId: curatorRunId,
+      claimedAgentId: curatedBy,
+      requiredAuthority: RoleAuthority.CURATE,
+    },
+    (message, details) =>
+      fail({
+        code: 'E_GATE_AUTHORITY',
+        message: 'Organizational learning may not be published: ' + message,
+        remedy:
+          'Generalised knowledge outlives the project it came from, so one governed role owns it and the run that performed the act is resolved rather than named.',
+        details,
+        specRef: '§32',
+      }),
+  );
 }
 
 /** Contribute a lesson. Generalised or refused; there is no third outcome. */
@@ -342,6 +303,8 @@ export function assessApplicability(
     readonly confidence: ApplicabilityAssessment['confidence'];
     readonly differences: readonly string[];
     readonly assessedBy: string;
+    /** The governed run that performed this assessment. Resolved, never taken on trust. */
+    readonly assessorRunId: string;
   },
 ): ApplicabilityAssessment {
   const pattern = repository(
@@ -357,15 +320,44 @@ export function assessApplicability(
       specRef: '§38',
     });
   }
-  if (o.assessedBy !== APPLICABILITY_ASSESSOR) {
-    return fail({
-      code: 'E_GATE_AUTHORITY',
-      message: 'Applicability is assessed by ' + APPLICABILITY_ASSESSOR + ', not ' + o.assessedBy,
-      remedy:
-        'A caller-supplied actor string is not proof of a governed run. Route this through the applicability department, which runs as the canonical assessor.',
-      specRef: '§38',
-    });
-  }
+  /*
+   * THE ASSESSOR IS RESOLVED, EXACTLY AS THE CURATOR IS.
+   *
+   * SPEC: §38; CRITICAL finding ORGANIZATIONAL-LEARNING-CORE/ORG-LEARNING-1.
+   *
+   * This compared `o.assessedBy` to a constant — while its own remedy line read "a
+   * caller-supplied actor string is not proof of a governed run". The round that fixed exactly
+   * that in `assertCurator` left this function, twenty lines away, untouched.
+   *
+   * It is the more dangerous of the two: `patternUsageRefusal` treats this assessment as the
+   * independent judgement gating `applyPattern`, so a caller could authorise applying any
+   * learned pattern to a new project by typing a name. `§38` exists to stop prior success
+   * becoming authority, and this was the door it left open.
+   *
+   * Independence is established here too, against the run that curated the pattern — between
+   * two RESOLVED actors rather than two strings.
+   */
+  assertActor(
+    {
+      store: deps.store,
+      registry: ContractRegistry.shared(),
+      actorRunId: o.assessorRunId,
+      claimedAgentId: o.assessedBy,
+      requiredAuthority: RoleAuthority.ASSESS,
+      ...(pattern.meta.attribution.runId === undefined
+        ? {}
+        : { mustDifferFromRunId: pattern.meta.attribution.runId }),
+    },
+    (message, details) =>
+      fail({
+        code: 'E_GATE_AUTHORITY',
+        message: 'Applicability may not be assessed: ' + message,
+        remedy:
+          'Applying a pattern to a new project is a judgement, and a judgement needs a governed run behind it that is not the one that curated the pattern.',
+        details,
+        specRef: '§38',
+      }),
+  );
   if (o.applies && o.differences.length === 0) {
     return fail({
       code: 'E_VALIDATION',
@@ -385,6 +377,7 @@ export function assessApplicability(
     confidence: o.confidence,
     differences: [...o.differences],
     assessedBy: o.assessedBy,
+    assessorRunId: o.assessorRunId,
     meta: {
       provenance: {
         marking: 'DERIVED',
@@ -437,11 +430,30 @@ export function patternUsageRefusal(store: Store, patternId: string): string | u
     return 'pattern ' + patternId + ' was assessed as NOT applying to this project';
   }
 
-  /* §40: the assessor is the canonical one, and is not the curator. */
+  /*
+   * §40: THE ASSESSMENT WAS MADE BY A RESOLVED, INDEPENDENT ACTOR.
+   *
+   * This filtered on `assessedBy === APPLICABILITY_ASSESSOR && assessedBy !== curator`, which
+   * two different string literals satisfy. The assessments are now re-checked against the
+   * store: each must cite a governed run that resolves, completed, was made by the agent it
+   * names, holds a verifier's authority, and is not the run that curated the pattern.
+   */
   const curator = pattern.meta.attribution.agentId;
-  const independent = accepting.filter(
-    (a) => a.assessedBy === APPLICABILITY_ASSESSOR && a.assessedBy !== curator,
-  );
+  const independent = accepting.filter((a) => {
+    if (a.assessorRunId === undefined) return false;
+    return (
+      actorRefusal({
+        store,
+        registry: ContractRegistry.shared(),
+        actorRunId: a.assessorRunId,
+        claimedAgentId: a.assessedBy,
+        requiredAuthority: RoleAuthority.ASSESS,
+        ...(pattern.meta.attribution.runId === undefined
+          ? {}
+          : { mustDifferFromRunId: pattern.meta.attribution.runId }),
+      }) === undefined
+    );
+  });
   if (independent.length === 0) {
     return (
       'pattern ' +

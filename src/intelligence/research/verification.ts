@@ -69,20 +69,47 @@ export function claimIsAuthoritative(v: ClaimVerification): boolean {
 export function verificationRefusal(
   v: ClaimVerification,
   o: {
-    /** The run and actor that produced the claim being checked. */
-    readonly claimRunId?: string;
-    readonly claimAgentId?: string;
+    /**
+     * The run and actor that produced the claim being checked.
+     *
+     * REQUIRED. Optional fields made the independence check skippable by omission.
+     */
+    readonly claimRunId: string;
+    readonly claimAgentId: string;
     readonly captures: readonly SourceCapture[];
   },
 ): string | undefined {
-  if (o.claimRunId !== undefined && v.verifiedByRunId === o.claimRunId) {
+  /*
+   * NOT KNOWING WHO MADE THE CLAIM IS NOT EVIDENCE THAT SOMEBODY ELSE CHECKED IT.
+   *
+   * SPEC: Phase 6 security invariant sweep; finding RESEARCH-TRUST/F-1.
+   *
+   * Both fields were optional, so the check this module's own header calls one of its two
+   * structural constraints — "marking your own homework is not verification" — simply did not
+   * run when a caller left them out. The guarantee was caller discipline wearing the shape of
+   * an invariant, and every existing caller happened to comply, which is exactly why nothing
+   * noticed.
+   */
+  if (
+    o.claimRunId === undefined ||
+    o.claimAgentId === undefined ||
+    o.claimRunId === '' ||
+    o.claimAgentId === ''
+  ) {
+    return (
+      'ClaimVerification ' +
+      v.id +
+      ' was checked without knowing who made the claim, so its independence was never established'
+    );
+  }
+  if (v.verifiedByRunId === o.claimRunId) {
     return (
       'ClaimVerification ' +
       v.id +
       ' was produced by the same run that made the claim: marking your own homework is not verification'
     );
   }
-  if (o.claimAgentId !== undefined && v.verifiedByAgentId === o.claimAgentId) {
+  if (v.verifiedByAgentId === o.claimAgentId) {
     return (
       'ClaimVerification ' +
       v.id +

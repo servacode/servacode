@@ -7,6 +7,8 @@ import { listChangeSets, readChangeSet } from '../engineering/changeset.js';
 import { listReviews } from '../engineering/review.js';
 import { listEvidence } from '../engineering/execution.js';
 import { runStream } from '../events/agentRun.js';
+import { RoleAuthority, actorRefusal } from '../core/actorAuthority.js';
+import { ContractRegistry } from '../agents/registry.js';
 import type { Store } from '../store/store.js';
 import type { SubstrateQualification } from '../substrate/types.js';
 
@@ -725,10 +727,32 @@ export function resolveLiveEngineering(
      * Producer is the system asking itself for permission, and the whole engineering gate
      * rests on this one comparison.
      */
-    if (review.reviewerAgentId === producerAgentId) {
+    /*
+     * THE REVIEWER IS RESOLVED, NOT MERELY DIFFERENT.
+     *
+     * SPEC: Phase 6 security invariant sweep; finding SSA-REV-1.
+     *
+     * This compared two names and stopped. Any agent with a different id and a persisted review
+     * record showing PASS satisfied the "independent Reviewer" requirement — a second Producer,
+     * or an agent holding no verifier contract at all. The round that added exactly this check
+     * to `proof.ts` and `reviewAuthority.ts` never carried it here.
+     *
+     * `actorRefusal` answers the whole question at once: the cited run resolves, it COMPLETED,
+     * it was made by the agent the review names, that agent holds a verifier's authority by
+     * contract, and it is not the agent that produced the work.
+     */
+    const reviewerRefusal = actorRefusal({
+      store: input.store,
+      registry: ContractRegistry.shared(),
+      actorRunId: review.runRef,
+      claimedAgentId: review.reviewerAgentId,
+      requiredAuthority: RoleAuthority.VERIFY,
+      ...(producerRunId === undefined ? {} : { mustDifferFromRunId: producerRunId }),
+    });
+    if (reviewerRefusal !== undefined) {
       refuse(
         'INDEPENDENCE',
-        'the reviewer and the producer are both ' + producerAgentId + ', so nothing was reviewed',
+        'the review was not made by an independent verifier: ' + reviewerRefusal,
       );
     }
     if (review.outcome !== 'PASS') {

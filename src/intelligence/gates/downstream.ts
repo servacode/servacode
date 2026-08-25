@@ -373,11 +373,21 @@ export function downstreamStoreAnswer(store: Store, criterionId: string): boolea
       const releases = repository(store, ARTIFACT_TYPES.RELEASE, ReleaseSchema).list();
       if (releases.length === 0) return undefined;
       /*
-       * An owner decision, or nothing. There is deliberately no branch here that accepts a
-       * recommendation, a verdict or a confident summary: authorisation to ship is the one
-       * thing in this file that no agent output can produce.
+       * An owner decision on THIS release, or nothing.
+       *
+       * SPEC: finding SEC-REV-1. This asked `releases.some(...)` across every release the
+       * store had ever held, so one approval, ever, satisfied the criterion for every release
+       * afterwards — including one the owner had never seen. The comment below was true and
+       * beside the point: nothing needed to produce an approval when an old one stood in.
+       *
+       * There is still deliberately no branch accepting a recommendation, a verdict or a
+       * confident summary. Authorisation to ship is the one thing in this file no agent output
+       * can produce — and now also the one thing an earlier release cannot lend to a later one.
        */
-      return releases.some((r) => r.approvedByOwnerDecisionRef !== undefined);
+      const current = releases.reduce((latest, r) =>
+        r.createdAt >= latest.createdAt ? r : latest,
+      );
+      return current.approvedByOwnerDecisionRef !== undefined;
     }
     case 'RL-3': {
       const packages = repository(

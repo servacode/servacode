@@ -12,7 +12,7 @@ import {
 } from './backup.js';
 import { MIGRATABLE_BACKUP_FORMATS, planMigration } from './migration.js';
 import { backupCompatibility, VersionCompatibility } from './version.js';
-import { MACHINE_QUALIFICATION_TYPE } from './machine.js';
+import { isMachineBound } from './machine.js';
 import type { BackupManifest } from './backup.js';
 import type { MigrationPlan } from './migration.js';
 
@@ -385,19 +385,6 @@ export function performRestore(o: RestoreOptions): RestoreResult {
       'This machine is UNQUALIFIED. Project truth, history, decisions and evidence are restored; the authority to run write-capable engineering is not, because it was never a property of the project.',
     ],
   };
-}
-
-/** Does this path carry a fact about a machine rather than about a project? */
-export function isMachineBound(relPath: string): boolean {
-  const p = relPath.split('/');
-  if (p[0] !== SERVA_DIR) return false;
-  const joined = p.join('/');
-  return (
-    joined.includes(MACHINE_QUALIFICATION_TYPE) ||
-    joined.includes('machine.identity') ||
-    joined.includes('engineering.boundary') ||
-    joined.includes('engineering.osQualification')
-  );
 }
 
 /** A backup bundle is a directory with a manifest in it. Cheap enough to call anywhere. */

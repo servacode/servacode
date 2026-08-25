@@ -21,7 +21,7 @@ import { canonicalJson, digestOf } from '../core/hash.js';
 import { IsoSchema } from '../domain/schemas.js';
 import { SERVA_DIR } from '../store/paths.js';
 import { BACKUP_FORMAT_VERSION, SERVA_VERSION, SCHEMA_VERSION } from './version.js';
-import { MACHINE_BOUND_KEYS } from './machine.js';
+import { MACHINE_BOUND_KEYS, isMachineBound } from './machine.js';
 import type { Clock } from '../core/clock.js';
 
 /**
@@ -370,6 +370,29 @@ function walkProject(root: string, bundlePrefix: string): WalkOutput {
       const skip = isExcluded(name);
       if (skip !== undefined) {
         excluded.push({ path: relPath, reason: skip.reason, detail: skip.detail });
+        continue;
+      }
+      /*
+       * NOTHING MACHINE-BOUND TRAVELS — ENFORCED BY THE WRITER, NOT ONLY THE READER.
+       *
+       * SPEC: §32; findings MIGR-1 and REL-HANDOVER-1.
+       *
+       * `MACHINE_BOUND_KEYS` was imported and used in exactly one place: to write
+       * `machineBoundExcluded` into the manifest. Nothing here ever consulted it, so the field
+       * described an exclusion that never happened, and enforcement existed only on the restore
+       * path — which protects a bundle Serva restores and not a bundle somebody opens.
+       *
+       * The header's own threat scenario is the second one: "a backup gets copied to a USB
+       * stick and emailed". `isMachineBound` is the same predicate the reader uses, so the two
+       * sides cannot drift apart.
+       */
+      if (isMachineBound(relPath)) {
+        excluded.push({
+          path: relPath,
+          reason: 'MACHINE_BOUND',
+          detail:
+            'qualification, identity and boundary facts are true of one machine, so they never travel',
+        });
         continue;
       }
       if (rel === SERVA_DIR && EXCLUDED_STORE_SUBDIRS.includes(name)) {
