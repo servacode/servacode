@@ -9,7 +9,12 @@ import {
   resolveSecurityReview,
 } from '../src/acceptance/securityReview.js';
 import { ALWAYS_DENY_TOOLS, NEVER_AVAILABLE } from '../src/agents/toolPolicy.js';
-import { runSecurityReview } from '../src/acceptance/securityReviewRun.js';
+import {
+  AREA_SOURCES,
+  reviewAreaFiles,
+  runScopedSecurityReview,
+  runSecurityReview,
+} from '../src/acceptance/securityReviewRun.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import type { RepositoryIdentity } from '../src/acceptance/proof.js';
@@ -601,6 +606,182 @@ describe('the reviewer runs read-only, and the grant says so', () => {
     const policy = (seen.request?.['capability'] as { policy: { deny: string[] } }).policy;
     for (const tool of [...ALWAYS_DENY_TOOLS, ...NEVER_AVAILABLE]) {
       expect(policy.deny, tool).toContain(tool);
+    }
+  });
+});
+
+describe('the review is scoped by area, because one reviewer cannot read the whole codebase', () => {
+  /*
+   * SPEC: Phase 6 final acceptance sequence §7.
+   *
+   * The first version handed one reviewer all 189 source files. 2.36MB does not fit an 80K
+   * context, the bundle truncated at 40 files, and the run escalated INSUFFICIENT_CONTEXT
+   * rather than certify what it had not seen. That refusal was correct — so the question
+   * changed rather than the answer.
+   */
+  const REPO = { commit: COMMIT, tree: TREE };
+  /*
+   * One file under every prefix any area maps to. A fixture that covered only some areas would
+   * exercise the "no source mapped" refusal instead of the path under test — which is itself
+   * worth knowing, and is covered separately below.
+   */
+  const FILES = Object.freeze([
+    ...new Set(
+      REQUIRED_SCOPE.flatMap((area) =>
+        (AREA_SOURCES[area] ?? []).map((prefix) =>
+          prefix.endsWith('/') ? prefix + 'seed.ts' : prefix,
+        ),
+      ),
+    ),
+  ]);
+
+  /** A runtime answering every area, recording what each was asked. */
+  function areaRuntime(reply: (area: string) => { outcome: string; result?: unknown }) {
+    const seen: { area: string; request: Record<string, unknown> }[] = [];
+    let n = 0;
+    const runtime = {
+      run: (request: Record<string, unknown>) => {
+        n += 1;
+        const task = String(request['taskDefinition']);
+        const area = REQUIRED_SCOPE.find((a) => task.includes('Area under review: ' + a)) ?? '?';
+        seen.push({ area, request });
+        const r = reply(area);
+        return Promise.resolve({
+          runId: 'SC-RUN-' + String(n),
+          outcome: r.outcome,
+          bundle: {},
+          envelope: { result: r.result },
+          claimAssessments: [],
+          attempts: 1,
+          diagnostics: [],
+        });
+      },
+    } as unknown as Parameters<typeof runScopedSecurityReview>[0]['runtime'];
+    return { seen, runtime };
+  }
+
+  const clean = (area: string) => ({
+    outcome: 'COMPLETED',
+    result: { scope: [area], findings: [], verdict: ReviewVerdict.ACCEPTED, summary: 'clean' },
+  });
+
+  function scoped(
+    rt: ServaRuntime,
+    runtime: Parameters<typeof runScopedSecurityReview>[0]['runtime'],
+  ) {
+    return runScopedSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+      allFiles: FILES,
+      readFile: () => 'export const x = 1;',
+    });
+  }
+
+  it('dispatches one run per required area, each told only its own area', async () => {
+    const rt = project();
+    const { seen, runtime } = areaRuntime(clean);
+    const outcome = await scoped(rt, runtime);
+
+    expect(outcome.refusals).toEqual([]);
+    expect(seen.length).toBe(REQUIRED_SCOPE.length);
+    expect(new Set(seen.map((x) => x.area)).size).toBe(REQUIRED_SCOPE.length);
+    expect(outcome.review?.scope).toEqual([...REQUIRED_SCOPE]);
+
+    /* Each run is bounded to its own area, so findings cannot drift across scopes. */
+    for (const { area, request } of seen) {
+      expect(String(request['scopeBoundary'])).toContain(area);
+    }
+  });
+
+  it('one CRITICAL anywhere blocks the whole review', async () => {
+    /* A review is not an average of its areas. The strictest part decides. */
+    const rt = project();
+    const { runtime } = areaRuntime((area) =>
+      area === 'Owner authority'
+        ? {
+            outcome: 'COMPLETED',
+            result: {
+              scope: [area],
+              findings: [
+                {
+                  id: 'F-1',
+                  severity: Severity.CRITICAL,
+                  area,
+                  statement: 'a gate can be bypassed',
+                  evidence: ['src/app/conversation.ts:1'],
+                },
+              ],
+              verdict: ReviewVerdict.BLOCKED,
+              summary: 'blocked',
+            },
+          }
+        : clean(area),
+    );
+    const outcome = await scoped(rt, runtime);
+    expect(outcome.review?.verdict).toBe(ReviewVerdict.BLOCKED);
+    expect(outcome.review?.findings.length).toBe(1);
+  });
+
+  it('an area that could not be reviewed refuses the whole review', async () => {
+    /* Sixteen of seventeen areas is not a review of seventeen. */
+    const rt = project();
+    const { runtime } = areaRuntime((area) =>
+      area === 'AI Runtime' ? { outcome: 'ESCALATED' } : clean(area),
+    );
+    const outcome = await scoped(rt, runtime);
+    expect(outcome.review).toBeUndefined();
+    expect(outcome.refusals.join(' ')).toContain('AI Runtime');
+  });
+
+  it('namespaces finding ids by area so two reviewers cannot collide', async () => {
+    const rt = project();
+    const { runtime } = areaRuntime((area) => ({
+      outcome: 'COMPLETED',
+      result: {
+        scope: [area],
+        findings: [
+          {
+            id: 'F-1',
+            severity: Severity.LOW,
+            area,
+            statement: 'a note',
+            evidence: ['src/store/store.ts:1'],
+          },
+        ],
+        verdict: ReviewVerdict.ACCEPTED,
+        summary: 'ok',
+      },
+    }));
+    const outcome = await scoped(rt, runtime);
+    const ids = outcome.review?.findings.map((f) => f.id) ?? [];
+    expect(ids.length).toBe(REQUIRED_SCOPE.length);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('tells the reviewer which files it did NOT get', async () => {
+    /*
+     * A reviewer that silently receives a truncated bundle reports on a codebase that does not
+     * exist. Naming the omissions is what makes the scope honest.
+     */
+    const source = reviewAreaFiles(
+      'Core Store/integrity',
+      ['src/store/a.ts', 'src/store/b.ts'],
+      () => 'x'.repeat(1000),
+      1500,
+    );
+    expect(source.files).toEqual(['src/store/a.ts']);
+    expect(source.omitted).toEqual(['src/store/b.ts']);
+  });
+
+  it('maps every required area to real source', () => {
+    /* An area matching nothing is a hole in the table, and would review nothing at all. */
+    for (const area of REQUIRED_SCOPE) {
+      expect(AREA_SOURCES[area], area + ' has no source mapping').toBeDefined();
+      expect((AREA_SOURCES[area] ?? []).length, area).toBeGreaterThan(0);
     }
   });
 });

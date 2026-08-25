@@ -64,33 +64,20 @@ if (dirty.length > 0) {
  */
 const IMPLEMENTATION_PRODUCERS = ['SC-AGENT-150', 'SC-AGENT-160', 'SC-AGENT-180'];
 
-/** The source the reviewer actually judges. Read here so the run needs no filesystem tool. */
-function sourceContext() {
-  const files = execSync('git ls-files src extension/src', { cwd: root, encoding: 'utf8' })
-    .split('\n')
-    .map((f) => f.trim())
-    .filter((f) => f.endsWith('.ts'));
+/** Every source file in the repository, as the reviewer will be given them. */
+const allFiles = execSync('git ls-files src extension/src', { cwd: root, encoding: 'utf8' })
+  .split('\n')
+  .map((f) => f.trim())
+  .filter((f) => f.endsWith('.ts'));
 
-  const parts = [];
-  let budget = 480_000;
-  for (const f of files) {
-    const text = readFileSync(join(root, ...f.split('/')), 'utf8');
-    if (text.length > budget) break;
-    budget -= text.length;
-    parts.push('=== ' + f + ' ===\n' + text);
-  }
-  return { content: parts.join('\n\n'), files: files.length, included: parts.length };
-}
-
-const source = sourceContext();
 console.log(
   'security-review: reviewing ' +
     repository.commit.slice(0, 12) +
     ' — ' +
-    String(source.included) +
-    ' of ' +
-    String(source.files) +
-    ' source files in context',
+    String(allFiles.length) +
+    ' source files across ' +
+    String(REQUIRED_SCOPE.length) +
+    ' scoped areas, one governed run each',
 );
 
 const storeRoot = process.env['SERVA_REVIEW_STORE'] ?? join(root, 'out', 'security-review-store');
@@ -104,7 +91,7 @@ const rt = existsSync(join(storeRoot, '.serva'))
 
 const ai = buildAiLayer(rt);
 
-const outcome = await runSecurityReview({
+const outcome = await runScopedSecurityReview({
   runtime: ai.runtime,
   workItemId: 'SC-WI-SECURITY-REVIEW',
   repository,
@@ -112,21 +99,26 @@ const outcome = await runSecurityReview({
   implementationProducers: IMPLEMENTATION_PRODUCERS,
   reviewedAt: new Date().toISOString(),
   agentId: DEFAULT_SECURITY_REVIEWER,
-  canon: [
-    {
-      source: 'implementation',
-      kind: 'SOURCE',
-      version: repository.tree,
-      content: source.content,
-      relevance: 1,
-    },
-  ],
+  allFiles,
+  readFile: (f) => readFileSync(join(root, ...f.split('/')), 'utf8'),
+  onArea: (a) => {
+    console.log(
+      '  ' +
+        (a.refusal === undefined ? a.verdict.padEnd(13) : 'NOT_REVIEWED ') +
+        String(a.filesReviewed.length).padStart(3) +
+        ' files  ' +
+        String(a.findings.length) +
+        ' finding(s)  ' +
+        a.area +
+        (a.omitted.length === 0 ? '' : '  [' + String(a.omitted.length) + ' omitted]'),
+    );
+  },
 });
 
 if (outcome.review === undefined) {
-  console.error('security-review: the review did not complete.');
+  console.error('');
+  console.error('security-review: the review did not complete, so no proof is minted:');
   for (const r of outcome.refusals) console.error('  - ' + r);
-  for (const d of outcome.run.diagnostics.slice(0, 5)) console.error('  ' + d);
   process.exit(1);
 }
 
@@ -185,11 +177,19 @@ const proof = {
       digest: digest(reviewPath),
       note: 'the review as the reviewer left it, re-resolved rather than read',
     },
-    {
-      kind: 'AGENT_RUN',
-      ref: outcome.review.reviewerRunId,
-      note: outcome.review.reviewerAgentId + ' — VERIFIER, write = NONE, network = NONE',
-    },
+    ...outcome.areas
+      .filter((a) => a.runId !== '')
+      .map((a) => ({
+        kind: 'AGENT_RUN',
+        ref: a.runId,
+        note:
+          outcome.review.reviewerAgentId +
+          ' reviewed "' +
+          a.area +
+          '" across ' +
+          String(a.filesReviewed.length) +
+          ' file(s) — VERIFIER, write = NONE, network = NONE',
+      })),
     { kind: 'COMMIT', ref: repository.commit, note: 'the exact implementation reviewed' },
   ],
   notes:
