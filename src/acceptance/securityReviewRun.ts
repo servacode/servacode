@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { REQUIRED_SCOPE, ReviewVerdict, Severity } from './securityReview.js';
 import type { SecurityReview } from './securityReview.js';
 import type { AgentRunResult, AgentRuntime } from '../agents/runtime.js';
+import type { ToolPolicy } from '../engine/types.js';
 
 /**
  * THE INDEPENDENT SECURITY REVIEW, PERFORMED RATHER THAN WRITTEN DOWN.
@@ -89,6 +90,57 @@ export const REVIEW_RESULT_SCHEMA: Record<string, unknown> = {
   },
 };
 
+/**
+ * The grant this review runs under: read the source, and nothing else.
+ *
+ * SPEC: 19 §5, SC-POL-026; Phase 6 final acceptance sequence §7.
+ *
+ * `SC-AGENT-220`'s contract declares `exec(declared security test commands)`, so
+ * `resolveToolPolicy` refuses it outright — execute is enforceable only on the isolation
+ * substrate, and a policy resolver that guessed otherwise would be granting authority nothing
+ * can hold. That refusal is correct and stays.
+ *
+ * But this review does not execute anything. It reads source it is handed and returns a
+ * judgement, so the honest fix is to state that narrowly rather than to relax the resolver: an
+ * explicit grant, strictly smaller than the contract, carrying no Bash, no write and no
+ * network. `assertGrantWithinContract` then proves it does not exceed what the contract allows
+ * — a grant implements a contract, it never extends one — and CAPABILITY_BOUND records what
+ * was actually bound rather than what would have been derived.
+ *
+ * The empty `approve` list is deliberate and is not an oversight: under `dontAsk` an available
+ * tool with no approving rule is refused, and the reviewer needs no tool at all. Its evidence
+ * arrives as context. This is the same shape as the Producer's missing `Bash(...)` rule, which
+ * is the invariant that makes a measured result trustworthy in the first place.
+ */
+function readOnlyGrant(): ToolPolicy {
+  return {
+    available: [],
+    approve: [],
+    deny: [...NEVER_GRANTED],
+    filesystem: { read: [], write: [], readDenied: [] },
+    network: 'NONE',
+    maxToolCalls: 0,
+    rationale: [
+      'independent security review: judgement only, on source supplied as context',
+      'no tool is available, which 19 IV-5 makes a valid grant meaning no tools at all',
+      'strictly narrower than the contract: no execution, no filesystem write, no network',
+    ],
+  };
+}
+
+/** Denied whatever else is granted, so a widened grant later cannot quietly reach these. */
+const NEVER_GRANTED: readonly string[] = Object.freeze([
+  'Bash',
+  'PowerShell',
+  'Edit',
+  'Write',
+  'NotebookEdit',
+  'Agent',
+  'Task',
+  'WebFetch',
+  'WebSearch',
+]);
+
 export interface SecurityReviewRunInput {
   readonly runtime: AgentRuntime;
   readonly workItemId: string;
@@ -156,6 +208,14 @@ export async function runSecurityReview(
       'Do not review work outside the declared scope, and do not propose changes.',
     resultSchema: REVIEW_RESULT_SCHEMA,
     resultValidator: ReviewResultSchema,
+    capability: {
+      policy: readOnlyGrant(),
+      cwd: input.storePath,
+      basis:
+        'independent security review of ' +
+        input.repository.commit.slice(0, 12) +
+        ': read-only judgement, no execution, no write, no network',
+    },
     ...(input.canon === undefined ? {} : { canon: input.canon }),
   });
 

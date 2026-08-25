@@ -493,3 +493,91 @@ describe('the review is performed by a governed run, not authored', () => {
     expect(outcome.review?.findings[0]?.severity).toBe(Severity.CRITICAL);
   });
 });
+
+describe('the reviewer runs read-only, and the grant says so', () => {
+  /*
+   * SPEC: 19 §5, SC-POL-026.
+   *
+   * SC-AGENT-220's contract declares exec, so `resolveToolPolicy` refuses it — execute is
+   * enforceable only on the isolation substrate. That refusal is correct and must stay: the
+   * temptation here was to relax the resolver so a review could run at all, which would have
+   * granted every agent declaring exec a capability nothing can hold.
+   *
+   * The narrow answer is an explicit grant smaller than the contract. These tests pin it
+   * closed, because a grant that quietly widened later is exactly how this would go wrong.
+   */
+  const REPO = { commit: COMMIT, tree: TREE };
+
+  function capture() {
+    const seen: { request?: Record<string, unknown> } = {};
+    const runtime = {
+      run: (request: Record<string, unknown>) => {
+        seen.request = request;
+        return Promise.resolve({
+          runId: 'SC-RUN-REVIEW',
+          outcome: 'COMPLETED',
+          bundle: {},
+          envelope: {
+            result: {
+              scope: [...REQUIRED_SCOPE],
+              findings: [],
+              verdict: ReviewVerdict.ACCEPTED,
+              summary: 'clean',
+            },
+          },
+          claimAssessments: [],
+          attempts: 1,
+          diagnostics: [],
+        });
+      },
+    } as unknown as Parameters<typeof runSecurityReview>[0]['runtime'];
+    return { seen, runtime };
+  }
+
+  it('grants no tool, no write, no network and no tool calls', async () => {
+    const rt = project();
+    const { seen, runtime } = capture();
+    await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+
+    const capability = seen.request?.['capability'] as { policy: Record<string, unknown> };
+    expect(capability).toBeDefined();
+    const policy = capability.policy as {
+      available: string[];
+      approve: string[];
+      deny: string[];
+      filesystem: { write: string[] };
+      network: unknown;
+      maxToolCalls: number;
+    };
+    expect(policy.available).toEqual([]);
+    expect(policy.approve).toEqual([]);
+    expect(policy.filesystem.write).toEqual([]);
+    expect(policy.network).toBe('NONE');
+    expect(policy.maxToolCalls).toBe(0);
+  });
+
+  it('denies execution and write tools explicitly, not merely by omission', async () => {
+    /* Deny outranks approve, so a later widening of `available` still cannot reach these. */
+    const rt = project();
+    const { seen, runtime } = capture();
+    await runSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+    });
+    const policy = (seen.request?.['capability'] as { policy: { deny: string[] } }).policy;
+    for (const tool of ['Bash', 'PowerShell', 'Edit', 'Write', 'WebFetch']) {
+      expect(policy.deny, tool + ' must be denied outright').toContain(tool);
+    }
+  });
+});
