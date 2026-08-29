@@ -7,6 +7,7 @@ import { migrationState, renderMigration } from '../../portability/migrationWork
 import {
   installation,
   performSwitch,
+  UNKNOWN_PROJECTS,
   planSwitch,
   removeVersion,
   renderInstallation,
@@ -312,7 +313,11 @@ export function cmdInstall(args: ParsedArgs): number {
      * have broken the thing it was meant to protect.
      */
     const rt = tryOpenRuntime(args);
-    const projectRoots = rt === undefined ? [] : [rt.root];
+    /*
+     * UNKNOWN, not empty. Outside a project this command has looked at nothing, and saying so
+     * is what makes `planSwitch` refuse rather than vacuously succeed.
+     */
+    const projectRoots = rt === undefined ? UNKNOWN_PROJECTS : [rt.root];
 
     if (sub === 'remove') {
       if (!confirmed(args)) {

@@ -6,6 +6,7 @@ import {
   compareVersions,
   installation,
   performSwitch,
+  UNKNOWN_PROJECTS,
   planSwitch,
   recordInstalled,
   removeVersion,
@@ -117,7 +118,8 @@ describe('switching is a pointer move, in both directions', () => {
       ],
       '1.1.0',
     );
-    const plan = performSwitch(installation(root), '1.0.0');
+    /* No projects on this fixture machine — stated, not defaulted. */
+    const plan = performSwitch(installation(root), '1.0.0', []);
     expect(plan.outcome).toBe(ChangeOutcome.READY);
     expect(plan.reversible).toBe(true);
 
@@ -136,8 +138,8 @@ describe('switching is a pointer move, in both directions', () => {
       ],
       '1.1.0',
     );
-    performSwitch(installation(root), '1.0.0');
-    const forward = performSwitch(installation(root), '1.1.0');
+    performSwitch(installation(root), '1.0.0', []);
+    const forward = performSwitch(installation(root), '1.1.0', []);
     expect(forward.outcome).toBe(ChangeOutcome.READY);
     expect(installation(root).current?.version).toBe('1.1.0');
   });
@@ -230,7 +232,7 @@ describe('rollback is refused when it would lose data', () => {
       ],
       '1.1.0',
     );
-    const plan = planSwitch(installation(root), '1.0.0');
+    const plan = planSwitch(installation(root), '1.0.0', []);
     expect(plan.steps.join(' ')).toContain('no project directory is opened');
   });
 });
@@ -297,5 +299,106 @@ describe('the owner can see whether they can go back', () => {
     expect(renderInstallation(installation(installRoot()))).toContain(
       'never opens a project directory',
     );
+  });
+});
+
+/* ====== HIGH 2: an empty loop is not a safety proof ====== */
+
+describe('rollback refuses when it cannot establish that nothing is lost', () => {
+  /*
+   * SPEC: HIGH finding INSTALL-UPDATE-ROLLBACK/IUR-1.
+   *
+   * `planSwitch` checked each project's store schema, and the CLI built
+   * `projectRoots = rt === undefined ? [] : [rt.root]`. Run `serva install use <older>` outside
+   * a project — the natural way to manage a machine-global install — and the list was empty,
+   * the loop ran zero times, `tooNew` stayed empty, and it returned READY.
+   *
+   * The header says "ROLLBACK IS REFUSED WHEN IT WOULD LOSE DATA". An empty collection was
+   * read as "nothing would be lost" when it meant "nobody looked", and those are the two
+   * things a safety check must never confuse.
+   *
+   * No governed project inventory exists on this machine, so the honest answer is to fail
+   * closed and say why. `[]` can no longer be spelled where "unknown" is meant.
+   */
+  /** A project directory with a store schema marker of the given version. */
+  function projectAt(schema: number): string {
+    const root = tempRoot();
+    roots.push(root);
+    mkdirSync(join(root, '.serva'), { recursive: true });
+    writeFileSync(join(root, '.serva', 'SCHEMA_VERSION'), String(schema) + '\n', 'utf8');
+    return root;
+  }
+
+  it('refuses when the affected projects are unknown', () => {
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.1.0', 4],
+      ],
+      '1.1.0',
+    );
+    const plan = planSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toMatch(/could not|cannot|unknown/i);
+  });
+
+  it('allows a rollback when the machine genuinely holds no projects', () => {
+    /* Explicitly nothing to lose is a different claim from nobody having looked. */
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.1.0', 4],
+      ],
+      '1.1.0',
+    );
+    expect(planSwitch(installation(root), '1.0.0', []).outcome).toBe(ChangeOutcome.READY);
+  });
+
+  it('allows a rollback when every known project is compatible', () => {
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.1.0', 4],
+      ],
+      '1.1.0',
+    );
+    expect(planSwitch(installation(root), '1.0.0', [projectAt(3)]).outcome).toBe(
+      ChangeOutcome.READY,
+    );
+  });
+
+  it('refuses when one known project is too new', () => {
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.1.0', 4],
+      ],
+      '1.1.0',
+    );
+    const plan = planSwitch(installation(root), '1.0.0', [projectAt(99)]);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toMatch(/newer|schema/i);
+  });
+
+  it('refuses when one of several projects is too new', () => {
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.1.0', 4],
+      ],
+      '1.1.0',
+    );
+    expect(planSwitch(installation(root), '1.0.0', [projectAt(3), projectAt(99)]).outcome).toBe(
+      ChangeOutcome.REFUSED,
+    );
+  });
+
+  it('the unknown case cannot be spelled as an empty list', () => {
+    /*
+     * The structural half. `UNKNOWN_PROJECTS` is a distinct value rather than an empty array,
+     * so a caller that has not looked cannot accidentally spell it the same way as a caller
+     * that looked and found nothing.
+     */
+    expect(Array.isArray(UNKNOWN_PROJECTS)).toBe(false);
   });
 });

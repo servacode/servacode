@@ -13,6 +13,7 @@ import {
   WslTransport,
   GUEST_PATH,
   listWslDistributions,
+  GuestReach,
   resolveGuestBinary,
   selectWslDistribution,
   type ExecTransport,
@@ -357,8 +358,16 @@ export function boundaryOfEngine(o: {
   });
 }
 
+/**
+ * Where a binary is in the guest, or `undefined` when the guest did not say it is there.
+ *
+ * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A. Callers here want a path or nothing,
+ * and the REACH is consumed rather than discarded: an unreached guest yields `undefined`
+ * exactly as an absent binary does, but only after the distinction has been read.
+ */
 async function whichIn(transport: ExecTransport, bin: string): Promise<string | undefined> {
-  return resolveGuestBinary(transport, bin);
+  const found = await resolveGuestBinary(transport, bin);
+  return found.reach === GuestReach.REACHED ? found.path : undefined;
 }
 
 function transportDistro(transport: ExecTransport): string {

@@ -144,7 +144,7 @@ export class BubblewrapLauncher implements SandboxLauncher {
       };
     }
     const version = r.stdout.replace(/\0/g, '').trim();
-    this.resolved = await resolveGuestBinary(transport, this.binary);
+    this.resolved = (await resolveGuestBinary(transport, this.binary)).path;
     return {
       available: true,
       version,

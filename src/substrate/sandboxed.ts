@@ -25,6 +25,7 @@ import {
   GUEST_PATH,
   TransportKind,
   resolveGuestBinary,
+  type GuestBinaryLookup,
   type ExecTransport,
   type TransportCommand,
 } from './transport.js';
@@ -93,6 +94,9 @@ export interface SandboxedSubstrateOptions {
   /** Digest of the sandbox settings profile this boundary is measured under. */
   readonly profileDigest?: string;
 }
+
+/** The guest did not answer. Distinct from a file that is genuinely not there. */
+const UNREACHED = Symbol('guest not reached');
 
 export interface GuestBinary {
   readonly bin: string;
@@ -334,21 +338,38 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     // route the qualification exists to close.
     for (const req of this.opts.requiredBinaries ?? RECIPE_REQUIRED_BINARIES) {
       const found = await this.which(req.bin);
-      const usable = found !== undefined && !found.startsWith('/mnt/');
-      observations['bin:' + req.bin] = found ?? 'MISSING';
+      const usable =
+        found.reach === GuestReach.REACHED &&
+        found.path !== undefined &&
+        !found.path.startsWith('/mnt/');
+      /*
+       * UNREACHED IS NOT MISSING.
+       *
+       * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A.
+       *
+       * `which` returned `string | undefined` and both "the guest says no" and "the guest
+       * never answered" arrived as `undefined`. The observation read MISSING either way, and
+       * the branch below turned that into a MEASURED qualification of a machine nothing had
+       * measured. The two are now distinguishable in the record and in the decision.
+       */
+      observations['bin:' + req.bin] =
+        found.reach === GuestReach.REACHED ? (found.path ?? 'MISSING') : 'NOT_REACHED';
       prerequisites.push({
         id: 'GUEST_' + req.bin.toUpperCase(),
         what: req.bin + ' inside the execution environment',
         why: req.why,
         remedy: req.remedy,
         satisfied: usable,
+        reach: found.reach,
       });
     }
 
     let engineBin: string | undefined;
     if (this.opts.requiresEngine === true) {
-      engineBin = await this.which('claude');
-      observations['bin:claude'] = engineBin ?? 'MISSING';
+      const claude = await this.which('claude');
+      engineBin = claude.reach === GuestReach.REACHED ? claude.path : undefined;
+      observations['bin:claude'] =
+        claude.reach === GuestReach.REACHED ? (claude.path ?? 'MISSING') : 'NOT_REACHED';
       prerequisites.push({
         id: 'GUEST_ENGINE',
         what: 'Claude Code installed where the sandbox runs',
@@ -387,7 +408,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     const userns = await this.readGuestFile(
       '/proc/sys/kernel/apparmor_restrict_unprivileged_userns',
     );
-    const usernsValue = userns?.trim() ?? 'unset';
+    const usernsValue = userns === UNREACHED ? 'NOT_REACHED' : (userns?.trim() ?? 'unset');
     observations['kernel:apparmor_userns'] = usernsValue;
     prerequisites.push({
       id: 'USER_NAMESPACES',
@@ -435,7 +456,8 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     }
 
     const interop = await this.readGuestFile('/proc/sys/fs/binfmt_misc/WSLInterop');
-    observations['guest:interop'] = interop === undefined ? 'absent' : 'present';
+    observations['guest:interop'] =
+      interop === UNREACHED ? 'NOT_REACHED' : interop === undefined ? 'absent' : 'present';
 
     this.engineLocation = engineBin;
     this.launcherVersion = launcher.version;
@@ -459,11 +481,11 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     };
   }
 
-  private async which(bin: string): Promise<string | undefined> {
+  private async which(bin: string): Promise<GuestBinaryLookup> {
     return resolveGuestBinary(this.opts.transport, bin);
   }
 
-  private async readGuestFile(path: string): Promise<string | undefined> {
+  private async readGuestFile(path: string): Promise<string | undefined | typeof UNREACHED> {
     const r = await this.opts.transport.run({
       executable: '/bin/cat',
       args: [path],
@@ -472,7 +494,19 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       timeoutMs: 15_000,
       maxOutputBytes: 20_000,
     });
-    if (r.spawnFailed || r.exitCode !== 0) return undefined;
+    /*
+     * UNREACHED IS NOT ABSENT — the same distinction as `resolveGuestBinary`.
+     *
+     * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A, sibling path.
+     *
+     * These reads feed the machine FINGERPRINT rather than the enforcement decision, so a
+     * transport blip here grants no authority — but it would record `absent` where the truth
+     * is `present`, and a fingerprint that moves because the transport hiccuped reads as "the
+     * machine changed". Unreached is now its own value, so the digest can treat it as
+     * unmeasured rather than as a fact about the guest.
+     */
+    if (r.spawnFailed || r.reach !== GuestReach.REACHED) return UNREACHED;
+    if (r.exitCode !== 0) return undefined;
     return r.stdout.replace(/\0/g, '');
   }
 
@@ -543,7 +577,15 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
           '` could not be resolved in the execution environment, so nothing was run.',
       );
     }
-    if (resolved.startsWith('/mnt/')) {
+    const resolvedPath = resolved.path;
+    if (resolvedPath === undefined) {
+      return refuse(
+        'The executable `' +
+          request.executable +
+          '` could not be resolved in the execution environment, so nothing was run.',
+      );
+    }
+    if (resolvedPath.startsWith('/mnt/')) {
       return refuse(
         '`' +
           request.executable +
@@ -579,7 +621,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     };
 
     const command: TransportCommand = {
-      executable: resolved,
+      executable: resolvedPath,
       args: [...request.args],
       cwd: guestCwd,
       // Translated for the execution environment, exactly as the paths are. A recipe's
@@ -630,6 +672,53 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     const identity = await this.fingerprintOf(probe);
     const fingerprint = identity.digest;
     const missing = probe.prerequisites.filter((p) => !p.satisfied);
+
+    /*
+     * A PREREQUISITE NOBODY COULD ASK ABOUT IS NOT A MISSING PREREQUISITE.
+     *
+     * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A.
+     *
+     * This branch hard-coded `attempt: MEASURED` with a comment saying Serva had looked and
+     * the prerequisite was genuinely absent. That is true only when the guest ANSWERED. On an
+     * intermittent transport failure the probe reported MISSING, this branch recorded a
+     * measured NONE, and `recordQualification` overwrote a preserved HARD with it — the exact
+     * regression the qualification record documents itself as preventing.
+     */
+    const unreached = missing.filter(
+      (p) => p.reach !== undefined && p.reach !== GuestReach.REACHED,
+    );
+
+    if (unreached.length > 0) {
+      const reason =
+        'TRANSPORT_FAILURE: the guest could not be reached to check ' +
+        unreached.map((p) => p.id).join(', ');
+      return {
+        probe,
+        capabilities: unenforced(),
+        tests: QUALIFICATION_CASES.map((c) => ({
+          id: c.id,
+          title: c.title,
+          expectation: c.expectation,
+          outcome: 'NOT_RUN' as const,
+          detail: 'Not attempted: ' + reason,
+          blocking: c.blocking,
+          at,
+          reachedGuest: GuestReach.NOT_REACHED,
+          notRunReason: NotRunReason.TRANSPORT_FAILURE,
+        })),
+        enforcementClass: EnforcementClass.NONE,
+        /* NOT_MEASURED, so nothing here may overwrite a stored qualification. */
+        attempt: QualificationAttempt.NOT_MEASURED,
+        availability: ExecutionAvailability.UNREACHABLE,
+        blockedBy: reason,
+        qualifiedAt: at,
+        fingerprint,
+        fingerprintComplete: identity.complete,
+        fingerprintUnmeasured: identity.unmeasured,
+        engineVersion: this.opts.engineVersion,
+        boundary: this.boundaryOf(probe),
+      };
+    }
 
     if (missing.length > 0) {
       const reason =

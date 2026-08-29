@@ -165,10 +165,27 @@ export interface ChangePlan {
  * here, and the check has to happen before anything moves — an installer that discovers this
  * afterwards has already broken the thing it was meant to protect.
  */
+/**
+ * "Nobody looked", as a value that cannot be confused with "nothing to lose".
+ *
+ * SPEC: HIGH finding INSTALL-UPDATE-ROLLBACK/IUR-1.
+ *
+ * `projectRoots` defaulted to `[]`, and the CLI passed `[]` whenever it was invoked outside a
+ * project. The schema loop then ran zero times, `tooNew` stayed empty, and a rollback that
+ * could strand every project on the machine returned READY.
+ *
+ * An empty collection is a perfectly good answer to "which projects are affected?" — it means
+ * none. It is a terrible answer to "did you check?", and the two were spelled identically.
+ * They no longer are: this is not an array, so it cannot be passed where a list is meant or
+ * produced by a `.filter()` that found nothing.
+ */
+export const UNKNOWN_PROJECTS = Symbol('affected projects were not established');
+export type ProjectInventory = readonly string[] | typeof UNKNOWN_PROJECTS;
+
 export function planSwitch(
   install: Installation,
   toVersion: string,
-  projectRoots: readonly string[] = [],
+  projectRoots: ProjectInventory = UNKNOWN_PROJECTS,
 ): ChangePlan {
   const target = install.installed.find((v) => v.version === toVersion);
   const from = install.current?.version;
@@ -203,6 +220,28 @@ export function planSwitch(
    * would be unreadable by it — and a build that "handles" that by opening it anyway would
    * drop every field it did not recognise.
    */
+  /*
+   * UNKNOWN FAILS CLOSED.
+   *
+   * There is no governed inventory of the projects on this machine, so when the caller has not
+   * established which are affected, this cannot say the rollback is safe. Refusing is the only
+   * honest answer, and it is the one the header already promised.
+   */
+  if (projectRoots === UNKNOWN_PROJECTS) {
+    return {
+      outcome: ChangeOutcome.REFUSED,
+      ...(from === undefined ? {} : { from }),
+      to: toVersion,
+      reason:
+        'Serva could not establish which projects this rollback would affect, so it cannot ' +
+        'show that no data would be lost. Run this from inside each project you want to move ' +
+        'back, or check them first — a rollback past a store schema silently drops ' +
+        'every field the older build does not understand.',
+      steps: [],
+      reversible: true,
+    };
+  }
+
   const tooNew: string[] = [];
   for (const projectRoot of projectRoots) {
     /*
@@ -303,7 +342,7 @@ export function recordInstalled(
 export function performSwitch(
   install: Installation,
   toVersion: string,
-  projectRoots: readonly string[] = [],
+  projectRoots: ProjectInventory = UNKNOWN_PROJECTS,
 ): ChangePlan {
   const plan = planSwitch(install, toVersion, projectRoots);
   if (plan.outcome !== ChangeOutcome.READY) return plan;

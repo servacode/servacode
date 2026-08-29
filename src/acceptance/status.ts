@@ -13,6 +13,7 @@ import type {
   RunResolver,
 } from './proof.js';
 import type { Requirement } from './requirements.js';
+import type { LiveEngineeringInput } from './liveProof.js';
 import { systemClock } from '../core/clock.js';
 import { TimeOrderedIdSource } from '../core/ids.js';
 import { Store } from '../store/store.js';
@@ -21,6 +22,7 @@ import {
   assessProducerContainment,
   assessVerificationBlock,
   resolveLiveEngineering,
+  resolveLiveServa,
 } from './liveProof.js';
 import { EnforcementClass } from '../vocab/index.js';
 import { ExecutionAvailability, QualificationAttempt } from '../substrate/types.js';
@@ -337,28 +339,88 @@ function defaultSecurityAssessor(
  * would lack — the ChangeSet bound to that producer run, the measured evidence, an independent
  * authorised reviewer, the engineering gate, and an accepted commit that exists in git.
  */
-function defaultLiveChainAssessor(): (
+/**
+ * How each LIVE requirement is re-derived. Exhaustive by construction.
+ *
+ * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-LIVE-SERVA.
+ *
+ * The previous assessor took `requirementId` and ignored it, calling `resolveLiveEngineering`
+ * for everything — so LIVE-SERVA was gated by LIVE-ENGINEERING's semantics and its
+ * distinguishing content, that an OWNER REQUEST caused the work, went unverified.
+ *
+ * A table rather than a switch with a default, because a permissive default is precisely how
+ * that happened. A LIVE requirement added later and not named here is refused, loudly, by a
+ * test that reads the requirement catalogue.
+ */
+export const LIVE_ASSESSORS: Readonly<
+  Record<string, (store: Store, ref: RunRef) => readonly string[]>
+> = Object.freeze({
+  'LIVE-ENGINEERING': (store, ref) =>
+    resolveLiveEngineering(liveInput(store, ref)).refusals.map((r) => r.detail),
+  /*
+   * The whole-product join. `resolveLiveServa` resolves the engineering half by calling the
+   * function above and adds the front of the chain — the owner's request, recorded verbatim,
+   * and the governed runs it caused — which is the only thing that distinguishes this
+   * requirement from the one above it.
+   */
+  'LIVE-SERVA': (store, ref) =>
+    resolveLiveServa({ ...liveInput(store, ref), companyStore: store }).refusals.map(
+      (r) => r.detail,
+    ),
+});
+
+/**
+ * The inputs both live resolvers share.
+ *
+ * WHAT THIS CANNOT DO, stated rather than assumed: the machine fingerprint is supplied to both
+ * sides of its own comparison, because nothing can re-measure after the fact the machine a
+ * past run happened on. Everything else — the ChangeSet bound to that producer run, the
+ * measured evidence, an independent authorised reviewer, the gate, an accepted commit that
+ * exists in git, and for LIVE-SERVA the owner request in front of all of it — is re-derived.
+ */
+function liveInput(store: Store, ref: RunRef): LiveEngineeringInput {
+  const fingerprint = 'resolver-does-not-remeasure';
+  return {
+    store,
+    repoRoot: store.paths.root,
+    machineFingerprint: fingerprint,
+    recordedFingerprint: fingerprint,
+    qualification: {
+      attempt: QualificationAttempt.MEASURED,
+      availability: ExecutionAvailability.AVAILABLE,
+      enforcementClass: EnforcementClass.HARD,
+    },
+    hints: { producerRunId: ref.runId },
+  } as LiveEngineeringInput;
+}
+
+/**
+ * RE-DERIVE THE GOVERNED CHAIN A LIVE PROOF RESTS ON — THE RIGHT ONE FOR THE REQUIREMENT.
+ *
+ * `prove-live.mjs` refuses to mint unless the whole chain resolves, and `resolveProof`
+ * re-derived none of it until the writer-vs-resolver sweep. This closes the second half of
+ * that fix: which chain gets re-derived is decided by the requirement, not by whichever
+ * resolver happened to be wired first.
+ */
+export function defaultLiveChainAssessor(): (
   ref: RunRef,
   requirementId: string,
 ) => SecurityAssessment | undefined {
-  return (ref) => {
+  return (ref, requirementId) => {
+    const assessor = LIVE_ASSESSORS[requirementId];
+    if (assessor === undefined) {
+      return {
+        refusals: [
+          requirementId +
+            ' has no canonical live resolver, so its chain cannot be re-derived; a LIVE ' +
+            "requirement must not inherit another requirement's semantics by default",
+        ],
+      };
+    }
     const store = openStoreAt(ref.storePath);
     if (store === undefined) return undefined;
     try {
-      const fingerprint = 'resolver-does-not-remeasure';
-      const outcome = resolveLiveEngineering({
-        store,
-        repoRoot: store.paths.root,
-        machineFingerprint: fingerprint,
-        recordedFingerprint: fingerprint,
-        qualification: {
-          attempt: QualificationAttempt.MEASURED,
-          availability: ExecutionAvailability.AVAILABLE,
-          enforcementClass: EnforcementClass.HARD,
-        } as never,
-        hints: { producerRunId: ref.runId },
-      });
-      return { refusals: outcome.refusals.map((r) => r.detail) };
+      return { refusals: assessor(store, ref) };
     } catch {
       return undefined;
     }

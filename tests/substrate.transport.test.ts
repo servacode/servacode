@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { EnforcementClass } from '../src/vocab/index.js';
 import {
   GuestReach,
+  resolveGuestBinary,
   TRANSPORT_ATTEMPTS,
   type TransportAttempt,
   type TransportResult,
@@ -482,5 +484,100 @@ describe('K. the evidence says whether each probe reached the guest', () => {
       attempts: [],
     };
     expect(raw.reach).not.toBe(GuestReach.REACHED);
+  });
+});
+
+/* ====== HIGH 1: absence of a binary is only measurable if the guest answered ====== */
+
+describe('resolving a guest binary reports whether the guest was reached', () => {
+  /*
+   * SPEC: Phase 6 qualification transport invariant; HIGH finding
+   * QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A.
+   *
+   * `resolveGuestBinary` ended with `if (r.spawnFailed || r.exitCode !== 0) return undefined`,
+   * so "the guest says this binary is not installed" and "the guest never answered" came back
+   * as the same value. `qualify()` read that single `undefined` as MISSING, took its
+   * early-return branch, and hard-coded `attempt: MEASURED` — bypassing
+   * `deriveEnforcementClass`, where the TRANSPORT_FAILURE guard lives. A preserved HARD
+   * qualification was then overwritten by a NONE no measurement supported.
+   *
+   * This is the invariant that opened Phase 6 reappearing on a path the original fix did not
+   * cover. The vocabulary for saying it correctly already existed; this function threw it away.
+   */
+  function transportReturning(r: Record<string, unknown>) {
+    return {
+      run: () =>
+        Promise.resolve({
+          stdout: '',
+          stderr: '',
+          exitCode: 0,
+          spawnFailed: false,
+          reach: GuestReach.REACHED,
+          ...r,
+        }),
+    } as never;
+  }
+
+  it('REACHED and present: the path is returned', async () => {
+    const r = await resolveGuestBinary(
+      transportReturning({ stdout: '/usr/bin/node\n', exitCode: 0 }),
+      'node',
+    );
+    expect(r.reach).toBe(GuestReach.REACHED);
+    expect(r.path).toBe('/usr/bin/node');
+  });
+
+  it('REACHED and genuinely absent: a real negative measurement', async () => {
+    /* The guest answered and said no. That IS a measurement, and stays one. */
+    const r = await resolveGuestBinary(transportReturning({ stdout: '', exitCode: 1 }), 'node');
+    expect(r.reach).toBe(GuestReach.REACHED);
+    expect(r.path).toBeUndefined();
+  });
+
+  it('NOT_REACHED: absence is not established', async () => {
+    const r = await resolveGuestBinary(
+      transportReturning({ exitCode: 4294967295, reach: GuestReach.NOT_REACHED }),
+      'node',
+    );
+    expect(r.reach).toBe(GuestReach.NOT_REACHED);
+    expect(r.path).toBeUndefined();
+  });
+
+  it('a spawn failure is NOT_REACHED, whatever the transport claims', async () => {
+    const r = await resolveGuestBinary(
+      transportReturning({ spawnFailed: true, reach: GuestReach.REACHED }),
+      'node',
+    );
+    expect(r.reach).toBe(GuestReach.NOT_REACHED);
+    expect(r.path).toBeUndefined();
+  });
+
+  it('UNKNOWN reach never establishes presence', async () => {
+    const r = await resolveGuestBinary(
+      transportReturning({ stdout: '/usr/bin/node\n', exitCode: 0, reach: GuestReach.UNKNOWN }),
+      'node',
+    );
+    expect(r.reach).toBe(GuestReach.UNKNOWN);
+    expect(r.path).toBeUndefined();
+  });
+
+  it('an unsafe binary name is refused without reaching anything', async () => {
+    const r = await resolveGuestBinary(transportReturning({}), 'node; rm -rf /');
+    expect(r.reach).toBe(GuestReach.UNKNOWN);
+    expect(r.path).toBeUndefined();
+  });
+
+  it('the result type forces a caller to read reach before absence', () => {
+    /*
+     * The structural half. The signature no longer returns a bare `string | undefined`, so a
+     * caller cannot receive "nothing" and read it as "missing" — which is exactly what every
+     * caller did.
+     */
+    const source = readFileSync('src/substrate/transport.ts', 'utf8');
+    const sig = /export async function resolveGuestBinary\([\s\S]*?\): Promise<([^>]+)>/.exec(
+      source,
+    );
+    expect(sig, 'signature not found').not.toBeNull();
+    expect(String(sig?.[1])).not.toContain('undefined');
   });
 });

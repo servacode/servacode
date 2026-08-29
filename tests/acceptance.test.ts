@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AcceptanceState, acceptanceStatus, defaultRunResolver } from '../src/acceptance/status.js';
+import {
+  AcceptanceState,
+  LIVE_ASSESSORS,
+  acceptanceStatus,
+  defaultLiveChainAssessor,
+  defaultRunResolver,
+} from '../src/acceptance/status.js';
 import {
   PROOF_DIR,
   ProofStatus,
@@ -1329,5 +1335,96 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
     offlineProof(root, green);
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+  });
+});
+
+/* ====== HIGH 3: requirement identity selects the resolver, exhaustively ====== */
+
+describe('a LIVE requirement is resolved by ITS OWN canonical resolver', () => {
+  /*
+   * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-LIVE-SERVA.
+   *
+   * I introduced this in the commit that fixed the same class elsewhere. The assessor takes
+   * `requirementId`, and I wrote `return (ref) =>` — ignoring it — and called only
+   * `resolveLiveEngineering`. `resolveLiveServa` was defined and wired nowhere.
+   *
+   * So LIVE-SERVA was gated identically to LIVE-ENGINEERING and its distinguishing content —
+   * that an OWNER REQUEST entered the governed chain and caused the accepted work — went
+   * unverified while gating READY FOR OWNER USE.
+   *
+   * The mapping is exhaustive rather than defaulted, because a permissive default is exactly
+   * how this happened: a new LIVE requirement must fail loudly rather than inherit the
+   * semantics of whichever resolver was written first.
+   */
+  it('LIVE_ASSESSORS covers every LIVE requirement in the catalogue', () => {
+    /* The structural half: adding a LIVE requirement without a mapping fails here. */
+    const liveRequirements = REQUIREMENTS.filter((r) => r.expects === VerificationType.LIVE).map(
+      (r) => r.id,
+    );
+    expect(liveRequirements.length).toBeGreaterThan(0);
+    for (const id of liveRequirements) {
+      expect(Object.keys(LIVE_ASSESSORS), id + ' has no canonical resolver').toContain(id);
+    }
+  });
+
+  it('each mapping names a distinct resolver, so one cannot stand in for the other', () => {
+    expect(LIVE_ASSESSORS['LIVE-ENGINEERING']).not.toBe(LIVE_ASSESSORS['LIVE-SERVA']);
+  });
+
+  it('an unknown LIVE requirement refuses rather than defaulting', () => {
+    const assess = defaultLiveChainAssessor();
+    const verdict = assess({ runId: 'SC-RUN-000002', storePath: '.nope' }, 'LIVE-SOMETHING-NEW');
+    expect(verdict).toBeDefined();
+    expect(verdict?.refusals.join(' ')).toMatch(/no canonical live resolver/i);
+  });
+
+  it('LIVE-SERVA is refused when the store holds no owner request', () => {
+    /*
+     * The distinguishing condition, end to end. An engineering chain with no owner request in
+     * front of it satisfies LIVE-ENGINEERING and must not satisfy LIVE-SERVA.
+     */
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-SERVA',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: { runId: 'SC-RUN-000002', agentId: 'SC-AGENT-150', storePath: '.serva-live' },
+    });
+    const resolved = resolveProof('LIVE-SERVA', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      /* The engineering half is clean; the cross-phase half is what is missing. */
+      assessLiveChain: (_ref, requirementId) =>
+        requirementId === 'LIVE-SERVA'
+          ? { refusals: ['no owner request caused this work'] }
+          : { refusals: [] },
+    });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('owner request');
+  });
+
+  it('the requirement id actually reaches the assessor', () => {
+    /* The bug in one line: the parameter was declared and never read. */
+    const seen: string[] = [];
+    const root = pkg();
+    writeProof(root, {
+      requirementId: 'LIVE-SERVA',
+      verificationType: VerificationType.LIVE,
+      producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: { runId: 'SC-RUN-000002', agentId: 'SC-AGENT-150', storePath: '.serva-live' },
+    });
+    resolveProof('LIVE-SERVA', {
+      root,
+      repository: REPOSITORY,
+      resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      assessLiveChain: (_ref, requirementId) => {
+        seen.push(requirementId);
+        return { refusals: [] };
+      },
+    });
+    expect(seen).toEqual(['LIVE-SERVA']);
   });
 });

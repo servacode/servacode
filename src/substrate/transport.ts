@@ -600,11 +600,34 @@ export const GUEST_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sb
  * against the same pattern the recipe schema enforces. Anything else is refused rather
  * than quoted.
  */
+/**
+ * Where a binary lives in the guest, AND whether the guest answered at all.
+ *
+ * SPEC: Phase 6 qualification transport invariant; HIGH finding
+ * QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A.
+ *
+ * This used to be `string | undefined`, and that single `undefined` meant two incompatible
+ * things: the guest replied that the binary is not installed, or the guest never replied. A
+ * caller could not tell them apart, and `qualify()` read both as MISSING — recording
+ * `attempt: MEASURED` for a machine it had not measured, and overwriting a preserved HARD
+ * qualification with a NONE nothing supported.
+ *
+ * `reach` is not optional here, so absence can no longer be read without first reading whether
+ * anything was reached.
+ */
+export interface GuestBinaryLookup {
+  readonly reach: GuestReach;
+  /** Set only when the guest was REACHED and reported a path. */
+  readonly path?: string;
+}
+
 export async function resolveGuestBinary(
   transport: ExecTransport,
   bin: string,
-): Promise<string | undefined> {
-  if (!SAFE_BINARY.test(bin)) return undefined;
+): Promise<GuestBinaryLookup> {
+  /* Never asked, so nothing about the guest is known either way. */
+  if (!SAFE_BINARY.test(bin)) return { reach: GuestReach.UNKNOWN };
+
   const r = await transport.run({
     executable: '/bin/sh',
     args: ['-c', 'command -v ' + bin],
@@ -613,9 +636,21 @@ export async function resolveGuestBinary(
     timeoutMs: 20_000,
     maxOutputBytes: 20_000,
   });
-  if (r.spawnFailed || r.exitCode !== 0) return undefined;
+
+  /*
+   * A process that never started measured nothing, whatever the transport says about reach.
+   * Its own field is not taken at face value in the one case where it cannot be right.
+   */
+  if (r.spawnFailed) return { reach: GuestReach.NOT_REACHED };
+  if (r.reach !== GuestReach.REACHED) return { reach: r.reach };
+
+  /* The guest answered. A non-zero exit here IS the guest saying "not installed". */
+  if (r.exitCode !== 0) return { reach: GuestReach.REACHED };
+
   const first = r.stdout.replace(/\0/g, '').trim().split('\n')[0]?.trim();
-  return first !== undefined && first.length > 0 ? first : undefined;
+  return first !== undefined && first.length > 0
+    ? { reach: GuestReach.REACHED, path: first }
+    : { reach: GuestReach.REACHED };
 }
 
 export { runProcess as runHostProcess };

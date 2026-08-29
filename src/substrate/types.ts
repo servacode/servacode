@@ -66,6 +66,15 @@ export interface Prerequisite {
   readonly why: string;
   readonly remedy: string;
   readonly satisfied: boolean;
+  /**
+   * Whether the guest answered when this was checked.
+   *
+   * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A. `satisfied: false` used to mean
+   * both "the guest says no" and "the guest never answered", and a qualification cannot be
+   * MEASURED on the second. Optional only because prerequisites established without touching
+   * a guest have no reach to report.
+   */
+  readonly reach?: GuestReach;
 }
 
 export interface SubstrateProbe {

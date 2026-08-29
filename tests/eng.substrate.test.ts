@@ -274,9 +274,17 @@ class StubTransport implements ExecTransport {
     if (exe === 'sh' && args[0] === '-c' && args[1]?.startsWith('command -v ')) {
       const bin = args[1].slice('command -v '.length);
       const hit = this.answers['which ' + bin];
-      return hit === undefined
-        ? { ...blank(1), spawnFailed: true }
-        : blank(hit.code, hit.stdout ?? '');
+      /*
+       * A BINARY THE GUEST DOES NOT HAVE, NOT A GUEST THAT DID NOT ANSWER.
+       *
+       * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A.
+       *
+       * This returned `spawnFailed: true` — a transport failure — to mean "not installed".
+       * The fixture was making the exact conflation the finding is about, which is part of
+       * why the product could make it too and every test still passed. `command -v` exiting
+       * non-zero from a guest that answered is what "not installed" actually looks like.
+       */
+      return hit === undefined ? blank(1) : blank(hit.code, hit.stdout ?? '');
     }
     const sep = exe === 'bwrap' || exe === 'srt' ? args.indexOf('--') : -1;
     if (sep >= 0) {
@@ -318,7 +326,18 @@ class StubTransport implements ExecTransport {
 
     const hit = this.answers[[exe, ...args].join(' ')];
     if (hit === undefined) {
-      return { ...blank(1), spawnFailed: true, reach: GuestReach.NOT_REACHED };
+      /*
+       * THE GUEST ANSWERED, AND THE ANSWER WAS NO.
+       *
+       * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A.
+       *
+       * This used to return `spawnFailed: true, reach: NOT_REACHED` — a TRANSPORT failure —
+       * to simulate a MISSING binary. The fixture was making exactly the conflation the
+       * finding is about, which is why it kept passing while the product could not tell the
+       * two apart. A command that is genuinely absent exits non-zero from a guest that
+       * answered; transport failures are modelled explicitly above.
+       */
+      return blank(1);
     }
     return blank(hit.code, hit.stdout ?? '');
   }
