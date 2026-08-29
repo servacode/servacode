@@ -59,8 +59,30 @@ export interface LearningDeps {
 }
 
 /** Every field a future reader could see. All of it is checked, not just the summary. */
-function refuseLeakage(kind: string, fields: readonly string[]): void {
-  const reasons = [...new Set(fields.flatMap((f) => leakageRefusal(f)))];
+/**
+ * The names of the projects this store holds.
+ *
+ * SPEC: 11, 27, 28 — "client names ... never cross".
+ *
+ * `leakageRefusal` cannot recognise a client name in the abstract, and does not try. Serva
+ * knows the names of its own projects, so the guard is given those. Best-effort by design: a
+ * store it cannot read yields no names and the structural rules still apply, which is weaker
+ * than nothing would be honest about.
+ */
+function knownProjectNames(store: Store): readonly string[] {
+  try {
+    return store
+      .listCanonIds('project')
+      .map((id) => store.getCanon<{ name?: string }>('project', id)?.body?.name)
+      .filter((n): n is string => typeof n === 'string' && n.trim().length >= 3);
+  } catch {
+    return [];
+  }
+}
+
+function refuseLeakage(deps: LearningDeps, kind: string, fields: readonly string[]): void {
+  const names = knownProjectNames(deps.store);
+  const reasons = [...new Set(fields.flatMap((f) => leakageRefusal(f, names)))];
   if (reasons.length === 0) return;
   fail({
     code: 'E_ISOLATION',
@@ -126,7 +148,7 @@ export function contributeLesson(
   },
 ): LessonLearned {
   assertCurator(deps, o.curatedBy, o.curatorRunId);
-  refuseLeakage('lesson', [o.statement, o.context, o.applicableWhen]);
+  refuseLeakage(deps, 'lesson', [o.statement, o.context, o.applicableWhen]);
   const at = deps.clock.now();
   const lesson = LessonLearnedSchema.parse({
     id: deps.ids.next('SC-LL'),
@@ -176,7 +198,7 @@ export function contributePattern(
   },
 ): ReusablePattern {
   assertCurator(deps, o.curatedBy, o.curatorRunId);
-  refuseLeakage('pattern', [
+  refuseLeakage(deps, 'pattern', [
     o.name,
     o.problem,
     o.solution,
@@ -228,7 +250,11 @@ export function contributeFailedApproach(
   },
 ): FailedApproach {
   assertCurator(deps, o.curatedBy, o.curatorRunId);
-  refuseLeakage('failed approach', [o.approach, o.whyItFailed, ...(o.symptomsToWatchFor ?? [])]);
+  refuseLeakage(deps, 'failed approach', [
+    o.approach,
+    o.whyItFailed,
+    ...(o.symptomsToWatchFor ?? []),
+  ]);
   const at = deps.clock.now();
   const failed = FailedApproachSchema.parse({
     id: deps.ids.next('SC-FA'),
@@ -270,7 +296,7 @@ export function offerCandidate(
     readonly summary: string;
   },
 ): CandidateItem {
-  refuseLeakage('candidate', [o.summary]);
+  refuseLeakage(deps, 'candidate', [o.summary]);
   const at = deps.clock.now();
   const item = CandidateItemSchema.parse({
     id: deps.ids.next('SC-CAND'),

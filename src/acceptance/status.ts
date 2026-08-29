@@ -6,6 +6,7 @@ import { ACCEPTANCE_LINES, REQUIREMENTS, requirementsFor } from './requirements.
 import { ProofStatus, resolveProof } from './proof.js';
 import type {
   ContainmentVerdict,
+  SecurityAssessment,
   RepositoryIdentity,
   ResolvedProof,
   RunRef,
@@ -16,8 +17,15 @@ import { systemClock } from '../core/clock.js';
 import { TimeOrderedIdSource } from '../core/ids.js';
 import { Store } from '../store/store.js';
 import { listChangeSets } from '../engineering/changeset.js';
-import { assessProducerContainment, assessVerificationBlock } from './liveProof.js';
+import {
+  assessProducerContainment,
+  assessVerificationBlock,
+  resolveLiveEngineering,
+} from './liveProof.js';
+import { EnforcementClass } from '../vocab/index.js';
+import { ExecutionAvailability, QualificationAttempt } from '../substrate/types.js';
 import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
+import { aggregateSecurityReview } from './securityAggregate.js';
 import { ContractRegistry } from '../agents/registry.js';
 
 /**
@@ -272,6 +280,91 @@ function producersFromProject(root: string, store?: Store): ReadonlySet<string> 
   }
 }
 
+/**
+ * RE-DERIVE THE SECURITY REVIEW, FROM THE SAME MACHINERY THAT MINTED IT.
+ *
+ * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-F1.
+ *
+ * `resolveProof` re-derived who reviewed and then trusted `proof.status` for what they found,
+ * so a hand-authored PASS over a CRITICAL resolved green. The only thing preventing that was a
+ * minting script declining to write the file — a trustworthy writer guarding an untrustworthy
+ * resolver, which is the inversion this model exists to prevent.
+ *
+ * This calls `aggregateSecurityReview` rather than re-implementing its rules, so there is one
+ * definition of a clean security review and the resolver and the writer cannot drift apart.
+ * Its refusals are returned verbatim: coverage, commit binding, run re-resolution, reviewer
+ * authority and unresolved blockers are all already its job.
+ */
+function defaultSecurityAssessor(
+  repository: RepositoryIdentity | undefined,
+): (ref: RunRef) => SecurityAssessment | undefined {
+  return (ref) => {
+    if (repository === undefined) return undefined;
+    const store = openStoreAt(ref.storePath);
+    if (store === undefined) return undefined;
+    try {
+      const outcome = aggregateSecurityReview({
+        store,
+        repository,
+        registry: ContractRegistry.shared(),
+        reviewedAt: new Date().toISOString(),
+        storePath: ref.storePath,
+      });
+      return { refusals: outcome.refusals };
+    } catch {
+      /* An unreadable review establishes nothing, which is a refusal rather than a pass. */
+      return undefined;
+    }
+  };
+}
+
+/**
+ * RE-DERIVE THE GOVERNED CHAIN A LIVE PROOF RESTS ON.
+ *
+ * SPEC: Phase 6 bounded writer-vs-resolver sweep.
+ *
+ * `prove-live.mjs` refuses to mint unless `resolveLiveEngineering` finds the whole chain, and
+ * `resolveProof` re-derived none of it — it confirmed the named run resolved and took the rest
+ * from the document. A hand-authored LIVE proof naming any real COMPLETED run resolved green
+ * with no ChangeSet, no review and no accepted commit anywhere in the store.
+ *
+ * This calls the same resolver rather than restating its rules, so the writer and the resolver
+ * cannot drift apart.
+ *
+ * WHAT THIS STILL CANNOT DO, stated rather than papered over: the machine fingerprint is taken
+ * from the proof for both sides of its own comparison, because nothing can re-measure after
+ * the fact the machine a past run happened on. What IS re-derived is everything a forged proof
+ * would lack — the ChangeSet bound to that producer run, the measured evidence, an independent
+ * authorised reviewer, the engineering gate, and an accepted commit that exists in git.
+ */
+function defaultLiveChainAssessor(): (
+  ref: RunRef,
+  requirementId: string,
+) => SecurityAssessment | undefined {
+  return (ref) => {
+    const store = openStoreAt(ref.storePath);
+    if (store === undefined) return undefined;
+    try {
+      const fingerprint = 'resolver-does-not-remeasure';
+      const outcome = resolveLiveEngineering({
+        store,
+        repoRoot: store.paths.root,
+        machineFingerprint: fingerprint,
+        recordedFingerprint: fingerprint,
+        qualification: {
+          attempt: QualificationAttempt.MEASURED,
+          availability: ExecutionAvailability.AVAILABLE,
+          enforcementClass: EnforcementClass.HARD,
+        } as never,
+        hints: { producerRunId: ref.runId },
+      });
+      return { refusals: outcome.refusals.map((r) => r.detail) };
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 function stateOf(resolution: ResolvedProof, expects: string): AcceptanceState {
   if (resolution.status === ProofStatus.FAIL) return AcceptanceState.FAIL;
   if (resolution.status !== ProofStatus.PASS) return AcceptanceState.NOT_VERIFIED;
@@ -292,6 +385,8 @@ export function acceptanceStatus(o: StatusOptions | string = {}): AcceptanceStat
   const repository = opts.repository ?? repositoryIdentity(root);
   const resolveRun = opts.resolveRun ?? defaultRunResolver(root);
   const assessContainment = opts.assessContainment ?? defaultContainmentAssessor();
+  const assessSecurityReview = defaultSecurityAssessor(repository);
+  const assessLiveChain = defaultLiveChainAssessor();
 
   /*
    * INDEPENDENCE IS ENFORCED HERE, NOT WHEN A CALLER REMEMBERS TO ASK FOR IT.
@@ -320,6 +415,8 @@ export function acceptanceStatus(o: StatusOptions | string = {}): AcceptanceStat
       assessContainment,
       implementationProducers,
       reviewerAuthority: (agentId) => reviewerAuthorityOf(agentId, ContractRegistry.shared()),
+      assessSecurityReview,
+      assessLiveChain,
     });
     const wrongKind = base.status === ProofStatus.PASS && base.verificationType !== r.expects;
     const resolution: ResolvedProof = wrongKind

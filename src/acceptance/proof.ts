@@ -234,6 +234,39 @@ export interface ResolveOptions {
    * about the registry rather than about a document.
    */
   readonly reviewerAuthority?: (agentId: string) => string | undefined;
+  /**
+   * Re-derive the security review this proof claims to rest on.
+   *
+   * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-F1.
+   *
+   * The SECURITY-INDEPENDENT requirement demands the reviewer "left no unresolved Critical or
+   * High finding". Nothing here enforced that clause: the JUDGED branch re-derived WHO
+   * reviewed and then took WHAT THEY FOUND from `proof.status`, a field anyone can edit.
+   *
+   * Injected for the same reason `resolveRun` is — this module opens no stores — and returning
+   * the aggregate's own refusals rather than a boolean, so there is ONE definition of what a
+   * clean security review is and this is not a second copy of it.
+   */
+  readonly assessSecurityReview?: (ref: RunRef) => SecurityAssessment | undefined;
+  /**
+   * Re-derive the whole governed chain a LIVE proof rests on.
+   *
+   * SPEC: Phase 6 bounded writer-vs-resolver sweep.
+   *
+   * `prove-live.mjs` refuses to mint unless `resolveLiveEngineering` finds the entire chain —
+   * ChangeSet, measured evidence, an independent authorised reviewer, the engineering gate and
+   * an accepted commit that exists in git. This branch re-derived none of it: it checked that
+   * the named run resolved and how it ended, and took the rest from the document.
+   *
+   * Same shape as `assessSecurityReview`, for the same reason: the writer was trustworthy and
+   * the resolver was not.
+   */
+  readonly assessLiveChain?: (ref: RunRef, requirementId: string) => SecurityAssessment | undefined;
+}
+
+/** What the canonical security aggregate concluded. Its refusals, unmodified. */
+export interface SecurityAssessment {
+  readonly refusals: readonly string[];
 }
 
 /** Authorities that are a verifier's rather than a producer's. */
@@ -296,6 +329,65 @@ export function readProof(root: string, requirementId: string): AcceptanceProof 
   } catch {
     return undefined;
   }
+}
+
+/**
+ * What the recorded verification run actually reports.
+ *
+ * Read from the file the proof cites — already digest-checked above, so this is reading a file
+ * whose bytes are pinned, and asking it the question nobody was asking.
+ */
+function verificationRecordRefusals(
+  root: string,
+  proof: AcceptanceProof,
+  repository: RepositoryIdentity | undefined,
+): readonly string[] {
+  const cited = proof.evidence.find(
+    (e) => e.kind === EvidenceKind.FILE && e.id.endsWith('offline-verification.json'),
+  );
+  if (cited === undefined) {
+    return ['the proof cites no verification run record, so nothing says the suite passed'];
+  }
+
+  let record: {
+    implementationCommit?: string;
+    treeDigest?: string;
+    commands?: { command?: string; exitCode?: number; testsFailed?: number }[];
+  };
+  try {
+    record = JSON.parse(readFileSync(join(root, ...cited.id.split('/')), 'utf8')) as never;
+  } catch {
+    return ['the verification run record could not be read'];
+  }
+
+  const refusals: string[] = [];
+  if (repository !== undefined) {
+    if (record.implementationCommit !== repository.commit) {
+      refusals.push(
+        'the verification ran against commit ' +
+          String(record.implementationCommit).slice(0, 12) +
+          ' and this package is ' +
+          repository.commit.slice(0, 12),
+      );
+    }
+    if (record.treeDigest !== repository.tree) {
+      refusals.push('the verification ran against a different tree than this package is');
+    }
+  }
+
+  const commands = Array.isArray(record.commands) ? record.commands : [];
+  if (commands.length === 0) {
+    refusals.push('the verification record names no command, so it verified nothing');
+  }
+  for (const c of commands) {
+    if (c.exitCode !== 0) {
+      refusals.push(String(c.command) + ' exited ' + String(c.exitCode));
+    }
+    if (typeof c.testsFailed === 'number' && c.testsFailed > 0) {
+      refusals.push(String(c.command) + ' reported ' + String(c.testsFailed) + ' failing test(s)');
+    }
+  }
+  return refusals;
 }
 
 /**
@@ -472,6 +564,34 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
          * about. With no resolver supplied the answer is unknown, and unknown is a refusal —
          * a JUDGED proof whose reviewer's authority nobody can establish is not judged.
          */
+        /*
+         * AND THE REVIEW MUST HAVE FOUND NOTHING BLOCKING.
+         *
+         * SPEC: finding SC-SSA-REV-F1 (HIGH).
+         *
+         * Confined to SECURITY-INDEPENDENT, because it is the only requirement whose text
+         * makes a claim about FINDINGS rather than only about who judged. The answer comes
+         * from `aggregateSecurityReview` — the same machinery the minting script runs — so a
+         * document that disagrees with the evidence loses to the evidence.
+         */
+        if (requirementId === 'SECURITY-INDEPENDENT') {
+          if (o.assessSecurityReview === undefined) {
+            refusals.push(
+              'no canonical security assessment was available, so the review this proof cites ' +
+                'could not be re-derived and its findings are unknown',
+            );
+          } else {
+            const assessment = o.assessSecurityReview(reviewer);
+            if (assessment === undefined) {
+              refusals.push(
+                'the security review this proof cites does not resolve in ' + reviewer.storePath,
+              );
+            } else {
+              refusals.push(...assessment.refusals);
+            }
+          }
+        }
+
         if (o.reviewerAuthority === undefined) {
           refusals.push(
             'no authority resolver was supplied, so ' +
@@ -508,6 +628,32 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
       refusals.push('no run resolver was supplied, so the live run could not be confirmed');
     } else {
       const run = o.resolveRun(live);
+
+      /*
+       * THE CHAIN, NOT ONLY THE RUN.
+       *
+       * A run id resolving says somebody ran something. What makes a LIVE proof mean anything
+       * is everything around it, and none of that was checked here.
+       */
+      if (run !== undefined) {
+        if (o.assessLiveChain === undefined) {
+          refusals.push(
+            'no canonical chain assessment was available, so the governed chain behind ' +
+              live.runId +
+              ' could not be re-derived',
+          );
+        } else {
+          const chain = o.assessLiveChain(live, requirementId);
+          if (chain === undefined) {
+            refusals.push(
+              'the governed chain behind ' + live.runId + ' does not resolve in ' + live.storePath,
+            );
+          } else {
+            refusals.push(...chain.refusals);
+          }
+        }
+      }
+
       if (run === undefined) {
         refusals.push('live run ' + live.runId + ' does not resolve in ' + live.storePath);
       } else if (run.outcome !== 'COMPLETED') {
@@ -582,6 +728,23 @@ export function resolveProof(requirementId: string, o: ResolveOptions): Resolved
         }
       }
     }
+  }
+
+  /*
+   * OFFLINE-VERIFICATION MUST SAY THE SUITE PASSED, NOT MERELY THAT IT RAN.
+   *
+   * SPEC: Phase 6 bounded writer-vs-resolver sweep.
+   *
+   * The proof cites the run record by content digest, so the file cannot be altered after
+   * minting — and nothing ever read what it SAYS. A record of a run that exited 1 with five
+   * hundred failures digests exactly as cleanly as a green one, and the claim that the suite
+   * passed lived only in the proof's `notes`, which is prose.
+   *
+   * The digest proves the file is unmodified. It was never evidence that the file says the
+   * tests passed.
+   */
+  if (requirementId === 'OFFLINE-VERIFICATION') {
+    refusals.push(...verificationRecordRefusals(o.root, proof, o.repository));
   }
 
   /* ------------------------------------------------------------------- the verdict */

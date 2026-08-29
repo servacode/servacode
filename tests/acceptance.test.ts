@@ -10,6 +10,9 @@ import {
   resolveProof,
 } from '../src/acceptance/proof.js';
 import { REQUIREMENTS } from '../src/acceptance/requirements.js';
+import { ScopeCoverage, recordScopeReview } from '../src/acceptance/scopeReview.js';
+import { REQUIRED_SCOPE, ReviewVerdict } from '../src/acceptance/securityReview.js';
+import { reviewUnitsFor } from '../src/acceptance/securityReviewRun.js';
 import { reviewerAuthorityOf } from '../src/acceptance/reviewAuthority.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
@@ -308,6 +311,8 @@ describe('a JUDGED proof needs a governed reviewer run that actually exists', ()
       /* SC-AGENT-200 is a VERIFIER by contract; the resolver is asked rather than assumed. */
       reviewerAuthority: (agentId: string) =>
         reviewerAuthorityOf(agentId, ContractRegistry.shared()),
+      /* A clean canonical aggregate; the store-backed path is covered end to end below. */
+      assessSecurityReview: () => ({ refusals: [] }),
     });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });
@@ -358,6 +363,8 @@ describe('a LIVE proof needs a machine and a run', () => {
     });
     const resolved = resolve(root, 'LIVE-ENGINEERING', {
       resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      /* The chain has its own tests below; this one is about the machine and the run. */
+      assessLiveChain: () => ({ refusals: [] }),
     });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });
@@ -467,8 +474,28 @@ describe('the requirement catalogue is complete and the current tree does not sa
       repository: REPOSITORY,
       resolveRun: () => ({ agentId: 'SC-AGENT-200', outcome: 'COMPLETED' }),
     });
-    expect(status.notProven).toHaveLength(1);
-    expect(status.notProven[0]).toContain('EXT-HOST');
+    /*
+     * TWO, and the second one is the point.
+     *
+     * EXT-HOST is unproven because this package deliberately omits its proof. The other four
+     * are unproven because a synthetic package cannot FABRICATE them: each proof file is
+     * present and perfectly formed, and what stands behind it — a security review, a governed
+     * live chain, a verification run that actually passed — is re-derived from evidence that
+     * does not exist here.
+     *
+     * Writing the file used to be enough for all four. That is what the writer-vs-resolver
+     * sweep closed, and this count is the cheapest place to notice if it ever reopens.
+     */
+    expect(status.notProven).toHaveLength(5);
+    for (const id of [
+      'EXT-HOST',
+      'SECURITY-INDEPENDENT',
+      'LIVE-ENGINEERING',
+      'LIVE-SERVA',
+      'OFFLINE-VERIFICATION',
+    ]) {
+      expect(status.notProven.join(' '), id).toContain(id);
+    }
     expect(status.readyForOwnerUse).toBe(false);
     expect(status.rendered).not.toContain('READY FOR OWNER USE');
   });
@@ -608,6 +635,7 @@ describe('LIVE-ENGINEERING accepts a contained EVIDENCE_VIOLATION, and nothing e
       root,
       repository: REPOSITORY,
       resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      assessLiveChain: () => ({ refusals: [] }),
     });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });
@@ -619,6 +647,7 @@ describe('LIVE-ENGINEERING accepts a contained EVIDENCE_VIOLATION, and nothing e
       root,
       repository: REPOSITORY,
       resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'EVIDENCE_VIOLATION' }),
+      assessLiveChain: () => ({ refusals: [] }),
       assessContainment: contained,
     });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
@@ -631,6 +660,7 @@ describe('LIVE-ENGINEERING accepts a contained EVIDENCE_VIOLATION, and nothing e
       root,
       repository: REPOSITORY,
       resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'EVIDENCE_VIOLATION' }),
+      assessLiveChain: () => ({ refusals: [] }),
       assessContainment: uncontained,
     });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
@@ -733,6 +763,8 @@ describe('LIVE-ENGINEERING accepts a contained PARTIAL, and nothing else does', 
       root,
       repository: REPOSITORY,
       resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome }),
+      /* The chain is re-derived separately; these tests are about the terminal outcome. */
+      assessLiveChain: () => ({ refusals: [] }),
       ...(assessContainment === undefined ? {} : { assessContainment }),
     });
   }
@@ -921,5 +953,381 @@ describe('the default readiness path enforces reviewer independence by itself', 
     const req = status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT');
     expect(req?.state).not.toBe(AcceptanceState.PASS);
     expect(req?.resolution.refusals.join(' ')).toContain('authority');
+  });
+});
+
+/* ====== SC-SSA-REV-F1: the findings clause is enforced by evidence, not by a field ====== */
+
+describe('SECURITY-INDEPENDENT is decided by the review, not by the proof that cites it', () => {
+  /*
+   * SPEC: Phase 6 final acceptance sequence §7; HIGH finding
+   * SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-F1.
+   *
+   * The requirement text demands the reviewer "left no unresolved Critical or High finding".
+   * `resolveProof` re-derived the reviewer run properly — COMPLETED, matching agent, not a
+   * producer, holding verifier authority — and then took the verdict from the document:
+   *
+   *     status = proof.status !== PASS ? proof.status : (refusals.length === 0 ? PASS : ...)
+   *
+   * The findings-vs-verdict agreement and the no-unresolved-blocker check live in
+   * `resolveSecurityReview` and `aggregateSecurityReview`, and `status.ts` called neither. So a
+   * proof saying PASS, with a real completed SC-AGENT-220 run behind it, resolved green even
+   * when that run had reported a CRITICAL.
+   *
+   * The only thing preventing that was a minting script choosing not to write the file — a
+   * trustworthy writer guarding an untrustworthy resolver, which is the inversion this whole
+   * model exists to prevent. It is also the defect that would have let me force 51/51 by hand
+   * at any point in this phase.
+   *
+   * These tests hand-author the proof deliberately, because that is the attack.
+   */
+  const REVIEWER = 'SC-AGENT-220';
+  const IMPLEMENTER = 'SC-AGENT-150';
+
+  function project(): ServaRuntime {
+    const root = tempRoot();
+    roots.push(root);
+    return ServaRuntime.init('RahalGo', 'Stop losing phone orders', { root });
+  }
+
+  function seedRun(rt: ServaRuntime, runId: string, agentId: string, roleInTask?: string): void {
+    const tx = rt.store.begin();
+    tx.putCanon('agentRunRecord', runId, {
+      runId,
+      agentId,
+      outcome: 'COMPLETED',
+      ...(roleInTask === undefined ? {} : { roleInTask }),
+    });
+    tx.commit();
+  }
+
+  /** Every required unit, reviewed cleanly, unless `over` says otherwise for that unit. */
+  function seedReview(
+    rt: ServaRuntime,
+    over: (unit: string) => Record<string, unknown> = () => ({}),
+  ): void {
+    let n = 0;
+    for (const area of REQUIRED_SCOPE) {
+      for (const { unit } of reviewUnitsFor(area)) {
+        n += 1;
+        const runId = 'SC-RUN-SR' + String(n).padStart(3, '0');
+        seedRun(rt, runId, REVIEWER);
+        recordScopeReview(rt.store, {
+          scopeId: '',
+          scopeName: unit,
+          implementationCommit: COMMIT,
+          treeDigest: TREE,
+          reviewerRunId: runId,
+          reviewerAgentId: REVIEWER,
+          coverage: ScopeCoverage.COMPLETE,
+          filesReviewed: ['src/x.ts'],
+          filesOmitted: [],
+          findings: [],
+          verdict: ReviewVerdict.ACCEPTED,
+          terminalOutcome: 'COMPLETED',
+          reviewedAt: '2026-08-29T00:00:00.000Z',
+          ...over(unit),
+        });
+      }
+    }
+  }
+
+  /** A syntactically perfect SECURITY-INDEPENDENT proof claiming PASS. */
+  function forgeProof(rt: ServaRuntime, reviewerAgentId = REVIEWER): void {
+    writeProof(rt.root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      status: ProofStatus.PASS,
+      producer: { kind: 'TOOL', id: 'scripts/security-review.mjs' },
+      reviewerRunRef: {
+        runId: 'SC-RUN-SR001',
+        agentId: reviewerAgentId,
+        storePath: rt.root,
+      },
+    });
+  }
+
+  function stateOfSecurity(rt: ServaRuntime) {
+    const status = acceptanceStatus({ root: rt.root, repository: REPOSITORY });
+    return status.requirements.find((r) => r.id === 'SECURITY-INDEPENDENT');
+  }
+
+  const blocking = (severity: string) => (unit: string) =>
+    unit === 'Owner authority'
+      ? {
+          verdict: ReviewVerdict.BLOCKED,
+          findings: [
+            {
+              id: 'X-1',
+              severity,
+              area: unit,
+              statement: 'a real problem the reviewer found',
+              evidence: ['src/app/conversation.ts:1'],
+              resolved: false,
+            },
+          ],
+        }
+      : {};
+
+  it('1. a forged PASS over an unresolved HIGH is NOT_VERIFIED', () => {
+    const rt = project();
+    seedReview(rt, blocking('HIGH'));
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toMatch(/HIGH/);
+  });
+
+  it('2. a forged PASS over an unresolved CRITICAL is NOT_VERIFIED', () => {
+    const rt = project();
+    seedReview(rt, blocking('CRITICAL'));
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toMatch(/CRITICAL/);
+  });
+
+  it('3. a forged PASS over incomplete required scope is NOT_VERIFIED', () => {
+    const rt = project();
+    seedReview(rt, (unit) =>
+      unit === 'migration'
+        ? { coverage: ScopeCoverage.PARTIAL, filesOmitted: ['src/portability/migration.ts'] }
+        : {},
+    );
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toMatch(/migration|coverage/i);
+  });
+
+  it('4. a forged PASS over a NOT_VERIFIED scoped review is NOT_VERIFIED', () => {
+    const rt = project();
+    seedReview(rt, (unit) =>
+      unit === 'Research trust' ? { verdict: ReviewVerdict.NOT_VERIFIED } : {},
+    );
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toMatch(/Research trust|NOT_VERIFIED/);
+  });
+
+  it('5. a forged PASS over an EVIDENCE_VIOLATION scoped review is NOT_VERIFIED', () => {
+    const rt = project();
+    seedReview(rt, (unit) =>
+      unit === 'AI Runtime'
+        ? {
+            terminalOutcome: 'EVIDENCE_VIOLATION',
+            coverage: ScopeCoverage.NOT_REVIEWED,
+            verdict: ReviewVerdict.NOT_VERIFIED,
+          }
+        : {},
+    );
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toMatch(/AI Runtime|EVIDENCE_VIOLATION/);
+  });
+
+  it('6. a forged PASS naming a non-independent reviewer is NOT_VERIFIED', () => {
+    const rt = project();
+    seedReview(rt);
+    /* Governed history says this agent produced here, so it cannot certify its own work. */
+    seedRun(rt, 'SC-RUN-PROD', REVIEWER, 'PRODUCER');
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state).not.toBe(AcceptanceState.PASS);
+    expect(req?.resolution.refusals.join(' ')).toMatch(/produced/i);
+  });
+
+  it('7. a genuine clean aggregate resolves', () => {
+    const rt = project();
+    seedReview(rt);
+    seedRun(rt, 'SC-RUN-PROD', IMPLEMENTER, 'PRODUCER');
+    forgeProof(rt);
+    const req = stateOfSecurity(rt);
+    expect(req?.state, req?.resolution.refusals.join('; ')).toBe(AcceptanceState.PASS);
+  });
+
+  it('8. editing the proof document cannot change the answer', () => {
+    /*
+     * The same store, judged twice: once with the document claiming PASS and once with it
+     * claiming NOT_VERIFIED. Neither claim moves the result, because neither is consulted.
+     */
+    const rt = project();
+    seedReview(rt, blocking('HIGH'));
+    seedRun(rt, 'SC-RUN-PROD', IMPLEMENTER, 'PRODUCER');
+
+    forgeProof(rt);
+    expect(stateOfSecurity(rt)?.state).not.toBe(AcceptanceState.PASS);
+
+    writeProof(rt.root, {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      status: ProofStatus.NOT_VERIFIED,
+      producer: { kind: 'TOOL', id: 'scripts/security-review.mjs' },
+      reviewerRunRef: { runId: 'SC-RUN-SR001', agentId: REVIEWER, storePath: rt.root },
+    });
+    expect(stateOfSecurity(rt)?.state).not.toBe(AcceptanceState.PASS);
+
+    /* And the clean store passes regardless of what the document had said. */
+    const clean = project();
+    seedReview(clean);
+    seedRun(clean, 'SC-RUN-PROD', IMPLEMENTER, 'PRODUCER');
+    forgeProof(clean);
+    expect(stateOfSecurity(clean)?.state).toBe(AcceptanceState.PASS);
+  });
+});
+
+/* ====== the bounded sweep: what stops a hand-authored PASS for the other types? ====== */
+
+describe('a LIVE proof must resolve its whole chain, not just name a run', () => {
+  /*
+   * SPEC: Phase 6 bounded writer-vs-resolver sweep.
+   *
+   * Same class as SC-SSA-REV-F1, found by asking the same question of the other
+   * acceptance-critical types. `prove-live.mjs` runs `resolveLiveEngineering` and refuses to
+   * mint unless the entire chain holds — ChangeSet, measured evidence, independent authorised
+   * reviewer, engineering gate, accepted commit that exists in git.
+   *
+   * `resolveProof`'s LIVE branch re-derived none of it. It checked that the named run resolved
+   * and how it ended, and took everything else from the document. A hand-authored LIVE proof
+   * naming any real COMPLETED run therefore resolved green, with no ChangeSet, no review and
+   * no accepted commit anywhere.
+   *
+   * The writer was trustworthy and the resolver was not, which is the inversion this model
+   * exists to prevent.
+   */
+  const LIVE_RUN = { runId: 'SC-RUN-000002', agentId: 'SC-AGENT-150', storePath: '.serva-live' };
+
+  function liveProofFor(root: string, requirementId: string): void {
+    writeProof(root, {
+      requirementId,
+      verificationType: VerificationType.LIVE,
+      status: ProofStatus.PASS,
+      producer: { kind: 'TOOL', id: 'scripts/prove-live.mjs' },
+      machineFingerprint: 'f'.repeat(64),
+      liveRunRef: LIVE_RUN,
+    });
+  }
+
+  for (const requirementId of ['LIVE-ENGINEERING', 'LIVE-SERVA']) {
+    it(requirementId + ': a real run with no chain behind it is refused', () => {
+      const root = pkg();
+      liveProofFor(root, requirementId);
+      const resolved = resolveProof(requirementId, {
+        root,
+        repository: REPOSITORY,
+        resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+        assessLiveChain: () => ({ refusals: ['no ChangeSet is bound to this producer run'] }),
+      });
+      expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+      expect(resolved.refusals.join(' ')).toContain('ChangeSet');
+    });
+
+    it(requirementId + ': with no chain assessment available it is refused', () => {
+      const root = pkg();
+      liveProofFor(root, requirementId);
+      const resolved = resolveProof(requirementId, {
+        root,
+        repository: REPOSITORY,
+        resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+      });
+      expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+      expect(resolved.refusals.join(' ')).toMatch(/chain|could not be re-derived/i);
+    });
+
+    it(requirementId + ': a genuine chain resolves', () => {
+      const root = pkg();
+      liveProofFor(root, requirementId);
+      const resolved = resolveProof(requirementId, {
+        root,
+        repository: REPOSITORY,
+        resolveRun: () => ({ agentId: 'SC-AGENT-150', outcome: 'COMPLETED' }),
+        assessLiveChain: () => ({ refusals: [] }),
+      });
+      expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
+    });
+  }
+});
+
+describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran', () => {
+  /*
+   * SPEC: Phase 6 bounded writer-vs-resolver sweep.
+   *
+   * The proof cites `offline-verification.json` by content digest, so the file cannot be
+   * altered after minting — and nothing ever read what it SAYS. A record of a run that exited
+   * 1 with five hundred failures digests just as cleanly as a green one, and the claim that
+   * the suite passed lived only in the proof's `notes`, which is prose.
+   *
+   * The digest proves the file is unmodified. It was never evidence that the file says the
+   * tests passed.
+   */
+  function offlineProof(root: string, record: unknown): void {
+    const rel = 'evidence/acceptance-run/offline-verification.json';
+    const full = join(root, ...rel.split('/'));
+    mkdirSync(join(full, '..'), { recursive: true });
+    writeFileSync(full, JSON.stringify(record, null, 2), 'utf8');
+    writeProof(root, {
+      requirementId: 'OFFLINE-VERIFICATION',
+      verificationType: VerificationType.DETERMINISTIC,
+      status: ProofStatus.PASS,
+      producer: { kind: 'TOOL', id: 'scripts/verify-evidence.mjs' },
+      evidence: [
+        { kind: 'FILE', id: rel, digest: fileDigest(full) as string, note: 'the run record' },
+      ],
+    });
+  }
+
+  const green = {
+    implementationCommit: COMMIT,
+    treeDigest: TREE,
+    commands: [
+      { command: 'npm run verify', exitCode: 0, testsPassed: 1600, testsFailed: 0 },
+      { command: 'npm run test:vscode', exitCode: 0, testsPassed: 35, testsFailed: 0 },
+    ],
+  };
+
+  it('refuses a record whose command exited non-zero', () => {
+    const root = pkg();
+    offlineProof(root, {
+      ...green,
+      commands: [{ command: 'npm run verify', exitCode: 1, testsPassed: 1200, testsFailed: 0 }],
+    });
+    const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toMatch(/exited 1|exit/i);
+  });
+
+  it('refuses a record with failing tests', () => {
+    const root = pkg();
+    offlineProof(root, {
+      ...green,
+      commands: [{ command: 'npm run verify', exitCode: 0, testsPassed: 1200, testsFailed: 17 }],
+    });
+    const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toMatch(/17|fail/i);
+  });
+
+  it('refuses a record bound to a different commit', () => {
+    const root = pkg();
+    offlineProof(root, { ...green, implementationCommit: 'c'.repeat(40) });
+    const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+  });
+
+  it('refuses a record with no commands at all', () => {
+    /* A verification that ran nothing verified nothing, however clean it looks. */
+    const root = pkg();
+    offlineProof(root, { ...green, commands: [] });
+    const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+  });
+
+  it('a genuinely green record resolves', () => {
+    const root = pkg();
+    offlineProof(root, green);
+    const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
+    expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });
 });

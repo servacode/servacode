@@ -893,4 +893,101 @@ describe('cross-project learning carries nothing identifying', () => {
       });
     }
   });
+
+  /* ============ what the wall actually promises, and what it does not ============ */
+
+  describe('secrets: the VALUE is the secret, not the word next to it', () => {
+    /*
+     * SPEC: 11, 27, 28 — "Raw requirements, code, evidence, client names and secrets never
+     * cross".
+     *
+     * The guard matched credential LABELS — `api_key`, `secret`, `token`, `password`,
+     * `bearer` — and nothing else, so a bare key with no label word beside it walked through.
+     * `sk-ant-...`, `AKIA...` and a private-key block were all missed while "the api_key was
+     * rotated", which contains no secret at all, was refused.
+     *
+     * `credentialScan` in backup.ts already recognises these shapes and is already the
+     * canonical answer to "is there a credential in this text". Reusing it is the whole fix:
+     * two lists of credential patterns would drift, and the drift would be silent.
+     */
+    const SECRET_VALUES = [
+      'the value AKIA1234567890ABCDEF was rotated after the incident',
+      'we found sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789 in the config',
+      'it contained -----BEGIN RSA PRIVATE KEY----- in plain text',
+      'the header read Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789',
+    ];
+
+    for (const text of SECRET_VALUES) {
+      it('refuses: ' + text.slice(0, 52), () => {
+        expect(leakageRefusal(text).join(' '), text).toMatch(/key|private key|token|credential/i);
+      });
+    }
+
+    it('still refuses a labelled credential', () => {
+      expect(leakageRefusal('the api_key was rotated').join(' ')).toContain('credential');
+    });
+
+    it('does not refuse prose that merely discusses secrecy', () => {
+      /* The word is not the thing. A lesson ABOUT credential handling must be able to cross. */
+      expect(
+        leakageRefusal('rotate credentials on a schedule rather than after an incident'),
+      ).toEqual([]);
+    });
+  });
+
+  describe('client names: checked against what Serva actually knows', () => {
+    /*
+     * SPEC: 11, 27, 28 — "client names ... never cross".
+     *
+     * Promised in the module's own header and detected by nothing. Recognising "a client name"
+     * in the abstract is not possible and not what the promise needs: Serva knows the names of
+     * the projects it holds, so the check is against THOSE rather than against a guess.
+     *
+     * That is deliberately the smallest mechanism that keeps the promise. It cannot catch a
+     * client Serva has never heard of, and it does not pretend to.
+     */
+    it('refuses a name Serva holds', () => {
+      expect(
+        leakageRefusal('RahalGo staff would not use the two-tap screen', ['RahalGo']).join(' '),
+      ).toContain('client');
+    });
+
+    it('matches regardless of case, as a whole word', () => {
+      expect(leakageRefusal('the rahalgo till was busy', ['RahalGo']).join(' ')).toContain(
+        'client',
+      );
+    });
+
+    it('a name that is also a common word still refuses, and that is the documented trade', () => {
+      /*
+       * A project called "Orders" makes every sentence about orders refuse, which is a real
+       * cost — that client's lessons need rewording before they can cross.
+       *
+       * It is still the right answer here. This module states its own posture in its header:
+       * "a false positive costs a rewrite while a false negative costs a client's
+       * confidentiality." Softening the check to keep an ambiguous name usable would trade the
+       * expensive failure for the cheap one, in the guard that exists to prevent exactly that.
+       */
+      expect(
+        leakageRefusal('orders arrive in bursts during the lunch rush', ['Orders']).join(' '),
+      ).toContain('client');
+    });
+
+    it('does not fire on a substring of a longer word', () => {
+      expect(leakageRefusal('the acmelike pattern applies here', ['Acme'])).toEqual([]);
+    });
+
+    it('with no names supplied, behaves exactly as before', () => {
+      expect(leakageRefusal('RahalGo staff would not use the two-tap screen')).toEqual([]);
+    });
+
+    it('a genuine generalisation still passes with names supplied', () => {
+      expect(
+        leakageRefusal(
+          'Counter staff will not use a screen that needs more than one tap during a rush.',
+          ['RahalGo', 'Acme'],
+        ),
+      ).toEqual([]);
+    });
+  });
 });

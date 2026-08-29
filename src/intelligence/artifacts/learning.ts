@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { credentialScan } from '../../portability/backup.js';
 import { RefSchema, artifact, enumOf } from './base.js';
 import { Confidence } from '../provenance.js';
 
@@ -187,8 +188,50 @@ const LEAKAGE_PATTERNS: readonly { readonly what: string; readonly re: RegExp }[
  * Returns every reason it must not cross, so a Curator sees the whole list rather than
  * fixing them one run at a time.
  */
-export function leakageRefusal(text: string): readonly string[] {
+export function leakageRefusal(
+  text: string,
+  /**
+   * The project or client names Serva actually holds.
+   *
+   * SPEC: 11, 27, 28 — "client names ... never cross".
+   *
+   * The header promised this and nothing checked it. Recognising "a client name" in the
+   * abstract is not possible and is not what the promise needs: Serva knows the names of the
+   * projects in its own store, so the check is against THOSE rather than against a guess.
+   *
+   * Deliberately the smallest mechanism that keeps the promise. It cannot catch a client Serva
+   * has never heard of, and the comment says so rather than implying otherwise.
+   */
+  knownNames: readonly string[] = [],
+): readonly string[] {
   const found: string[] = [];
+
+  /*
+   * THE VALUE IS THE SECRET, NOT THE WORD NEXT TO IT.
+   *
+   * The credential rule below matches LABELS — `api_key`, `secret`, `token` — so a bare key
+   * with no label beside it walked straight through: `sk-ant-...`, `AKIA...` and a private-key
+   * block were all missed, while "the api_key was rotated", which contains no secret at all,
+   * was refused.
+   *
+   * `credentialScan` already recognises those shapes and is already the canonical answer to
+   * "is there a credential in this text". Reusing it rather than restating its patterns is the
+   * point: two lists would drift, and the drift would be silent.
+   */
+  for (const what of credentialScan(text)) {
+    found.push('cross-project knowledge must not contain ' + what);
+  }
+
+  for (const name of knownNames) {
+    const trimmed = name.trim();
+    if (trimmed.length < 3) continue;
+    /* Whole word, any case: a project called "Orders" must not refuse every mention of orders. */
+    const re = new RegExp('\\b' + trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+    if (re.test(text)) {
+      found.push('cross-project knowledge must not contain a client or project name');
+      break;
+    }
+  }
   for (const p of LEAKAGE_PATTERNS) {
     if (p.re.test(text)) found.push('cross-project knowledge must not contain ' + p.what);
   }
