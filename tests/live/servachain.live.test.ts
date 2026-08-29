@@ -508,10 +508,24 @@ describe('Serva 1.0 — one owner request, across the governed join', () => {
       turn = rt.store.getWorking<Record<string, unknown>>('conversationTurn', id)?.body as never;
       console.log('resumed the existing request ' + id);
     } else {
+      /*
+       * THE REQUEST MUST STATE SOMETHING TRUE OF THE SEEDED CODE.
+       *
+       * This used to add "and total([]) throws", which is false: the seeded loop is skipped at
+       * length 0, so the empty case already returns 0 and its check already passes. Serva's
+       * planner noticed exactly that — CLAIM_STATE_MISMATCH, "project state shows it returns
+       * 0" — recorded it unresolved, and the plan validator halted for the owner.
+       *
+       * That is the product behaving correctly, and it is why the fixture text is corrected
+       * rather than the check relaxed: the halt-on-unresolved path has its own offline test
+       * (`halts when the plan records unresolved items`), so nothing is lost here. What this
+       * fixture exists to exercise is the CROSS-PHASE JOIN reaching an accepted commit, and it
+       * cannot do that while asking Serva to fix something that is not broken.
+       */
       turn = await sendOwnerRequest(
         rt,
-        'The declared test suite fails: total() is short by one element and total([]) throws. ' +
-          'Please make the suite pass.',
+        'The declared test suite fails: total() is short by one element. Please make the ' +
+          'suite pass.',
         { orchestrator: layer.orchestrator },
       );
     }
