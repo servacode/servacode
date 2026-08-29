@@ -72,7 +72,18 @@ afterAll(() => {
 });
 
 const PRODUCER = 'SC-AGENT-150';
-const REVIEWER = 'SC-AGENT-180';
+/*
+ * The Code Reviewer — a VERIFIER holding VERIFY, and the reviewer `handoff.ts` defaults to.
+ *
+ * This named SC-AGENT-180, the Database Engineer: archetype PRODUCER, authority EXECUTE. The
+ * factory admitted it because the only separation was `producer !== reviewer`, so the live
+ * chain had a Producer reviewing another Producer's work and the engineering gate accepted the
+ * PASS as an independent review — its run record says `roleInTask: PRODUCER`.
+ *
+ * The factory now refuses that outright. This fixture is corrected to match what it always
+ * meant to exercise, which is also what `engineering.live.test.ts` already used.
+ */
+const REVIEWER = 'SC-AGENT-200';
 
 let engineering: EngineeringEngine | undefined;
 let qualification: SubstrateQualification | undefined;

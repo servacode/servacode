@@ -52,6 +52,9 @@ import type { GateResult } from '../gates/types.js';
  *     the gate.
  */
 
+/** Contract authorities that permit judging somebody else's work. */
+const VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
+
 export const WORKITEM_CANON_TYPE = 'engineeringWorkItem';
 
 export const EngineeringWorkItemSchema = z
@@ -141,6 +144,32 @@ export class EngineeringFactory {
     if (!this.deps.registry.has(item.reviewerAgentId)) {
       return 'Unknown reviewer agent ' + item.reviewerAgentId + '.';
     }
+    /*
+     * A DIFFERENT AGENT IS HALF OF INDEPENDENCE. THE OTHER HALF IS BEING ABLE TO JUDGE.
+     *
+     * SPEC: 19 §5; finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SSA-REV-1.
+     *
+     * The schema refines `producerAgentId !== reviewerAgentId` and `reviewerAvailable` meant
+     * only "this id is in the registry", so two different Producers satisfied both. A live
+     * cross-phase run then dispatched SC-AGENT-180 — a Database Engineer, archetype PRODUCER,
+     * authority EXECUTE — as the reviewer of SC-AGENT-150's work, and the engineering gate
+     * accepted its PASS as an independent review. The run record says `roleInTask: PRODUCER`.
+     *
+     * The authority comes from the contract rather than from the work item, because the work
+     * item is where the reviewer was named in the first place.
+     */
+    const reviewerAuthority = this.deps.registry.get(item.reviewerAgentId).authorityLevel;
+    if (!VERIFIER_AUTHORITIES.has(reviewerAuthority.toUpperCase())) {
+      return (
+        'Reviewer ' +
+        item.reviewerAgentId +
+        ' holds ' +
+        reviewerAuthority +
+        ', which does not authorise review. An agent that produces cannot certify, so a work ' +
+        'item must name a reviewer whose contract grants a verifier authority.'
+      );
+    }
+
     const conflict = this.deps.registry.conflicts(item.producerAgentId, item.reviewerAgentId);
     void conflict; // distinct agents on a CoI pair is the separation working, not a fault
 

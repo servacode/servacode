@@ -764,3 +764,76 @@ describe('the engine adapter declares where it runs', () => {
     expect(listExecutions(store)).toEqual([]);
   });
 });
+
+/* ====== the engineering gate's reviewer must be able to review ====== */
+
+describe('a Producer cannot be admitted as the reviewer', () => {
+  /*
+   * SPEC: 19 §5; HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SSA-REV-1.
+   *
+   * The only separation the factory enforced was `producerAgentId !== reviewerAgentId`, and
+   * `reviewerAvailable` meant nothing more than "this id is in the registry". Two different
+   * Producers pass both.
+   *
+   * That is not theoretical. A live cross-phase run dispatched SC-AGENT-180 — a Database
+   * Engineer, archetype PRODUCER, authority EXECUTE — as the reviewer of SC-AGENT-150's work,
+   * and the engineering gate accepted the resulting PASS as an independent review. Its own run
+   * record says `roleInTask: PRODUCER`.
+   *
+   * Independence needs both halves: a different agent, AND one whose contract lets it judge.
+   */
+  const DB_ENGINEER = 'SC-AGENT-180';
+
+  async function factoryFor(h: Harness): Promise<EngineeringFactory> {
+    const { GitService } = await import('../src/engineering/git.js');
+    const { EngineeringWorkspaceManager } = await import('../src/engineering/workspace.js');
+    return new EngineeringFactory({
+      store: h.rt.store,
+      git: new GitService({ repoRoot: h.repo }),
+      workspaces: new EngineeringWorkspaceManager({
+        store: h.rt.store,
+        git: new GitService({ repoRoot: h.repo }),
+        clock: h.rt.clock,
+        projectRoot: h.repo,
+      }),
+      recipes: h.recipes,
+      registry: ContractRegistry.shared(),
+      qualification: h.engineering.qualification!,
+      executorDeps: {
+        store: h.rt.store,
+        clock: h.rt.clock,
+        ids: h.rt.ids,
+        substrate: h.substrate,
+        qualification: h.engineering.qualification!,
+        env: process.env,
+      },
+      gateDeps: { ids: h.rt.ids, clock: h.rt.clock, evaluator: 'G' },
+      projectRoot: h.repo,
+      enabledProducers: new Set([PRODUCER]),
+      producerBoundary: h.boundary,
+      allowSimulatedBoundary: true,
+    });
+  }
+
+  it('refuses a reviewer whose contract grants no verifier authority', async () => {
+    const h = await harness();
+    const factory = await factoryFor(h);
+    const refusal = factory.refusal({
+      ...workItem(h.base),
+      reviewerAgentId: DB_ENGINEER,
+    } as never);
+    expect(refusal).toBeDefined();
+    expect(refusal).toMatch(/EXECUTE|verif/i);
+  });
+
+  it('does not raise that refusal for a real verifier', async () => {
+    /*
+     * This fixture has no worktree open, so `refusal` still returns the worktree message —
+     * what matters is that a genuine VERIFIER never trips the authority check.
+     */
+    const h = await harness();
+    const factory = await factoryFor(h);
+    const refusal = factory.refusal(workItem(h.base) as never);
+    expect(refusal ?? '').not.toMatch(/verifier authority|does not authorise/i);
+  });
+});
