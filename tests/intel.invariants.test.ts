@@ -828,4 +828,69 @@ describe('cross-project learning carries nothing identifying', () => {
       ),
     ).toEqual([]);
   });
+
+  /* ================== OL-1: the shapes a real path actually takes ================== */
+
+  /*
+   * SPEC: §38; HIGH finding ORGANIZATIONAL-LEARNING-ARTIFACTS/OL-1.
+   *
+   * The guard had two path rules and a gap between them: an absolute rule enumerating
+   * `home|Users|var|opt|mnt|srv|clients`, and a relative rule requiring THREE or more
+   * segments. `src/checkout.ts` — two segments, and the commonest path shape in this very
+   * codebase — matched neither, so a lesson naming another client's file crossed into
+   * generalised knowledge undetected.
+   *
+   * The tests come in two halves on purpose. Catching more is only half the job: a guard that
+   * refuses ordinary prose is one somebody switches off, and then it catches nothing at all.
+   */
+  describe('OL-1: a two-segment path is still a path', () => {
+    const MUST_REFUSE = [
+      'the bug was in src/checkout.ts on the second pass',
+      'lib/utils.ts held the helper',
+      'foo/bar.js was the entry point',
+      'look at ./src/checkout.ts',
+      'it moved to ../src/checkout.ts',
+      'deep under src/app/services/billing/checkout.ts',
+      'the file src\\checkout.ts on the windows box',
+      'see /home/acme/orders/main.js for the pattern',
+      'mounted at /mnt/c/project/file.ts',
+      'data was under /data/clients/acme',
+      'the file d:/clients/acme/src/checkout.ts had it',
+      'config at /etc/serva/config.yaml',
+      'deployed from /app/src/index.js',
+      'see (/home/acme/orders/main.js) for the pattern',
+    ];
+
+    for (const text of MUST_REFUSE) {
+      it('refuses: ' + text, () => {
+        expect(leakageRefusal(text).join(' '), text).toContain('file path');
+      });
+    }
+  });
+
+  describe('OL-1: prose with a slash in it is not a path', () => {
+    /*
+     * The other half. "input/output", "24/7", "he/she", a date, a fraction and a URL-free
+     * sentence all contain a slash and none of them names a file — over-blocking these would
+     * make the library refuse the sentences it exists to carry.
+     */
+    const MUST_ALLOW = [
+      'balance the input/output ratio before tuning anything else',
+      'the counter runs 24/7 and staff rotate every four hours',
+      'ask whether he/she can complete the task without leaving the till',
+      'the rate changed on 01/04 and again on 01/10',
+      'roughly 2/3 of orders arrive in the first hour',
+      'a read/write split helps once the read volume dominates',
+      'When a marketplace charges a percentage commission, make the rate effective-dated.',
+      'Counter staff will not use a screen that needs more than one tap during a rush.',
+      'prefer an offline-first queue and reconcile when connectivity returns',
+      'the ratio of staff to tills matters more than the speed of either',
+    ];
+
+    for (const text of MUST_ALLOW) {
+      it('allows: ' + text, () => {
+        expect(leakageRefusal(text), text).toEqual([]);
+      });
+    }
+  });
 });

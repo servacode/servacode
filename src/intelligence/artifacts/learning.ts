@@ -131,12 +131,45 @@ const LEAKAGE_PATTERNS: readonly { readonly what: string; readonly re: RegExp }[
    * Harmless while a lesson stayed inside its own project; not harmless now that one can
    * cross into somebody else's.
    */
+  /*
+   * AN ABSOLUTE PATH, BY ITS ROOT.
+   *
+   * A Windows drive with either separator, or a POSIX path from the filesystem root. The
+   * original enumerated a handful of unix roots — `home|Users|var|opt|mnt|srv|clients` — so
+   * `/data/clients/acme` walked straight past the guard while `/home/...` did not, which is a
+   * distinction no attacker and no careless Curator would ever respect.
+   *
+   * Any `/` followed by a path-shaped segment and another separator is an absolute path. That
+   * is broader than a list of roots and still says something definite, which is what makes it
+   * checkable rather than a guess.
+   */
   {
     what: 'a file path',
-    re: /(^|\s)(?:[A-Za-z]:[\\/]|\/(?:home|Users|var|opt|mnt|srv|clients)\/)/,
+    re: /(?:^|[\s(<'"[])(?:[A-Za-z]:[\\/]|\/[\w.-]+\/[\w.-]+)/,
   },
-  /* A path-shaped token with a file extension, wherever it sits in a sentence. */
-  { what: 'a file path', re: /\b[\w.-]+\/[\w.-]+\/[\w.-]+\.[A-Za-z0-9]{1,6}\b/ },
+  /*
+   * A RELATIVE PATH, BY ITS EXTENSION.
+   *
+   * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-ARTIFACTS/OL-1.
+   *
+   * This required THREE or more segments, so `src/checkout.ts` — two segments, and the
+   * commonest path shape in this very codebase — matched nothing. Between this rule and the
+   * absolute one above there was a gap exactly the width of the most ordinary way anybody
+   * writes a file path, and a lesson naming another client's file crossed undetected.
+   *
+   * Two segments is now enough, and the FILE EXTENSION is what makes it a path rather than
+   * prose. That is the whole reason this does not become "anything containing a slash":
+   * `input/output`, `24/7`, `he/she`, `01/04` and `2/3` have no extension and stay readable,
+   * while `foo/bar.js` does and does not. The extension must also look like one — letters,
+   * two to four of them — so a date like `01/04.2026` is not mistaken for a file.
+   *
+   * Backslashes are accepted for the same reason the drive-letter rule takes both: a Windows
+   * relative path is a path, and the form a tool prints is not the author's choice.
+   */
+  {
+    what: 'a file path',
+    re: /(?:^|[\s(<'"[])\.{0,2}[\\/]?[\w.-]+(?:[\\/][\w.-]+)+\.[A-Za-z]{2,4}\b/,
+  },
   {
     what: 'a source-code fragment',
     /* Inline backticks around a call are as much code as a fenced block is. */
