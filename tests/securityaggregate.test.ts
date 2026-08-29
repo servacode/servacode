@@ -3,6 +3,11 @@ import { aggregateSecurityReview } from '../src/acceptance/securityAggregate.js'
 import { ScopeCoverage, recordScopeReview } from '../src/acceptance/scopeReview.js';
 import { REQUIRED_SCOPE, ReviewVerdict, Severity } from '../src/acceptance/securityReview.js';
 import { reviewUnitsFor } from '../src/acceptance/securityReviewRun.js';
+import {
+  AcceptanceProofSchema,
+  ProofStatus,
+  VerificationType,
+} from '../src/acceptance/proof.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -482,5 +487,68 @@ describe('the aggregate re-resolves the runs it aggregates', () => {
     expect(result.refusals, result.refusals.join('; ')).toEqual([]);
     /* The resolved finding is still carried, because history does not disappear. */
     expect(result.review?.findings.some((f) => f.id === 'R-CRIT')).toBe(true);
+  });
+});
+
+describe('the aggregate shapes into a proof the resolver will actually accept', () => {
+  /*
+   * A complete, clean review across all 22 units minted a proof that `resolveProof` refused as
+   * malformed: `scope` was an array where the schema wants prose, and every evidence entry
+   * said `ref` where it wants `id`. The review had done its job and the last twenty lines of
+   * the script threw the result away.
+   *
+   * Nothing caught it because nothing checked the shape of what it wrote — producing evidence
+   * and then declining to look at it, which is the failure this whole phase has been
+   * correcting. So the shape is pinned here, at the seam between the two modules.
+   */
+  it('every field the aggregate produces fits the proof schema', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    const result = aggregate(rt);
+    expect(result.review, result.refusals.join('; ')).toBeDefined();
+    const review = result.review as NonNullable<typeof result.review>;
+
+    const proof = {
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      status: ProofStatus.PASS,
+      implementationCommit: COMMIT,
+      treeDigest: TREE,
+      producedAt: '2026-08-25T01:00:00.000Z',
+      producer: { kind: 'TOOL', id: 'scripts/security-review.mjs' },
+      scope: 'Independent security review of ' + String(review.scope.length) + ' required areas',
+      reviewerRunRef: {
+        runId: review.reviewerRunId,
+        agentId: review.reviewerAgentId,
+        storePath: rt.root,
+      },
+      evidence: [
+        { kind: 'FILE', id: 'evidence/x.json', digest: 'a'.repeat(64) },
+        ...result.scopeRunIds.map((id) => ({ kind: 'AGENT_RUN', id })),
+        { kind: 'COMMIT', id: COMMIT },
+      ],
+      notes: ['clean'],
+    };
+
+    const parsed = AcceptanceProofSchema.safeParse(proof);
+    expect(
+      parsed.success,
+      parsed.success ? '' : JSON.stringify(parsed.error.issues.slice(0, 4)),
+    ).toBe(true);
+  });
+
+  it('an evidence entry keyed `ref` is refused, which is what went wrong', () => {
+    const parsed = AcceptanceProofSchema.safeParse({
+      requirementId: 'SECURITY-INDEPENDENT',
+      verificationType: VerificationType.JUDGED,
+      status: ProofStatus.PASS,
+      implementationCommit: COMMIT,
+      treeDigest: TREE,
+      producedAt: '2026-08-25T01:00:00.000Z',
+      producer: { kind: 'TOOL', id: 'x' },
+      scope: 'a scope',
+      evidence: [{ kind: 'COMMIT', ref: COMMIT }],
+    });
+    expect(parsed.success).toBe(false);
   });
 });

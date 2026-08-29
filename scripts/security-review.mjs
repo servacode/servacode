@@ -26,7 +26,8 @@ const REQUIREMENT = 'SECURITY-INDEPENDENT';
 const { ServaRuntime } = await import('../dist/app/runtime.js');
 const { buildAiLayer } = await import('../dist/app/ai.js');
 const { repositoryIdentity } = await import('../dist/acceptance/status.js');
-const { PROOF_DIR, ProofStatus, VerificationType } = await import('../dist/acceptance/proof.js');
+const { AcceptanceProofSchema, PROOF_DIR, ProofStatus, VerificationType } =
+  await import('../dist/acceptance/proof.js');
 const { REQUIRED_SCOPE } = await import('../dist/acceptance/securityReview.js');
 const { aggregateSecurityReview } = await import('../dist/acceptance/securityAggregate.js');
 const { ContractRegistry } = await import('../dist/agents/registry.js');
@@ -169,7 +170,12 @@ const proof = {
   treeDigest: repository.tree,
   producedAt: new Date().toISOString(),
   producer: { kind: 'TOOL', id: 'scripts/security-review.mjs' },
-  scope: aggregated.review.scope,
+  /* The proof's scope is prose a reader can disagree with, not the machine-readable list. */
+  scope:
+    'Independent security review of all ' +
+    String(aggregated.review.scope.length) +
+    ' required areas: ' +
+    aggregated.review.scope.join('; '),
   reviewerRunRef: {
     runId: aggregated.review.reviewerRunId,
     agentId: aggregated.review.reviewerAgentId,
@@ -178,30 +184,52 @@ const proof = {
   evidence: [
     {
       kind: 'FILE',
-      ref: REVIEW_OUT,
+      id: REVIEW_OUT,
       digest: digest(reviewPath),
       note: 'the aggregate, re-resolved from persisted scope records rather than summarised',
     },
     ...aggregated.scopeRunIds.map((runId) => ({
       kind: 'AGENT_RUN',
-      ref: runId,
+      id: runId,
       note: 'one scoped review — VERIFIER, write = NONE, network = NONE',
     })),
-    { kind: 'COMMIT', ref: repository.commit, note: 'the exact implementation reviewed' },
+    { kind: 'COMMIT', id: repository.commit, note: 'the exact implementation reviewed' },
   ],
-  notes:
+  notes: [
     'Independent review of ' +
-    repository.commit.slice(0, 12) +
-    ' across ' +
-    String(REQUIRED_SCOPE.length) +
-    ' required areas in ' +
-    String(aggregated.scopeRunIds.length) +
-    ' governed runs: ' +
-    String(aggregated.review.findings.length) +
-    ' finding(s), verdict ' +
-    aggregated.review.verdict +
-    '. No CRITICAL or HIGH finding remains unresolved.',
+      repository.commit.slice(0, 12) +
+      ' across ' +
+      String(REQUIRED_SCOPE.length) +
+      ' required areas in ' +
+      String(aggregated.scopeRunIds.length) +
+      ' governed runs: ' +
+      String(aggregated.review.findings.length) +
+      ' finding(s), verdict ' +
+      aggregated.review.verdict +
+      '. No CRITICAL or HIGH finding remains unresolved.',
+  ],
 };
+
+/*
+ * THE PROOF IS PARSED BEFORE IT IS WRITTEN.
+ *
+ * A complete, clean review minted a proof that `resolveProof` then refused as malformed —
+ * `scope` was an array where the schema wants prose, and every evidence entry said `ref` where
+ * it wants `id`. The review had done its job perfectly and the last twenty lines threw the
+ * result away, which nothing caught because nothing checked the shape of what it wrote.
+ *
+ * Producing evidence and then refusing to look at it is the exact failure this whole phase has
+ * been correcting, so the proof goes through the same schema that will later judge it.
+ */
+const parsedProof = AcceptanceProofSchema.safeParse(proof);
+if (!parsedProof.success) {
+  console.error('');
+  console.error('security-review: the review is clean but the proof does not parse:');
+  for (const issue of parsedProof.error.issues.slice(0, 5)) {
+    console.error('  - ' + issue.path.join('.') + ' ' + issue.message);
+  }
+  process.exit(1);
+}
 
 const proofPath = join(root, ...PROOF_DIR.split('/'), REQUIREMENT + '.json');
 mkdirSync(dirname(proofPath), { recursive: true });
