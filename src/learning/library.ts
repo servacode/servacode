@@ -95,6 +95,20 @@ export interface ContributeInput {
   readonly kind: LibraryEntryKind;
   readonly title: string;
   readonly body: Record<string, string>;
+  /**
+   * The project and client names the calling project holds.
+   *
+   * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-CORE/ORG-LEARN-CORE-1.
+   *
+   * REQUIRED rather than optional, and deliberately so. This function is the last code that
+   * runs before a sentence leaves the project that produced it, and `leakageRefusal` cannot
+   * recognise a client name without being told which names exist. An optional parameter here
+   * would be omitted by exactly the caller that most needs it — which is what happened.
+   *
+   * This module holds no store, so the names come from the caller. Passing an empty array to
+   * satisfy the signature defeats the check as surely as omitting it did.
+   */
+  readonly knownNames: readonly string[];
 }
 
 export interface ContributeResult {
@@ -127,7 +141,7 @@ export function contributeToLibrary(
    * body since, and this is the only place that can be sure.
    */
   const reasons = [
-    ...new Set([o.title, ...readerVisible(o.body)].flatMap((f) => leakageRefusal(f))),
+    ...new Set([o.title, ...readerVisible(o.body)].flatMap((f) => leakageRefusal(f, o.knownNames))),
   ];
   if (reasons.length > 0) {
     return fail({

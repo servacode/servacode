@@ -236,6 +236,9 @@ describe('the aggregate refuses anything less than a real review of everything',
                 statement: 'the guard was inert',
                 evidence: ['src/acceptance/proof.ts:445'],
                 resolved: true,
+                /* A resolution names the implementation it was verified at, or it is a claim. */
+                resolvedAtCommit: COMMIT,
+                resolvedAtTree: TREE,
                 resolvedNote: 'fixed: the producer set is derived from governed history',
               },
             ],
@@ -471,6 +474,9 @@ describe('the aggregate re-resolves the runs it aggregates', () => {
           statement: 'evidence can be trusted after an external change',
           evidence: ['src/engineering/reconcile.ts:234'],
           resolved: true,
+          /* Bound to the implementation being judged, or it suppresses nothing. */
+          resolvedAtCommit: COMMIT,
+          resolvedAtTree: TREE,
           resolvedNote: 'fixed: four divergence kinds are now detected',
         },
       ],
@@ -546,5 +552,171 @@ describe('the aggregate shapes into a proof the resolver will actually accept', 
       evidence: [{ kind: 'COMMIT', ref: COMMIT }],
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+/* ====== HIGH 2: a resolution is about one defect at one implementation ====== */
+
+describe('a historical resolution cannot mute a current finding', () => {
+  /*
+   * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-001.
+   *
+   * `findingsAcrossAttempts` gathered findings from every persisted attempt for a scope with
+   * no filter on commit or tree, then dropped any whose `resolved` flag was true. So a
+   * `resolved: true` written against any past attempt — at any older tree — permanently
+   * suppressed that finding id at the current commit.
+   *
+   * Finding ids are area-namespaced and reviewer-numbered, so a regression re-introducing the
+   * same defect collides with the old id and stays suppressed. This is the one place a
+   * blocking CRITICAL can be cleared, and it cleared on an unchecked boolean.
+   *
+   * The question the aggregate asks is now "what is unresolved at THIS commit and tree",
+   * rather than "which historical ids can I subtract". A resolution is evidence about one
+   * defect at one implementation state, and it is honoured only at that state.
+   */
+  const OLD_COMMIT = 'e'.repeat(40);
+  const OLD_TREE = 'f'.repeat(40);
+
+  function seedAt(store: Store, unit: string, over: Record<string, unknown>, n = 900): void {
+    const runId = 'SC-RUN-H' + String(n);
+    const tx = store.begin();
+    tx.putCanon('agentRunRecord', runId, { runId, agentId: REVIEWER, outcome: 'COMPLETED' });
+    tx.commit();
+    recordScopeReview(store, {
+      scopeId: '',
+      scopeName: unit,
+      implementationCommit: COMMIT,
+      treeDigest: TREE,
+      reviewerRunId: runId,
+      reviewerAgentId: REVIEWER,
+      coverage: ScopeCoverage.COMPLETE,
+      filesReviewed: ['src/x.ts'],
+      filesOmitted: [],
+      findings: [],
+      verdict: ReviewVerdict.ACCEPTED,
+      terminalOutcome: 'COMPLETED',
+      reviewedAt: '2026-08-30T00:00:00.000Z',
+      ...over,
+    });
+  }
+
+  const finding = (severity: string, over: Record<string, unknown> = {}) => ({
+    id: 'F-1',
+    severity,
+    area: 'Owner authority',
+    statement: 'a real problem',
+    evidence: ['src/app/conversation.ts:1'],
+    resolved: false,
+    ...over,
+  });
+
+  it('a HIGH resolved at an OLD commit does not mute the same id now', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    /* The historical record: same id, marked resolved, at a different implementation. */
+    seedAt(rt.store, 'Owner authority', {
+      implementationCommit: OLD_COMMIT,
+      treeDigest: OLD_TREE,
+      reviewedAt: '2026-01-01T00:00:00.000Z',
+      findings: [finding('HIGH', { resolved: true, resolvedNote: 'fixed, honestly' })],
+    });
+    /* And the current one: the same defect is back. */
+    seedAt(rt.store, 'Owner authority', { findings: [finding('HIGH')] }, 901);
+
+    const result = aggregate(rt);
+    expect(result.review).toBeUndefined();
+    expect(result.refusals.join(' ')).toMatch(/HIGH/);
+  });
+
+  it('a CRITICAL regression at a new tree blocks, whatever history says', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', {
+      implementationCommit: OLD_COMMIT,
+      treeDigest: OLD_TREE,
+      reviewedAt: '2026-01-01T00:00:00.000Z',
+      findings: [finding('CRITICAL', { resolved: true })],
+    });
+    seedAt(rt.store, 'Owner authority', { findings: [finding('CRITICAL')] }, 901);
+    expect(aggregate(rt).review).toBeUndefined();
+  });
+
+  it('a resolution bound to THIS commit and tree does suppress', () => {
+    /* Resolution is not impossible — it is bound. */
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', {
+      findings: [
+        finding('HIGH', {
+          resolved: true,
+          resolvedAtCommit: COMMIT,
+          resolvedAtTree: TREE,
+          resolvedNote: 'fixed and re-reviewed at this exact tree',
+        }),
+      ],
+    });
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+  });
+
+  it('resolved:true with no implementation binding is not authority', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', {
+      findings: [finding('HIGH', { resolved: true, resolvedNote: 'trust me' })],
+    });
+    expect(aggregate(rt).review).toBeUndefined();
+  });
+
+  it('a resolution bound to a DIFFERENT commit is not authority here', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', {
+      findings: [
+        finding('HIGH', { resolved: true, resolvedAtCommit: OLD_COMMIT, resolvedAtTree: OLD_TREE }),
+      ],
+    });
+    expect(aggregate(rt).review).toBeUndefined();
+  });
+
+  it('a legitimately fixed historical finding that does not recur blocks nothing', () => {
+    /* History stays readable; it simply does not decide the present. */
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', {
+      implementationCommit: OLD_COMMIT,
+      treeDigest: OLD_TREE,
+      reviewedAt: '2026-01-01T00:00:00.000Z',
+      findings: [finding('CRITICAL')],
+    });
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+  });
+
+  it('severity is read from the CURRENT finding, not an older one', () => {
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', {
+      implementationCommit: OLD_COMMIT,
+      treeDigest: OLD_TREE,
+      reviewedAt: '2026-01-01T00:00:00.000Z',
+      findings: [finding('LOW', { resolved: true })],
+    });
+    seedAt(rt.store, 'Owner authority', { findings: [finding('HIGH')] }, 901);
+    /* A historical LOW resolution must not clear a current HIGH by id collision. */
+    expect(aggregate(rt).review).toBeUndefined();
+  });
+
+  it('two attempts at THIS commit union their findings', () => {
+    /*
+     * The property SC-SSA-F2 established, preserved: a retry that simply does not re-report a
+     * finding does not resolve it. Both attempts are at the current implementation, so both
+     * count.
+     */
+    const rt = project();
+    seedCompleteReview(rt.store);
+    seedAt(rt.store, 'Owner authority', { findings: [finding('HIGH')] });
+    seedAt(rt.store, 'Owner authority', { findings: [] }, 901);
+    expect(aggregate(rt).review).toBeUndefined();
   });
 });

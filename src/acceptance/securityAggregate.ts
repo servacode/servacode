@@ -57,36 +57,69 @@ function latestByScope(reviews: readonly ScopeReview[]): Map<string, ScopeReview
 }
 
 /**
- * EVERY FINDING EVER RECORDED AT A SCOPE, NOT ONLY THE LATEST ATTEMPT'S.
+ * WHAT IS UNRESOLVED AT **THIS** IMPLEMENTATION, NOT WHICH IDS HISTORY CAN SUBTRACT.
  *
- * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-F2.
+ * SPEC: HIGH findings SC-SSA-F2 and SC-SSA-REV-001.
  *
- * The aggregate read findings from the latest attempt alone, so a CRITICAL recorded by an
- * earlier attempt disappeared the moment a later one did not re-report it — and a later run
- * has no obligation to re-find anything. Retrying a scope until it came back quiet would have
- * un-blocked the review.
+ * Two defects, one function, and they pull in opposite directions.
  *
- * `scopeReview.ts` rejects exactly that inference in its own docstring: "a finding that stops
- * appearing may have been fixed, or may simply not have been looked for". Resolution is a
- * RECORDED fact, so a finding stops blocking when someone marks it resolved and says why —
- * never by going unmentioned.
+ *   Reading only the LATEST attempt let a retry mute a finding by not re-reporting it. A
+ *   later silence is not a fix.
  *
- * Findings are keyed by id within a scope, so re-reporting the same finding does not double
- * it, and a later attempt CAN resolve one by recording it resolved.
+ *   Reading EVERY attempt and subtracting any id ever marked `resolved` was worse: a
+ *   `resolved: true` written against any past tree permanently suppressed that id at every
+ *   later commit. Finding ids are area-namespaced and reviewer-numbered — `F-1` — so a
+ *   regression re-introducing the same defect collided with the old id and stayed muted. This
+ *   is the one place a blocking CRITICAL can be cleared, and it cleared on a boolean.
+ *
+ * The question asked is therefore neither of those. Findings are gathered from the attempts
+ * bound to the CURRENT commit and tree — every one of them, so a retry cannot mute a sibling
+ * attempt — and history is not consulted at all, so it cannot mute the present.
+ *
+ * A resolution still works, and now says where: it must name the same commit and tree it is
+ * being applied to. `resolvedNote` remains free text and remains no authority.
  */
-function findingsAcrossAttempts(
+function currentFindings(
   reviews: readonly ScopeReview[],
   scopeId: string,
+  repository: RepositoryIdentity,
 ): readonly ScopeFinding[] {
+  const atThisImplementation = reviews.filter(
+    (r) =>
+      r.scopeId === scopeId &&
+      r.implementationCommit === repository.commit &&
+      r.treeDigest === repository.tree,
+  );
+
   const byId = new Map<string, ScopeFinding>();
-  for (const r of reviews.filter((x) => x.scopeId === scopeId)) {
+  for (const r of atThisImplementation) {
     for (const f of r.findings) {
+      /*
+       * A resolution counts only when it names THIS implementation. Anything else — a bare
+       * boolean, a note, a commit that is not this one — leaves the finding standing.
+       */
+      const resolvedHere =
+        f.resolved &&
+        f.resolvedAtCommit === repository.commit &&
+        f.resolvedAtTree === repository.tree;
+
       const seen = byId.get(f.id);
-      /* A later resolution wins; a later silence does not. */
-      if (seen === undefined || (!seen.resolved && f.resolved)) byId.set(f.id, f);
+      /* Within one implementation a later resolution wins; a later silence still does not. */
+      if (seen === undefined || (!isResolvedHere(seen, repository) && resolvedHere)) {
+        byId.set(f.id, f);
+      }
     }
   }
   return [...byId.values()];
+}
+
+/** Is this finding's resolution bound to the implementation being judged? */
+function isResolvedHere(f: ScopeFinding, repository: RepositoryIdentity): boolean {
+  return (
+    f.resolved === true &&
+    f.resolvedAtCommit === repository.commit &&
+    f.resolvedAtTree === repository.tree
+  );
 }
 
 export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome {
@@ -207,7 +240,7 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
         refusals.push('"' + unit + '" returned NOT_VERIFIED, so it decided nothing');
       }
 
-      findings.push(...findingsAcrossAttempts(all, record.scopeId));
+      findings.push(...currentFindings(all, record.scopeId, input.repository));
     }
   }
 
@@ -241,7 +274,9 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
    * stays in the evidence with `resolved: true` and the reason it was closed.
    */
   const blocking = findings.filter(
-    (f) => !f.resolved && (f.severity === Severity.CRITICAL || f.severity === Severity.HIGH),
+    (f) =>
+      !isResolvedHere(f, input.repository) &&
+      (f.severity === Severity.CRITICAL || f.severity === Severity.HIGH),
   );
   for (const f of blocking) {
     refusals.push(

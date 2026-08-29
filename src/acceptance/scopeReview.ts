@@ -57,6 +57,27 @@ export const ScopeFindingSchema = z
      */
     resolved: z.boolean().default(false),
     resolvedNote: z.string().optional(),
+    /**
+     * The implementation a resolution was verified at.
+     *
+     * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-001.
+     *
+     * `resolved: true` alone permanently suppressed a finding id at every later commit,
+     * because nothing tied the claim to an implementation. A resolution is evidence about one
+     * defect at one implementation state; without the state it is an assertion, and finding
+     * ids are reviewer-numbered so a regression collided with the old id and stayed muted.
+     *
+     * Optional in the schema so records written before this parse; a resolution missing them
+     * suppresses nothing, which is the honest treatment of a claim nobody can place in time.
+     */
+    resolvedAtCommit: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/)
+      .optional(),
+    resolvedAtTree: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/)
+      .optional(),
   })
   .strict();
 export type ScopeFinding = z.output<typeof ScopeFindingSchema>;

@@ -69,7 +69,7 @@ export interface LearningDeps {
  * store it cannot read yields no names and the structural rules still apply, which is weaker
  * than nothing would be honest about.
  */
-function knownProjectNames(store: Store): readonly string[] {
+export function knownProjectNames(store: Store): readonly string[] {
   try {
     return store
       .listCanonIds('project')

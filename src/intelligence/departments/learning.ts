@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { knownProjectNames } from '../learning.js';
+import type { Store } from '../../store/store.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
 import {
   ApplicabilityAssessmentSchema,
@@ -54,9 +56,22 @@ const ANALYST = 'SC-AGENT-280';
 const CURATOR = 'SC-AGENT-290';
 const ASSESSOR = 'SC-AGENT-291';
 
-/** Every field a future reader could see, checked together. */
-function leakage(fields: readonly string[]): readonly string[] {
-  return [...new Set(fields.flatMap((f) => leakageRefusal(f)))];
+/**
+ * Every field a future reader could see, checked together.
+ *
+ * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-CORE/ORG-LEARN-CORE-1.
+ *
+ * `leakageRefusal` gained a `knownNames` argument so it could catch client names — which it
+ * cannot recognise in the abstract — and this caller kept invoking the one-argument form. The
+ * check therefore existed at one door of the wall and not at this one.
+ *
+ * The names come from the governed store rather than from the caller, for the same reason
+ * they do in `learning.ts`: a name Serva actually holds is a fact, and a name a caller passes
+ * is a claim.
+ */
+function leakage(store: Store, fields: readonly string[]): readonly string[] {
+  const names = knownProjectNames(store);
+  return [...new Set(fields.flatMap((f) => leakageRefusal(f, names)))];
 }
 
 /* ============================================================ SC-AGENT-280 — analyst */
@@ -305,7 +320,7 @@ export const curationDepartment: DepartmentConfig<typeof CurationOutputSchema> =
     const at = ctx.clock.now();
 
     for (const l of output.lessons) {
-      const reasons = leakage([l.statement, l.context, l.applicableWhen]);
+      const reasons = leakage(ctx.store, [l.statement, l.context, l.applicableWhen]);
       if (reasons.length > 0) {
         notes.push('lesson refused: ' + reasons.join('; '));
         continue;
@@ -324,7 +339,7 @@ export const curationDepartment: DepartmentConfig<typeof CurationOutputSchema> =
     }
 
     for (const f of output.failedApproaches) {
-      const reasons = leakage([f.approach, f.whyItFailed, ...f.symptomsToWatchFor]);
+      const reasons = leakage(ctx.store, [f.approach, f.whyItFailed, ...f.symptomsToWatchFor]);
       if (reasons.length > 0) {
         notes.push('failed approach refused: ' + reasons.join('; '));
         continue;
@@ -343,7 +358,7 @@ export const curationDepartment: DepartmentConfig<typeof CurationOutputSchema> =
     }
 
     for (const p of output.patterns) {
-      const reasons = leakage([
+      const reasons = leakage(ctx.store, [
         p.name,
         p.problem,
         p.solution,
