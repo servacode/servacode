@@ -3,11 +3,7 @@ import { aggregateSecurityReview } from '../src/acceptance/securityAggregate.js'
 import { ScopeCoverage, recordScopeReview } from '../src/acceptance/scopeReview.js';
 import { REQUIRED_SCOPE, ReviewVerdict, Severity } from '../src/acceptance/securityReview.js';
 import { reviewUnitsFor } from '../src/acceptance/securityReviewRun.js';
-import {
-  AcceptanceProofSchema,
-  ProofStatus,
-  VerificationType,
-} from '../src/acceptance/proof.js';
+import { AcceptanceProofSchema, ProofStatus, VerificationType } from '../src/acceptance/proof.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
