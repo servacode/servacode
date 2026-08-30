@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { SCHEMA_VERSION, SERVA_VERSION } from './version.js';
 import { storePaths } from '../store/paths.js';
+import { fail } from '../core/errors.js';
 
 /**
  * INSTALLING, UPDATING, AND GOING BACK.
@@ -166,21 +167,56 @@ export interface ChangePlan {
  * afterwards has already broken the thing it was meant to protect.
  */
 /**
- * "Nobody looked", as a value that cannot be confused with "nothing to lose".
+ * COMPLETENESS IS SOMETHING A CALLER STATES, NOT SOMETHING A LIST IMPLIES.
  *
- * SPEC: HIGH finding INSTALL-UPDATE-ROLLBACK/IUR-1.
+ * SPEC: HIGH findings INSTALL-UPDATE-ROLLBACK/IUR-1 and IUR-REVIEW-1.
  *
- * `projectRoots` defaulted to `[]`, and the CLI passed `[]` whenever it was invoked outside a
- * project. The schema loop then ran zero times, `tooNew` stayed empty, and a rollback that
- * could strand every project on the machine returned READY.
+ * Two rounds at this defect, and the second was caused by the first fix.
  *
- * An empty collection is a perfectly good answer to "which projects are affected?" — it means
- * none. It is a terrible answer to "did you check?", and the two were spelled identically.
- * They no longer are: this is not an array, so it cannot be passed where a list is meant or
- * produced by a `.filter()` that found nothing.
+ *   IUR-1: the CLI passed `[]` outside a project, the schema loop ran zero times, and a
+ *   rollback that could strand every project returned READY. I made the empty case refuse.
+ *
+ *   IUR-REVIEW-1: inside a project it passed `[rt.root]`, one project was checked, and
+ *   `performSwitch` then wrote `<root>/current` — a single MACHINE-GLOBAL pointer selecting
+ *   the build every project on this machine runs under. One checked project cannot establish
+ *   safety for a global effect.
+ *
+ * I fixed n=0 and left n=1, which is the same error at a different arity. The list was never
+ * the problem; treating a list AS PROOF OF COMPLETENESS was. So a bare array can no longer be
+ * passed at all: a caller either says it knows the whole set and on what basis, or says it
+ * does not know — and not knowing refuses.
  */
-export const UNKNOWN_PROJECTS = Symbol('affected projects were not established');
-export type ProjectInventory = readonly string[] | typeof UNKNOWN_PROJECTS;
+export const UNKNOWN_PROJECTS = Symbol('the affected project set is not established');
+
+export interface CompleteProjectSet {
+  readonly complete: true;
+  readonly roots: readonly string[];
+  /**
+   * How the caller knows this is EVERY project the pointer would affect.
+   *
+   * Required, and required to be non-empty, because "on what basis?" is the question the old
+   * shape let everybody skip. A sentence nobody can write is a completeness claim nobody
+   * should be making.
+   */
+  readonly basis: string;
+}
+
+export type ProjectInventory = CompleteProjectSet | typeof UNKNOWN_PROJECTS;
+
+/** State that this is every affected project on the machine, and why you can say so. */
+export function knownCompleteProjects(roots: readonly string[], basis: string): CompleteProjectSet {
+  if (basis.trim() === '') {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'A complete project inventory must say how it knows it is complete.',
+      remedy:
+        'Serva moves one machine-global pointer. Claiming to know every affected project ' +
+        'without being able to say how is the shape of the defect this exists to prevent.',
+      specRef: '§11',
+    });
+  }
+  return { complete: true, roots: [...roots], basis };
+}
 
 export function planSwitch(
   install: Installation,
@@ -233,17 +269,19 @@ export function planSwitch(
       ...(from === undefined ? {} : { from }),
       to: toVersion,
       reason:
-        'Serva could not establish which projects this rollback would affect, so it cannot ' +
-        'show that no data would be lost. Run this from inside each project you want to move ' +
-        'back, or check them first — a rollback past a store schema silently drops ' +
-        'every field the older build does not understand.',
+        'This changes the machine-global `current` pointer, so it changes the Serva build ' +
+        'EVERY project on this machine runs under. Serva cannot prove that every one of them ' +
+        'can be opened by ' +
+        toVersion +
+        ', so the pointer was NOT changed and nothing was moved. A rollback past a store ' +
+        'schema silently drops every field the older build does not understand.',
       steps: [],
       reversible: true,
     };
   }
 
   const tooNew: string[] = [];
-  for (const projectRoot of projectRoots) {
+  for (const projectRoot of projectRoots.roots) {
     /*
      * AN UNREADABLE SCHEMA MARKER FAILS CLOSED.
      *

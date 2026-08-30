@@ -7,6 +7,7 @@ import {
   installation,
   performSwitch,
   UNKNOWN_PROJECTS,
+  knownCompleteProjects,
   planSwitch,
   recordInstalled,
   removeVersion,
@@ -118,8 +119,12 @@ describe('switching is a pointer move, in both directions', () => {
       ],
       '1.1.0',
     );
-    /* No projects on this fixture machine — stated, not defaulted. */
-    const plan = performSwitch(installation(root), '1.0.0', []);
+    /* No projects on this fixture machine — stated, with the basis for saying so. */
+    const plan = performSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([], 'this fixture machine holds no projects'),
+    );
     expect(plan.outcome).toBe(ChangeOutcome.READY);
     expect(plan.reversible).toBe(true);
 
@@ -138,8 +143,9 @@ describe('switching is a pointer move, in both directions', () => {
       ],
       '1.1.0',
     );
-    performSwitch(installation(root), '1.0.0', []);
-    const forward = performSwitch(installation(root), '1.1.0', []);
+    const none = knownCompleteProjects([], 'this fixture machine holds no projects');
+    performSwitch(installation(root), '1.0.0', none);
+    const forward = performSwitch(installation(root), '1.1.0', none);
     expect(forward.outcome).toBe(ChangeOutcome.READY);
     expect(installation(root).current?.version).toBe('1.1.0');
   });
@@ -191,7 +197,11 @@ describe('rollback is refused when it would lose data', () => {
       '2.0.0',
     );
     const project = projectWithSchema(9);
-    const plan = planSwitch(installation(root), '1.0.0', [project]);
+    const plan = planSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([project], 'the only project here'),
+    );
 
     expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
     expect(plan.reason).toContain('store schema 3');
@@ -208,7 +218,11 @@ describe('rollback is refused when it would lose data', () => {
       ],
       '2.0.0',
     );
-    performSwitch(installation(root), '1.0.0', [projectWithSchema(9)]);
+    performSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([projectWithSchema(9)], 'the only project here'),
+    );
     expect(installation(root).current?.version).toBe('2.0.0');
   });
 
@@ -220,7 +234,11 @@ describe('rollback is refused when it would lose data', () => {
       ],
       '2.0.0',
     );
-    const plan = planSwitch(installation(root), '1.0.0', [projectWithSchema(3)]);
+    const plan = planSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([projectWithSchema(3)], 'the only project here'),
+    );
     expect(plan.outcome).toBe(ChangeOutcome.READY);
   });
 
@@ -232,7 +250,11 @@ describe('rollback is refused when it would lose data', () => {
       ],
       '1.1.0',
     );
-    const plan = planSwitch(installation(root), '1.0.0', []);
+    const plan = planSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([], 'this fixture machine holds no projects'),
+    );
     expect(plan.steps.join(' ')).toContain('no project directory is opened');
   });
 });
@@ -302,24 +324,36 @@ describe('the owner can see whether they can go back', () => {
   });
 });
 
-/* ====== HIGH 2: an empty loop is not a safety proof ====== */
+/* ====== a machine-global pointer needs machine-wide evidence ====== */
 
-describe('rollback refuses when it cannot establish that nothing is lost', () => {
+describe('rollback refuses unless the affected project set is COMPLETE', () => {
   /*
-   * SPEC: HIGH finding INSTALL-UPDATE-ROLLBACK/IUR-1.
+   * SPEC: HIGH findings INSTALL-UPDATE-ROLLBACK/IUR-1 and IUR-REVIEW-1.
    *
-   * `planSwitch` checked each project's store schema, and the CLI built
-   * `projectRoots = rt === undefined ? [] : [rt.root]`. Run `serva install use <older>` outside
-   * a project — the natural way to manage a machine-global install — and the list was empty,
-   * the loop ran zero times, `tooNew` stayed empty, and it returned READY.
+   * Two rounds at the same defect, and the second was caused by the first fix.
    *
-   * The header says "ROLLBACK IS REFUSED WHEN IT WOULD LOSE DATA". An empty collection was
-   * read as "nothing would be lost" when it meant "nobody looked", and those are the two
-   * things a safety check must never confuse.
+   *   IUR-1: the CLI passed `[]` outside a project, the schema loop ran zero times, `tooNew`
+   *   stayed empty, and rollback returned READY. I made the empty case fail closed.
    *
-   * No governed project inventory exists on this machine, so the honest answer is to fail
-   * closed and say why. `[]` can no longer be spelled where "unknown" is meant.
+   *   IUR-REVIEW-1: inside a project it passed `[rt.root]`, one project was checked, and
+   *   `performSwitch` then wrote `<root>/current` — a single MACHINE-GLOBAL pointer selecting
+   *   the build every project on the machine runs under. One checked project cannot establish
+   *   safety for a global effect, so a rollback across a schema bump stranded the others.
+   *
+   * I fixed n=0 and left n=1, which is the same error at a different arity. The list was never
+   * the problem: treating a list AS PROOF OF COMPLETENESS was. Completeness is now something a
+   * caller states, with the basis on which it claims it, and no array length implies it.
    */
+  function machine(): string {
+    return withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.1.0', 4],
+      ],
+      '1.1.0',
+    );
+  }
+
   /** A project directory with a store schema marker of the given version. */
   function projectAt(schema: number): string {
     const root = tempRoot();
@@ -329,76 +363,100 @@ describe('rollback refuses when it cannot establish that nothing is lost', () =>
     return root;
   }
 
-  it('refuses when the affected projects are unknown', () => {
-    const root = withVersions(
-      [
-        ['1.0.0', 3],
-        ['1.1.0', 4],
-      ],
-      '1.1.0',
-    );
-    const plan = planSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
+  it('1. inside a project, with the machine inventory unknown, refuses', () => {
+    /* The regression that matters: ONE project is a partial inventory, not a complete one. */
+    const plan = planSwitch(installation(machine()), '1.0.0', UNKNOWN_PROJECTS);
     expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
-    expect(plan.reason).toMatch(/could not|cannot|unknown/i);
+    expect(plan.reason).toMatch(/machine-global|every|complete/i);
   });
 
-  it('allows a rollback when the machine genuinely holds no projects', () => {
-    /* Explicitly nothing to lose is a different claim from nobody having looked. */
-    const root = withVersions(
-      [
-        ['1.0.0', 3],
-        ['1.1.0', 4],
-      ],
-      '1.1.0',
-    );
-    expect(planSwitch(installation(root), '1.0.0', []).outcome).toBe(ChangeOutcome.READY);
-  });
-
-  it('allows a rollback when every known project is compatible', () => {
-    const root = withVersions(
-      [
-        ['1.0.0', 3],
-        ['1.1.0', 4],
-      ],
-      '1.1.0',
-    );
-    expect(planSwitch(installation(root), '1.0.0', [projectAt(3)]).outcome).toBe(
-      ChangeOutcome.READY,
-    );
-  });
-
-  it('refuses when one known project is too new', () => {
-    const root = withVersions(
-      [
-        ['1.0.0', 3],
-        ['1.1.0', 4],
-      ],
-      '1.1.0',
-    );
-    const plan = planSwitch(installation(root), '1.0.0', [projectAt(99)]);
-    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
-    expect(plan.reason).toMatch(/newer|schema/i);
-  });
-
-  it('refuses when one of several projects is too new', () => {
-    const root = withVersions(
-      [
-        ['1.0.0', 3],
-        ['1.1.0', 4],
-      ],
-      '1.1.0',
-    );
-    expect(planSwitch(installation(root), '1.0.0', [projectAt(3), projectAt(99)]).outcome).toBe(
+  it('2. outside a project, with the inventory unknown, refuses', () => {
+    expect(planSwitch(installation(machine()), '1.0.0', UNKNOWN_PROJECTS).outcome).toBe(
       ChangeOutcome.REFUSED,
     );
   });
 
-  it('the unknown case cannot be spelled as an empty list', () => {
+  it('3. a compatible current project does not license the ones nobody checked', () => {
     /*
-     * The structural half. `UNKNOWN_PROJECTS` is a distinct value rather than an empty array,
-     * so a caller that has not looked cannot accidentally spell it the same way as a caller
-     * that looked and found nothing.
+     * The exact shape of IUR-REVIEW-1: the project in front of you is fine, and that says
+     * nothing about the others the pointer also moves.
      */
-    expect(Array.isArray(UNKNOWN_PROJECTS)).toBe(false);
+    const plan = planSwitch(installation(machine()), '1.0.0', UNKNOWN_PROJECTS);
+    void projectAt(3);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+  });
+
+  it('4. a COMPLETE inventory of compatible projects is allowed', () => {
+    const inventory = knownCompleteProjects(
+      [projectAt(3), projectAt(3)],
+      'the test enumerated them',
+    );
+    expect(planSwitch(installation(machine()), '1.0.0', inventory).outcome).toBe(
+      ChangeOutcome.READY,
+    );
+  });
+
+  it('5. a COMPLETE inventory with one incompatible project refuses', () => {
+    const inventory = knownCompleteProjects(
+      [projectAt(3), projectAt(99)],
+      'the test enumerated them',
+    );
+    const plan = planSwitch(installation(machine()), '1.0.0', inventory);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toMatch(/newer|schema/i);
+  });
+
+  it('6. an EMPTY set is fine only when its completeness is stated', () => {
+    /* "I looked and there are none" is a real answer; "[]" on its own is not. */
+    expect(
+      planSwitch(installation(machine()), '1.0.0', knownCompleteProjects([], 'no projects exist'))
+        .outcome,
+    ).toBe(ChangeOutcome.READY);
+  });
+
+  it('7. a ONE-element set proves nothing without that statement', () => {
+    /*
+     * The structural heart of it. A bare array cannot be passed at all now, so the n=1 case
+     * cannot be spelled the way it was — and if it is stated complete, it is the caller
+     * asserting a fact about the machine rather than the code inferring one.
+     */
+    const complete = knownCompleteProjects([projectAt(3)], 'the only project on this machine');
+    expect(planSwitch(installation(machine()), '1.0.0', complete).outcome).toBe(
+      ChangeOutcome.READY,
+    );
+    expect(planSwitch(installation(machine()), '1.0.0', UNKNOWN_PROJECTS).outcome).toBe(
+      ChangeOutcome.REFUSED,
+    );
+  });
+
+  it('8. a refusal writes nothing to the machine-global pointer', () => {
+    const root = machine();
+    const before = readFileSync(join(root, 'current'), 'utf8');
+    const plan = performSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(readFileSync(join(root, 'current'), 'utf8'), 'the pointer moved').toBe(before);
+  });
+
+  it('9. an incompatible project is detected BEFORE the pointer moves', () => {
+    const root = machine();
+    const before = readFileSync(join(root, 'current'), 'utf8');
+    const inventory = knownCompleteProjects([projectAt(99)], 'the only project on this machine');
+    expect(performSwitch(installation(root), '1.0.0', inventory).outcome).toBe(
+      ChangeOutcome.REFUSED,
+    );
+    expect(readFileSync(join(root, 'current'), 'utf8')).toBe(before);
+  });
+
+  it('the CLI has no way to claim completeness it cannot establish', () => {
+    /*
+     * Serva holds no governed inventory of the projects on a machine, so the command that
+     * moves the pointer passes UNKNOWN_PROJECTS unconditionally. Building a registry to make
+     * this green would be inventing an authority to satisfy a check.
+     */
+    const source = readFileSync('src/cli/commands/portability.ts', 'utf8');
+    expect(source).toContain('UNKNOWN_PROJECTS');
+    expect(source, 'the CLI must not assemble an inventory from the open project').not.toMatch(
+      /knownCompleteProjects/,
+    );
   });
 });

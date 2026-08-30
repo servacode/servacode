@@ -8,6 +8,7 @@ import {
   installation,
   performSwitch,
   UNKNOWN_PROJECTS,
+  type ProjectInventory,
   planSwitch,
   removeVersion,
   renderInstallation,
@@ -312,12 +313,21 @@ export function cmdInstall(args: ParsedArgs): number {
      * BEFORE the pointer moves. An installer that discovered this afterwards would already
      * have broken the thing it was meant to protect.
      */
-    const rt = tryOpenRuntime(args);
     /*
-     * UNKNOWN, not empty. Outside a project this command has looked at nothing, and saying so
-     * is what makes `planSwitch` refuse rather than vacuously succeed.
+     * ALWAYS UNKNOWN, AND THAT IS THE HONEST ANSWER FOR 1.0.
+     *
+     * SPEC: HIGH finding INSTALL-UPDATE-ROLLBACK/IUR-REVIEW-1.
+     *
+     * This passed `[rt.root]` when run inside a project, so one project was checked and
+     * `performSwitch` then moved the machine-global `current` pointer that every project on
+     * this machine runs under. The project in front of you says nothing about the others.
+     *
+     * Serva holds no governed inventory of the projects on a machine. Scanning folders and
+     * calling the result authoritative would be inventing the authority rather than having
+     * it, so this says it does not know — and refuses. For 1.0 a refusal an owner can act on
+     * beats a rollback that can strand a project they had forgotten about.
      */
-    const projectRoots = rt === undefined ? UNKNOWN_PROJECTS : [rt.root];
+    const projectRoots: ProjectInventory = UNKNOWN_PROJECTS;
 
     if (sub === 'remove') {
       if (!confirmed(args)) {
