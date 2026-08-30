@@ -1,7 +1,7 @@
 {
   "name": "serva-code",
-  "version": "1.0.0",
-  "description": "Serva Code — Local AI Software Company Operating System. Local-first, single-owner, VS Code native.",
+  "version": "1.0.1",
+  "description": "Serva Code \u2014 Local AI Software Company Operating System. Local-first, single-owner, VS Code native.",
   "type": "module",
   "license": "UNLICENSED",
   "private": true,
@@ -37,8 +37,12 @@
     "test:intelligence-live": "vitest run --config vitest.intelligence.config.ts",
     "build:extension": "tsc -p extension/tsconfig.json && node scripts/copy-assets.mjs",
     "test:vscode": "node scripts/run-vscode-tests.mjs",
+    "test:package": "vitest run --config vitest.package.config.ts",
+    "package:extension": "node scripts/package-extension.mjs",
+    "validate:vsix": "node scripts/validate-vsix.mjs",
     "test:serva-live": "vitest run --config vitest.serva.config.ts",
-    "test:serva-chain": "vitest run --config vitest.servachain.config.ts"
+    "test:serva-chain": "vitest run --config vitest.servachain.config.ts",
+    "release:manifest": "node scripts/release-manifest.mjs"
   },
   "dependencies": {
     "zod": "^3.23.8"
@@ -51,10 +55,14 @@
     "@typescript-eslint/parser": "^8.8.1",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.9.2",
     "eslint": "^9.12.0",
     "mocha": "^11.8.0",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
     "vitest": "^2.1.3"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

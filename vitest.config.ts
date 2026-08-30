@@ -16,7 +16,15 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/live/**', 'tests/vscode/**', 'node_modules/**', 'dist/**', 'out/**'],
+    exclude: [
+      'tests/live/**',
+      'tests/vscode/**',
+      /* Artifact-level: packs and installs for real. `npm run test:package`. */
+      'tests/package/**',
+      'node_modules/**',
+      'dist/**',
+      'out/**',
+    ],
     environment: 'node',
     reporters: ['default'],
     sequence: { shuffle: false },

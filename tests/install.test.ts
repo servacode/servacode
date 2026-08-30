@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   ChangeOutcome,
@@ -16,6 +17,8 @@ import {
 import { SCHEMA_VERSION, SERVA_VERSION } from '../src/portability/version.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
+import { cmdInstall } from '../src/cli/commands/portability.js';
+import { parseArgs } from '../src/cli/main.js';
 
 /**
  * AN UPDATE WITH NO WAY BACK IS A GAMBLE.
@@ -458,5 +461,92 @@ describe('rollback refuses unless the affected project set is COMPLETE', () => {
     expect(source, 'the CLI must not assemble an inventory from the open project').not.toMatch(
       /knownCompleteProjects/,
     );
+  });
+});
+
+describe('an installation nothing ever recorded is an empty one', () => {
+  /*
+   * SPEC: the 1.0.1 packaging audit, section G.
+   *
+   * Every test in this file built its fixtures by writing version markers by hand, so the
+   * whole update-and-rollback story was proven against a table that only a test ever filled
+   * in. `recordInstalled` had no caller in the product: an owner who installed Serva and ran
+   * `serva install status` saw nothing installed, and `install use` could only refuse, because
+   * there was never anything to switch between.
+   *
+   * These tests fail against 1.0.0 by construction — they run the CLI rather than the fixture.
+   */
+  function scratch(): string {
+    return mkdtempSync(join(tmpdir(), 'serva-adopt-'));
+  }
+
+  it('reports nothing installed until something records itself', () => {
+    const root = scratch();
+    try {
+      expect(installation(root).installed).toEqual([]);
+      expect(installation(root).current).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('`install adopt` records the RUNNING build, and claims an unheld pointer', () => {
+    const root = scratch();
+    try {
+      const code = cmdInstall(parseArgs(['install', 'adopt', '--install-root', root]));
+      expect(code).toBe(0);
+
+      const after = installation(root);
+      expect(after.installed.map((v) => v.version)).toEqual([SERVA_VERSION]);
+      expect(after.current?.version, 'nothing held the pointer, so it should now').toBe(
+        SERVA_VERSION,
+      );
+      /* The recorded schema is the one this build understands — rollback safety reads it. */
+      expect(after.current?.storeSchema).toBe(SCHEMA_VERSION);
+      expect(after.problems).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not move a pointer an owner has deliberately placed elsewhere', () => {
+    /*
+     * The dangerous case. An owner pinned to an older build who runs the newer one once must
+     * not silently be switched to it — moving the pointer is `install use`, which refuses
+     * first if the move would strand a project.
+     */
+    const root = scratch();
+    try {
+      mkdirSync(join(root, 'versions', '9.9.9'), { recursive: true });
+      writeFileSync(
+        join(root, 'versions', '9.9.9', 'serva-version.json'),
+        JSON.stringify({ version: '9.9.9', storeSchema: SCHEMA_VERSION, installedAt: 'T' }),
+        'utf8',
+      );
+      writeFileSync(join(root, 'current'), '9.9.9\n', 'utf8');
+
+      expect(cmdInstall(parseArgs(['install', 'adopt', '--install-root', root]))).toBe(0);
+
+      const after = installation(root);
+      expect(after.current?.version, 'the pinned version must survive').toBe('9.9.9');
+      expect(
+        after.installed.map((v) => v.version).includes(SERVA_VERSION),
+        'and the running build is still recorded as present',
+      ).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('is idempotent, so an owner can run it as often as they like', () => {
+    const root = scratch();
+    try {
+      cmdInstall(parseArgs(['install', 'adopt', '--install-root', root]));
+      cmdInstall(parseArgs(['install', 'adopt', '--install-root', root]));
+      expect(installation(root).installed.map((v) => v.version)).toEqual([SERVA_VERSION]);
+      expect(installation(root).problems).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

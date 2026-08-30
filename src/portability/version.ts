@@ -23,7 +23,7 @@ import { SCHEMA_VERSION } from '../store/store.js';
  */
 
 /** The product. Phase 6 is the final implementation phase for 1.0. */
-export const SERVA_VERSION = '1.0.0';
+export const SERVA_VERSION = '1.0.1';
 
 /** The archive format this build writes and can read. */
 export const BACKUP_FORMAT_VERSION = 1;

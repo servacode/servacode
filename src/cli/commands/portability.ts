@@ -10,13 +10,16 @@ import {
   UNKNOWN_PROJECTS,
   type ProjectInventory,
   planSwitch,
+  recordInstalled,
   removeVersion,
   renderInstallation,
+  CURRENT_LINK,
 } from '../../portability/install.js';
 import { buildEngineeringLayer } from '../../app/engineering.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { systemClock } from '../../core/clock.js';
 import { verifyBackup } from '../../portability/backup.js';
 import { inspectRestore } from '../../portability/restore.js';
 import {
@@ -299,6 +302,56 @@ export function cmdInstall(args: ParsedArgs): number {
     if (wantsJson(args)) emitJson(state);
     else console.log(renderInstallation(state));
     return state.problems.length === 0 ? 0 : 1;
+  }
+
+  /*
+   * THE STEP THAT WAS MISSING, AND WITHOUT WHICH NONE OF THE REST WAS REACHABLE.
+   *
+   * SPEC: the 1.0.1 packaging audit, section G.
+   *
+   * `install status`, `use` and `remove` all read `<root>/versions/`, and through the whole of
+   * 1.0.0 nothing ever wrote there: `recordInstalled` had no caller in the product. On a real
+   * owner's machine `serva install status` therefore reported an empty installation no matter
+   * how Serva had been installed, and `use` could only ever refuse — the update and rollback
+   * story was bookkeeping over an empty table.
+   *
+   * `recordInstalled` says the files are "put in place by whatever delivered them", and that
+   * is the right division: `npm install -g serva-code-<version>.tgz` delivers, and this records
+   * what was delivered. Serva still downloads nothing and this still moves no files.
+   *
+   * It records the version that is RUNNING, because that is the one fact this process can state
+   * from its own existence rather than from an argument it was handed.
+   */
+  if (sub === 'adopt') {
+    const marker = recordInstalled(
+      root,
+      state.running.version,
+      state.running.storeSchema,
+      systemClock.now(),
+    );
+
+    /*
+     * The pointer is set only when nothing holds it. An owner who has deliberately pinned an
+     * older build should not have that undone by running the newer one once, and moving the
+     * pointer is `install use` — which checks whether the move would strand a project first.
+     */
+    const claimed = state.current === undefined;
+    if (claimed) writeFileSync(join(root, CURRENT_LINK), marker.version + '\n', 'utf8');
+
+    const after = installation(root);
+    if (wantsJson(args)) {
+      emitJson({ recorded: marker, becameCurrent: claimed, installation: after });
+      return 0;
+    }
+    console.log('Recorded Serva ' + marker.version + ' as installed at ' + root + '.');
+    console.log(
+      claimed
+        ? 'Nothing was current, so ' + marker.version + ' now is.'
+        : 'current stays at ' + String(after.current?.version) + '; `serva install use` moves it.',
+    );
+    console.log('');
+    console.log(renderInstallation(after));
+    return 0;
   }
 
   if (sub === 'use' || sub === 'remove') {

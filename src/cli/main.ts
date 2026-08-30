@@ -121,7 +121,7 @@ const USAGE = [
   '  verify-backup <path>          Prove a bundle before relying on it',
   '  restore <bundle> --to <dir>   Inspect a restore; --confirm to perform it',
   '  migrate                       The guided move to another computer',
-  '  install [status|use|remove]   Which installed Serva runs, and going back',
+  '  install [adopt|status|use|remove]  Which installed Serva runs, and going back',
   '  library [list|show|forget]    Machine-local generalised knowledge (--enable)',
   '  acceptance                    Serva Code 1.0 status, computed from measured truth',
   '  help                          This message',

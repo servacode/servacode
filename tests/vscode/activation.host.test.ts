@@ -1,5 +1,6 @@
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
+import { SERVA_VERSION } from '../../src/portability/version.js';
 
 /**
  * THE EXTENSION ACTUALLY LOADS, AND ITS COMMANDS ACTUALLY EXIST.
@@ -38,8 +39,18 @@ describe('the extension loads in a real VS Code', () => {
   });
 
   it('declares the version the package claims', async () => {
+    /*
+     * Against SERVA_VERSION rather than a literal.
+     *
+     * SPEC: the 1.0.1 packaging audit, section F.
+     *
+     * This read `'1.0.0'`, so it did not assert version identity at all — it asserted that
+     * nobody had shipped a new version yet, and it failed the moment one was. A test that has
+     * to be hand-edited on every release is a test that will one day be hand-edited to match
+     * whatever the code happens to say.
+     */
     const extension = await activate();
-    assert.equal(String(extension.packageJSON.version), '1.0.0');
+    assert.equal(String(extension.packageJSON.version), SERVA_VERSION);
   });
 
   it('registers every command it contributes', async () => {

@@ -2,7 +2,7 @@
   "name": "serva-code",
   "displayName": "Serva Code",
   "description": "Your private AI software company, inside VS Code.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "serva",
   "license": "UNLICENSED",
   "private": true,
@@ -109,5 +109,8 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.90.0"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
   }
 }

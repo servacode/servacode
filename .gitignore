@@ -14,3 +14,13 @@ evidence/acceptance-run/
 # Extension Host test output and the VS Code build it downloads.
 out/
 .vscode-test/
+
+# Release artifacts are built from a tagged tree, not stored in it.
+# `npm pack`, `npm run package:extension` and `npm run release:manifest` regenerate them,
+# and their hashes are a statement about a build rather than something to version.
+release/
+*.tgz
+*.vsix
+
+# The extension gets its own production dependencies when the VSIX is built.
+extension/node_modules/
