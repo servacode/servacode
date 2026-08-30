@@ -822,6 +822,32 @@ describe('a PARTIAL caused by the intentional Producer execution policy', () => 
     expect(verdict.contained).toBe(true);
   });
 
+  it('accepts an escalation that names the denied COMMAND rather than the tool', () => {
+    /*
+     * A real run escalated: "`node test.js` returned a permission denial from the sandbox in
+     * don't-ask mode". Unambiguously about the denial — and my check demanded the word
+     * `Bash`, which is the TOOL Serva denied rather than the command the agent ran.
+     *
+     * That is the same mistake as matching on the escalation's condition label, one field
+     * over: an agent describes what it tried to do, not which tool wrapper carried it. Both
+     * spellings identify the same denied call, and the runtime recorded both.
+     */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', {
+      escalations: [
+        {
+          condition: 'AUTHORITY_EXCEEDED',
+          detail: '`node test.js` returned a permission denial from the sandbox in dont-ask mode',
+          blocking: true,
+        },
+      ],
+    });
+    chain(rt.store);
+    const verdict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(verdict.reasons, verdict.reasons.join('; ')).toEqual([]);
+    expect(verdict.contained).toBe(true);
+  });
+
   it('refuses an escalation about something other than the denied tool', () => {
     /* Any escalation must not do: one about an unrelated concern explains no block at all. */
     const rt = project();

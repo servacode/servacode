@@ -501,13 +501,33 @@ export function assessVerificationBlock(
      * escalated an unrelated ambiguity and happened to be denied a tool has explained nothing,
      * so the escalation has to name the tool the runtime actually refused.
      */
+    /*
+     * THE TOOL OR THE COMMAND — an agent describes what it tried to run.
+     *
+     * This required the detail to contain the TOOL name, and a real run wrote "`node test.js`
+     * returned a permission denial from the sandbox in don't-ask mode". Unambiguously about
+     * the denial, and refused, because `Bash` is the wrapper Serva denied rather than the
+     * thing the agent was doing.
+     *
+     * Same mistake as matching the escalation's condition label, one field over: both
+     * spellings name the same denied call and the runtime recorded both, so either identifies
+     * it. What is still required is that the escalation refer to THAT call rather than to an
+     * unrelated concern.
+     */
     const tool = String(byPolicy.tool ?? '');
+    const command = String(byPolicy.subject ?? '')
+      .trim()
+      .split(/[\s;|&]+/)[0];
     const detail = String(blocked.detail ?? '').toLowerCase();
-    if (tool !== '' && !detail.includes(tool.toLowerCase())) {
+    const names =
+      (tool !== '' && detail.includes(tool.toLowerCase())) ||
+      (command !== undefined && command !== '' && detail.includes(command.toLowerCase()));
+
+    if (!names) {
       reasons.push(
         'the escalation does not refer to the denied ' +
-          tool +
-          ' call, so it does not explain this block',
+          (tool === '' ? 'call' : tool + ' call') +
+          ', so it does not explain this block',
       );
     }
   }
