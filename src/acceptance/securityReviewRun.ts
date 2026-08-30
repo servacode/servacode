@@ -225,6 +225,21 @@ export interface SubScope {
    * nothing — which is exactly what the first version did.
    */
   readonly except?: readonly string[];
+  /**
+   * Files another unit OWNS that this one must read to judge its own.
+   *
+   * SPEC: Phase 6 scoped review contract.
+   *
+   * `organizational learning — core` was asked whether client data can cross between
+   * projects, and the wall that decides it — `leakageRefusal` — lives in the artifacts
+   * sub-scope. The reviewer refused to certify a boundary it had not been shown, which is
+   * exactly right, and the partition was what made that happen.
+   *
+   * Context, not ownership: these files are still reviewed by the unit that owns them, and
+   * `partitionGap` still proves every file has an owner. A boundary that spans two files
+   * cannot be judged from one of them.
+   */
+  readonly context?: readonly string[];
 }
 
 export const AREA_SUBSCOPES: Readonly<Record<string, Readonly<Record<string, SubScope>>>> =
@@ -260,6 +275,8 @@ export const AREA_SUBSCOPES: Readonly<Record<string, Readonly<Record<string, Sub
       },
       'organizational learning — core': {
         prefixes: ['src/intelligence/', 'src/learning/'],
+        /* The wall this area's whole question turns on. Owned by the artifacts unit. */
+        context: ['src/intelligence/artifacts/learning.ts'],
         except: [
           'src/intelligence/artifacts/',
           'src/intelligence/departments/',
@@ -284,18 +301,21 @@ export interface ReviewUnit {
   readonly unit: string;
   readonly prefixes: readonly string[];
   readonly except: readonly string[];
+  /** Files owned elsewhere that this unit must read to judge its own. */
+  readonly context: readonly string[];
 }
 
 export function reviewUnitsFor(area: string): readonly ReviewUnit[] {
   const split = AREA_SUBSCOPES[area];
   if (split === undefined) {
-    return [{ area, unit: area, prefixes: AREA_SOURCES[area] ?? [], except: [] }];
+    return [{ area, unit: area, prefixes: AREA_SOURCES[area] ?? [], except: [], context: [] }];
   }
   return Object.entries(split).map(([unit, sub]) => ({
     area,
     unit,
     prefixes: sub.prefixes,
     except: sub.except ?? [],
+    context: sub.context ?? [],
   }));
 }
 
@@ -345,12 +365,15 @@ export function reviewAreaFiles(
   prefixOverride?: readonly string[],
   /** Paths belonging to a sibling sub-scope, so a partition does not overlap itself. */
   except: readonly string[] = [],
+  /** Files owned elsewhere that this unit must read anyway. Bypasses `except`. */
+  context: readonly string[] = [],
 ): AreaSource {
   const prefixes = prefixOverride ?? AREA_SOURCES[area] ?? [];
   const matched = allFiles.filter(
     (f) =>
-      prefixes.some((prefix) => f.startsWith(prefix)) &&
-      !except.some((prefix) => f.startsWith(prefix)),
+      context.some((prefix) => f.startsWith(prefix)) ||
+      (prefixes.some((prefix) => f.startsWith(prefix)) &&
+        !except.some((prefix) => f.startsWith(prefix))),
   );
 
   const parts: string[] = [];
@@ -627,8 +650,16 @@ export async function runScopedSecurityReview(
   for (const u of units) unitsByArea.set(u.area, (unitsByArea.get(u.area) ?? 0) + 1);
   const completedByArea = new Map<string, number>();
 
-  for (const { area, unit, prefixes, except } of units) {
-    const source = reviewAreaFiles(area, input.allFiles, input.readFile, 260_000, prefixes, except);
+  for (const { area, unit, prefixes, except, context } of units) {
+    const source = reviewAreaFiles(
+      area,
+      input.allFiles,
+      input.readFile,
+      260_000,
+      prefixes,
+      except,
+      context,
+    );
 
     if (source.files.length === 0) {
       /* An area with no source is a hole in AREA_SOURCES, not a clean result. */
