@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FixedClock } from '../src/core/clock.js';
+import { leakageRefusal } from '../src/intelligence/artifacts/learning.js';
 import {
   LibraryEntryKind,
   contributeToLibrary,
@@ -279,5 +280,155 @@ describe('every publishing boundary supplies the name context', () => {
         "client's:\n" +
         bare.join('\n'),
     ).toEqual([]);
+  });
+});
+
+/* ====== OL-CORE-1: a key is as reader-visible as a value ====== */
+
+describe('every reader-visible string crosses the same wall', () => {
+  /*
+   * SPEC: 11, 27, 28; HIGH finding ORGANIZATIONAL-LEARNING-CORE/OL-CORE-1.
+   *
+   * `readerVisible` returned `Object.values(body)`. The body is a `Record<string, string>`
+   * and its KEYS are persisted verbatim into the library entry, so a client name in a key
+   * reached every future project that read the library — through the module its own docstring
+   * calls "the last code that runs before a sentence leaves the project", whose helper claimed
+   * "All of them are checked" while checking half.
+   *
+   * This is the second defect at this boundary, so the last test here is behavioural rather
+   * than a check on `Object.keys`: it puts a marker in every reader-visible position and
+   * proves the entry cannot carry it. A field added later that nobody remembers to scan fails
+   * that test without anyone updating it.
+   */
+  const LEAKS = [
+    ['a client name', 'RahalGo'],
+    ['a relative path', 'src/checkout.ts'],
+    ['an absolute path', '/data/clients/acme'],
+    ['a project identifier', 'SC-REQ-000042'],
+    ['a credential value', 'AKIA1234567890ABCDEF'],
+  ] as const;
+
+  function contribute(over: Record<string, unknown>) {
+    return contributeToLibrary(clock, {
+      ...library(),
+      enabled: true as const,
+      kind: LibraryEntryKind.PATTERN,
+      title: 'Offline-first order capture',
+      body: { context: 'a rush at the counter', solution: 'queue locally and reconcile' },
+      knownNames: ['RahalGo'],
+      ...over,
+    });
+  }
+
+  for (const [what, leak] of LEAKS) {
+    it('refuses ' + what + ' in a body KEY', () => {
+      expect(() => contribute({ body: { [leak]: 'queue locally and reconcile' } })).toThrow(
+        /Refusing to publish/,
+      );
+    });
+
+    it('refuses ' + what + ' in a body VALUE, as it always did', () => {
+      expect(() => contribute({ body: { solution: leak } })).toThrow(/Refusing to publish/);
+    });
+
+    it('refuses ' + what + ' in the TITLE', () => {
+      expect(() => contribute({ title: 'What we learned about ' + leak })).toThrow(
+        /Refusing to publish/,
+      );
+    });
+  }
+
+  it('an unsafe key with a safe value is refused', () => {
+    expect(() => contribute({ body: { 'RahalGo notes': 'staff work standing up' } })).toThrow(
+      /Refusing to publish/,
+    );
+  });
+
+  it('a safe key with an unsafe value is refused', () => {
+    expect(() => contribute({ body: { notes: 'see src/checkout.ts' } })).toThrow(
+      /Refusing to publish/,
+    );
+  });
+
+  it('one leaking key among several safe ones is still refused', () => {
+    expect(() =>
+      contribute({
+        body: {
+          context: 'a rush at the counter',
+          'src/checkout.ts': 'where it happened',
+          solution: 'queue locally',
+        },
+      }),
+    ).toThrow(/Refusing to publish/);
+  });
+
+  it('ordinary generic keys are allowed — this is not "all keys are unsafe"', () => {
+    /*
+     * The other half. A wall that refuses `title` and `summary` is a wall somebody switches
+     * off, and then it stops refusing anything.
+     */
+    const result = contribute({
+      body: {
+        title: 'offline-first capture',
+        summary: 'queue locally and reconcile later',
+        pattern: 'write-behind',
+        category: 'resilience',
+        problem: 'connectivity drops during service',
+      },
+    });
+    expect(result.refused).toBeUndefined();
+    expect(result.entry).toBeDefined();
+  });
+
+  it('BOUNDARY COMPLETENESS: no reader-visible string escapes the scan', () => {
+    /*
+     * Behavioural, not structural. A marker that `leakageRefusal` refuses is placed in every
+     * caller-supplied position in turn, and the boundary must refuse each one — so a new
+     * reader-visible field added later is covered by this test the day it is added, without
+     * anybody remembering to extend it.
+     *
+     * The marker is a path, because paths are refused by the canonical wall and are the shape
+     * most likely to be typed into a field nobody thought of as content.
+     */
+    const MARKER = 'src/leaked.ts';
+    const positions: readonly { readonly where: string; readonly over: Record<string, unknown> }[] =
+      [
+        { where: 'title', over: { title: MARKER } },
+        { where: 'body value', over: { body: { solution: MARKER } } },
+        { where: 'body key', over: { body: { [MARKER]: 'anything' } } },
+      ];
+
+    for (const { where, over } of positions) {
+      expect(() => contribute(over), MARKER + ' escaped through the ' + where).toThrow(
+        /Refusing to publish/,
+      );
+    }
+
+    /*
+     * And the stronger half: whatever DOES get persisted must contain no string the wall
+     * would have refused. This reads the written entry rather than the code, so it holds for
+     * any field the schema grows.
+     */
+    const ok = contribute({
+      body: { context: 'a rush at the counter', solution: 'queue locally' },
+    });
+    const entry = ok.entry as NonNullable<typeof ok.entry>;
+    const strings: string[] = [];
+    const walk = (v: unknown): void => {
+      if (typeof v === 'string') strings.push(v);
+      else if (Array.isArray(v)) v.forEach(walk);
+      else if (v !== null && typeof v === 'object') {
+        for (const [k, inner] of Object.entries(v)) {
+          strings.push(k);
+          walk(inner);
+        }
+      }
+    };
+    walk(entry.body);
+    strings.push(entry.title);
+
+    for (const text of strings) {
+      expect(leakageRefusal(text, ['RahalGo']), 'persisted: ' + text).toEqual([]);
+    }
   });
 });

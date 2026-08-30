@@ -86,9 +86,28 @@ export function libraryRoot(o: LibraryOptions = {}): string {
   return resolve(o.root ?? join(homedir(), '.serva', 'library'));
 }
 
-/** Fields whose text a future reader would see. All of them are checked. */
-function readerVisible(body: Record<string, string>): readonly string[] {
-  return Object.values(body);
+/**
+ * EVERY STRING A FUTURE PROJECT COULD READ, FROM ONE PLACE.
+ *
+ * SPEC: 11, 27, 28; HIGH finding ORGANIZATIONAL-LEARNING-CORE/OL-CORE-1.
+ *
+ * This returned `Object.values(body)` while its docstring said "All of them are checked". The
+ * body is a `Record<string, string>` and its KEYS are persisted verbatim into the entry, so a
+ * client name in a key crossed the boundary untouched — in the module its own header calls
+ * "the last code that runs before a sentence leaves the project".
+ *
+ * A key is not metadata. It is text somebody wrote, stored on disk, and shown to whoever reads
+ * the library next, which is the entire definition of reader-visible.
+ *
+ * One helper rather than a scan at each call site, so a field added to the entry has exactly
+ * one place to be added here — and a behavioural test proves the boundary refuses a marker in
+ * every position rather than trusting that anybody remembered.
+ */
+function readerVisible(o: {
+  readonly title: string;
+  readonly body: Record<string, string>;
+}): readonly string[] {
+  return [o.title, ...Object.keys(o.body), ...Object.values(o.body)];
 }
 
 export interface ContributeInput {
@@ -140,9 +159,7 @@ export function contributeToLibrary(
    * that produced it. `contribute*` checked on the way in; the caller may have composed a
    * body since, and this is the only place that can be sure.
    */
-  const reasons = [
-    ...new Set([o.title, ...readerVisible(o.body)].flatMap((f) => leakageRefusal(f, o.knownNames))),
-  ];
+  const reasons = [...new Set(readerVisible(o).flatMap((f) => leakageRefusal(f, o.knownNames)))];
   if (reasons.length > 0) {
     return fail({
       code: 'E_ISOLATION',
