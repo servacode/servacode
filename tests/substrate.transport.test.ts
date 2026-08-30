@@ -581,3 +581,66 @@ describe('resolving a guest binary reports whether the guest was reached', () =>
     expect(String(sig?.[1])).not.toContain('undefined');
   });
 });
+
+describe('a refusal that never reached the guest is not a measurement', () => {
+  /*
+   * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-F1 (HIGH), 1.0.1 security review.
+   *
+   * `deriveEnforcementClass` filtered unreached trials on `notRunReason === TRANSPORT_FAILURE`,
+   * while `sandboxed.ts` recorded an unreachable guest as SUBSTRATE_REFUSED — a label whose own
+   * documentation says the guest WAS reached. The trial fell past the guard, came back MEASURED
+   * with a downgraded class, and `recordQualification` persisted it over a preserved HARD.
+   *
+   * A transport failure recorded as a measurement is the one thing this area exists to prevent.
+   * The guard now decides on `reachedGuest`, which is the observed fact rather than a label a
+   * writer chose, so relabelling cannot defeat it.
+   */
+  function trial(over: Record<string, unknown>): QualificationResult {
+    return {
+      id: 'Q-A',
+      outcome: 'NOT_RUN',
+      detail: 'substrate refused',
+      /* Blocking, because only a blocking probe can gate the enforcement class. */
+      blocking: true,
+      at: '2026-08-31T00:00:00.000Z',
+      reachedGuest: GuestReach.NOT_REACHED,
+      ...over,
+    } as QualificationResult;
+  }
+
+  it('is NOT_MEASURED whatever reason label the writer chose', () => {
+    for (const reason of [
+      NotRunReason.TRANSPORT_FAILURE,
+      NotRunReason.SUBSTRATE_REFUSED,
+      NotRunReason.PREREQUISITE_MISSING,
+    ]) {
+      const d = deriveEnforcementClass([trial({ notRunReason: reason })], ENFORCED);
+      expect(d.attempt, reason + ' with NOT_REACHED must not be a measurement').toBe(
+        QualificationAttempt.NOT_MEASURED,
+      );
+      expect(d.enforcementClass).toBe(EnforcementClass.NONE);
+      expect(d.availability).toBe(ExecutionAvailability.UNREACHABLE);
+    }
+  });
+
+  it('an unknown reach is not a measurement either', () => {
+    /* Fail closed. "We do not know whether we reached it" is not evidence about the machine. */
+    const d = deriveEnforcementClass(
+      [trial({ reachedGuest: GuestReach.UNKNOWN, notRunReason: NotRunReason.SUBSTRATE_REFUSED })],
+      ENFORCED,
+    );
+    expect(d.attempt).toBe(QualificationAttempt.NOT_MEASURED);
+  });
+
+  it('a refusal that DID reach the guest is still a measured fact about this machine', () => {
+    /*
+     * The other direction, so the fix does not simply mute every refusal. SUBSTRATE_REFUSED
+     * means what it says when reach is REACHED, and must keep reaching the notPassed branch.
+     */
+    const d = deriveEnforcementClass(
+      [trial({ reachedGuest: GuestReach.REACHED, notRunReason: NotRunReason.SUBSTRATE_REFUSED })],
+      ENFORCED,
+    );
+    expect(d.attempt).not.toBe(QualificationAttempt.NOT_MEASURED);
+  });
+});

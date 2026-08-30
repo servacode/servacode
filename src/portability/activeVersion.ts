@@ -1,8 +1,14 @@
 import { createRequire } from 'node:module';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CURRENT_LINK, versionEntrypoint, versionPayload } from './install.js';
+import {
+  CURRENT_LINK,
+  VERSIONS_DIR,
+  installation,
+  versionEntrypoint,
+  versionPayload,
+} from './install.js';
 
 /**
  * THE POINTER HAS TO MOVE THE PROGRAM, OR IT IS NOT A ROLLBACK.
@@ -102,7 +108,71 @@ export function resolveActive(input: {
   }
   if (named === '' || named === input.runningVersion) return {};
 
+  /*
+   * THE POINTER NAMES A VERSION. IT DOES NOT NAME A PATH.
+   *
+   * SPEC: findings IUR-SEC-A and IUR-CS-1 (MEDIUM), 1.0.1 security review.
+   *
+   * This took the pointer's contents and handed them straight to `versionEntrypoint`, which
+   * builds a path with `join`. A pointer containing `../../..` therefore resolved OUTSIDE
+   * `versions/`, and if a `dist/cli/main.js` existed at the far end, `main.ts` executed it as
+   * the active Serva before any other logic ran.
+   *
+   * `installation()` in install.ts already cross-checks the name against what is installed and
+   * records a problem when it does not match. The READ path validated and the EXECUTE path did
+   * not — which is the wrong way round, because only one of them starts a process.
+   *
+   * Both checks are applied here. The format check is the same expression
+   * `InstalledVersionSchema` enforces, so a name that could never have been recorded cannot be
+   * obeyed; `..` and separators fail it outright. The installed-set check then requires the
+   * version to be one this machine actually has.
+   */
+  if (!/^\d+\.\d+\.\d+$/.test(named)) {
+    return {
+      problem:
+        'serva: `current` contains ' +
+        JSON.stringify(named) +
+        ', which is not a version number. Ignoring it and running ' +
+        input.runningVersion +
+        '.',
+    };
+  }
+
   const entry = versionEntrypoint(input.root, named);
+
+  /*
+   * Belt and braces: even a well-formed version must resolve inside `versions/`. The format
+   * check above already excludes separators, so this can only fail if the layout helpers
+   * change — which is exactly when a confinement check earns its keep.
+   */
+  const versionsRoot = resolve(input.root, VERSIONS_DIR);
+  if (!resolve(entry).startsWith(versionsRoot + sep)) {
+    return {
+      problem:
+        'serva: `current` resolves outside the versions directory, so it was not run. ' +
+        'Running ' +
+        input.runningVersion +
+        '.',
+    };
+  }
+  /*
+   * And it must be a version this machine actually INSTALLED.
+   *
+   * Through `installation()` rather than by testing for the marker file here, so the execute
+   * path and the read path agree by construction. A directory someone dropped into `versions/`
+   * is not an installation, and the marker is what makes the difference.
+   */
+  if (!installation(input.root).installed.some((v) => v.version === named)) {
+    return {
+      problem:
+        'serva: `current` names ' +
+        named +
+        ', which is not an installed version on this machine. Running ' +
+        input.runningVersion +
+        ' instead. `serva install status` lists what is installed.',
+    };
+  }
+
   if (!existsSync(entry)) {
     /*
      * The pointer is honest about intent and wrong about the world — which is what a version

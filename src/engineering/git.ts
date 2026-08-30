@@ -22,6 +22,39 @@ import { fail } from '../core/errors.js';
  */
 
 /** Git operations Serva will never perform in Phase 4. Asserted by test. */
+/**
+ * THE VERB, NOT THE FIRST THING THAT DOES NOT LOOK LIKE A FLAG.
+ *
+ * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/F1 (MEDIUM), 1.0.1 security review.
+ *
+ * The guard read `args.find((a) => !a.startsWith('-'))`. Git's global options come BEFORE the
+ * subcommand and some of them take a separate value, so for the argv this module's own
+ * `commit()` builds —
+ *
+ *   ['-c', 'user.name=Serva Code', '-c', 'user.email=...', 'commit', ...]
+ *
+ * — that expression returns `user.name=Serva Code`. The real verb was never examined. Every
+ * caller here constructs a literal safe verb, so nothing was reachable, but the module's stated
+ * property is "a closed verb set enforced at the choke point" and the choke point was inspecting
+ * the wrong token: `['-c', 'x=y', 'push']` would have passed it.
+ *
+ * `-c` and `-C` consume the token after them; everything else beginning with `-` is a flag. The
+ * first token that survives both is the subcommand.
+ */
+export function gitVerb(args: readonly string[]): string | undefined {
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i];
+    if (a === undefined) continue;
+    if (a === '-c' || a === '-C') {
+      i += 1;
+      continue;
+    }
+    if (a.startsWith('-')) continue;
+    return a;
+  }
+  return undefined;
+}
+
 export const FORBIDDEN_GIT_VERBS: readonly string[] = Object.freeze([
   'push',
   'merge',
@@ -148,7 +181,7 @@ export class GitService {
 
   /** The single choke point. Every Git call in Serva passes through here. */
   private async git(args: readonly string[], cwd = this.repoRoot): Promise<GitResult> {
-    const verb = args.find((a) => !a.startsWith('-'));
+    const verb = gitVerb(args);
     if (verb !== undefined && FORBIDDEN_GIT_VERBS.includes(verb)) {
       return fail({
         code: 'E_CAPABILITY_NOT_ENABLED',

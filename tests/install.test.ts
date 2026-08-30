@@ -689,6 +689,8 @@ describe('the entry point asks which version should run', () => {
 
   it('hands off when current names another version that is really there', () => {
     const r = root();
+    /* Recorded as well as present: an unrecorded directory is not an installed version. */
+    recordInstalled(r, '0.9.0', SCHEMA_VERSION, 'T');
     const entry = versionEntrypoint(r, '0.9.0');
     mkdirSync(dirname(entry), { recursive: true });
     writeFileSync(entry, '', 'utf8');
@@ -705,6 +707,9 @@ describe('the entry point asks which version should run', () => {
   it('runs in place and says so when current names something unrunnable', () => {
     /* Fail open. Refusing to start would mean a bad pointer bricks the tool that fixes it. */
     const r = root();
+    /* Recorded, so what is under test is the missing PAYLOAD rather than a missing record —
+       the two now produce different refusals and the distinction is the point. */
+    recordInstalled(r, '0.9.0', SCHEMA_VERSION, 'T');
     writeFileSync(join(r, 'current'), '0.9.0\n', 'utf8');
     const decision = resolveActive({
       root: r,
@@ -799,5 +804,106 @@ describe('an unknown inventory only blocks what it could actually protect', () =
     expect(plan.outcome, 'schema 9 is installed, so 3 is still a downgrade').toBe(
       ChangeOutcome.REFUSED,
     );
+  });
+});
+
+describe('the pointer names a version, and is not trusted to name a path', () => {
+  /*
+   * SPEC: findings IUR-SEC-A and IUR-CS-1 (MEDIUM), 1.0.1 security review.
+   *
+   * `resolveActive` passed the pointer's raw contents to `versionEntrypoint`, which builds a
+   * path with `join`. A pointer holding `../../..` therefore resolved outside `versions/`,
+   * and `main.ts` would `spawnSync` whatever `dist/cli/main.js` sat at the far end — as the
+   * active Serva, before any other logic ran.
+   *
+   * `installation()` already validated the name on the READ path. The EXECUTE path did not,
+   * which is the wrong way round: only one of them starts a process.
+   */
+  function root(): string {
+    const r = mkdtempSync(join(tmpdir(), 'serva-pointer-'));
+    roots.push(r);
+    return r;
+  }
+
+  const ask = (r: string) =>
+    resolveActive({ root: r, runningVersion: SERVA_VERSION, alreadyHandedOff: false });
+
+  it('refuses a pointer that is not a version number, and names what it saw', () => {
+    for (const hostile of ['../../../evil', '..', 'latest', '1.0', 'a.b.c', '1.0.0/../..']) {
+      const r = root();
+      writeFileSync(join(r, 'current'), hostile + '\n', 'utf8');
+      const decision = ask(r);
+      expect(decision.handOffTo, hostile + ' must never be executed').toBeUndefined();
+      expect(decision.problem, hostile).toContain('not a version number');
+    }
+  });
+
+  it('refuses a well-formed version that is not installed here', () => {
+    /* The directory can exist without a marker; a marker is what makes it an installation. */
+    const r = root();
+    const entry = versionEntrypoint(r, '9.9.9');
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, '', 'utf8');
+    writeFileSync(join(r, 'current'), '9.9.9\n', 'utf8');
+
+    const decision = ask(r);
+    expect(
+      decision.handOffTo,
+      'an unrecorded directory is not an installed version',
+    ).toBeUndefined();
+    expect(decision.problem).toContain('not an installed version');
+  });
+
+  it('still hands off to a version that is genuinely installed', () => {
+    /* The fix must not make the feature inert — that would be a different way to fail. */
+    const r = root();
+    recordInstalled(r, '0.9.0', SCHEMA_VERSION, 'T');
+    const entry = versionEntrypoint(r, '0.9.0');
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, '', 'utf8');
+    writeFileSync(join(r, 'current'), '0.9.0\n', 'utf8');
+
+    expect(ask(r).handOffTo).toBe(entry);
+  });
+});
+
+describe('a switch is judged against the build being left', () => {
+  /*
+   * SPEC: finding RELEASE-HANDOVER/RELHANDOVER-1 (MEDIUM), 1.0.1 security review.
+   *
+   * `cannotLoseData` took the ceiling of every INSTALLED build's schema and treated it as a
+   * bound on what any project on disk could be. It is not one: `restore` lands bundles from
+   * other machines and `planMigration` chains on backup FORMAT, not store schema, so a
+   * project can carry a schema no build here understands.
+   *
+   * The sound comparison needs no inventory at all. Anything the CURRENT build can open has a
+   * schema it understands, so a target that understands at least as much cannot strand what is
+   * not already stranded.
+   */
+  it('allows moving to a build that understands at least what the current one does', () => {
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.5.0', 5],
+        ['2.0.0', 9],
+      ],
+      '1.0.0',
+    );
+    /* The old ceiling rule refused this because 2.0.0 was merely present. */
+    const plan = planSwitch(installation(root), '1.5.0', UNKNOWN_PROJECTS);
+    expect(plan.outcome, plan.reason).toBe(ChangeOutcome.READY);
+  });
+
+  it('still refuses a move to a build that understands less', () => {
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['2.0.0', 9],
+      ],
+      '2.0.0',
+    );
+    const plan = planSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toContain('cannot prove');
   });
 });

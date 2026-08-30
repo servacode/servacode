@@ -340,11 +340,31 @@ export function planSwitch(
    * WHEN IT WOULD LOSE DATA. Going BACK to a build that understands less still requires
    * knowing the projects, and still refuses when it does not.
    */
-  const ceiling = Math.max(
-    install.running.storeSchema,
-    ...install.installed.map((v) => v.storeSchema),
-  );
-  const cannotLoseData = target.storeSchema >= ceiling;
+  /*
+   * THE COMPARISON IS AGAINST THE BUILD BEING LEFT, NOT THE BUILDS THAT ARE INSTALLED.
+   *
+   * SPEC: finding RELEASE-HANDOVER/RELHANDOVER-1 (MEDIUM), 1.0.1 security review.
+   *
+   * This took the ceiling of every installed build's schema and treated it as a bound on what
+   * any project on disk could be. It is not one. `restore` lands bundles from other machines,
+   * and `planMigration` chains on BACKUP FORMAT rather than store schema — so a current-format
+   * bundle can carry a project whose schema exceeds every build here, and the ceiling would
+   * have declared a switch safe that was not.
+   *
+   * The sound statement does not need to know the projects at all. Any project the CURRENT
+   * build can open has a schema it understands. So a target that understands at least as much
+   * as the current build cannot strand anything that is not already stranded — the restored
+   * project with the impossible schema is unreadable before the switch and unreadable after,
+   * and no field is silently dropped that would not have been.
+   *
+   * It is also less brittle than the ceiling in the ordinary case: with 1.0.0 current and a
+   * newer build merely present, moving to a middle version is safe and the ceiling refused it.
+   *
+   * Going BACK to a build that understands less still requires knowing the projects, and still
+   * refuses when it does not. That is the case the refusal was written for.
+   */
+  const leaving = install.current?.storeSchema ?? install.running.storeSchema;
+  const cannotLoseData = target.storeSchema >= leaving;
 
   /*
    * UNKNOWN FAILS CLOSED.

@@ -472,7 +472,26 @@ export function deriveEnforcementClass(
    * rather than the class. A machine whose WSL was busy is not a machine without a boundary.
    */
   const unreached = blocking.filter(
-    (t) => t.outcome === 'NOT_RUN' && t.notRunReason === NotRunReason.TRANSPORT_FAILURE,
+    /*
+     * REACH DECIDES THIS, NOT THE LABEL SOMEBODY CHOSE FOR IT.
+     *
+     * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-F1 (HIGH), 1.0.1 security review.
+     *
+     * This filtered on `notRunReason === TRANSPORT_FAILURE`, and `sandboxed.ts` records an
+     * unreachable guest as SUBSTRATE_REFUSED — a label documented to mean the guest WAS
+     * reached. So a trial carrying `reachedGuest: NOT_REACHED` fell past this guard into the
+     * notPassed branch below, came back MEASURED with a downgraded class, and
+     * `recordQualification` persisted it over a preserved HARD.
+     *
+     * That is the exact regression this area exists to prevent: a transport failure recorded
+     * as a measurement. It fails closed on authority — HARD is never granted this way — but it
+     * destroys the last valid measurement, which is the durable half of the harm.
+     *
+     * The reason is a label a writer picked; `reachedGuest` is the observed fact. Deciding on
+     * the fact cannot be defeated by relabelling, and every reason whose meaning genuinely
+     * implies reach still reaches the branch below.
+     */
+    (t) => t.outcome === 'NOT_RUN' && t.reachedGuest !== GuestReach.REACHED,
   );
   if (unreached.length > 0) {
     const first = unreached[0]!;

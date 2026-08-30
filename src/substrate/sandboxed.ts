@@ -843,9 +843,26 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       if (result.refusedBySubstrate) {
         // A refusal is not a proof of containment for the negative cases: nothing ran,
         // so nothing was demonstrated.
+        /*
+         * A REFUSAL THAT NEVER REACHED THE GUEST IS A TRANSPORT FAILURE, AND MUST SAY SO.
+         *
+         * SPEC: finding QTS-F1 (HIGH), 1.0.1 security review.
+         *
+         * SUBSTRATE_REFUSED is documented as "the guest was reached and refused to run it — a
+         * measured fact about this machine". This recorded it unconditionally, including when
+         * `detect()` came back unavailable because the transport was down, producing a trial
+         * whose reason claimed the guest was reached and whose `reachedGuest` said it was not.
+         *
+         * The derivation now decides on reach, so this can no longer cause the overwrite. It is
+         * still corrected here: a record that contradicts itself will mislead the next reader
+         * of it, and an invariant test asserts the two can never disagree again.
+         */
         record(program.id, 'NOT_RUN', 'Substrate refused to execute: ' + result.refusalReason, {
-          reachedGuest: GuestReach.NOT_REACHED,
-          notRunReason: NotRunReason.SUBSTRATE_REFUSED,
+          reachedGuest: result.reach,
+          notRunReason:
+            result.reach === GuestReach.REACHED
+              ? NotRunReason.SUBSTRATE_REFUSED
+              : NotRunReason.TRANSPORT_FAILURE,
           ...(result.transportAttempts === undefined
             ? {}
             : { transportAttempts: result.transportAttempts }),

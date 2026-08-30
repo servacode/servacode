@@ -209,7 +209,26 @@ export function buildCriterionEvaluations(
     const id = deps.ids.next('SC-CE');
 
     if (spec.judged === true) {
-      const j = input.judged.find((x) => x.criterionId === spec.id);
+      /*
+       * A DISSENT IS NOT OVERRULED BY BEING SECOND.
+       *
+       * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-2 (MEDIUM), 1.0.1 security review.
+       *
+       * This was `.find(...)` — the first match wins. `judgedForChangeSet` returns EVERY
+       * persisted review for a ChangeSet, so for reviews ordered [PASS, FAIL] on the same
+       * criterion the FAIL was simply dropped: the criterion evaluated MET, and `acceptChange`
+       * checks only that a review exists and was not written by the Producer, never its
+       * outcome. An independent reviewer's rejection was therefore not authoritative over an
+       * earlier acceptance, which inverts what independent review is for.
+       *
+       * The failing judgement wins when there is one. Two reviewers disagreeing is not a tie
+       * to be broken by array order — it is a reason not to accept the change.
+       */
+      const judgements = input.judged.filter((x) => x.criterionId === spec.id);
+      const j =
+        judgements.find((x) => x.outcome === 'FAIL') ??
+        judgements.find((x) => x.outcome === 'NOT_VERIFIED') ??
+        judgements[0];
       if (j === undefined) {
         out.push({
           id,
