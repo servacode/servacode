@@ -1248,3 +1248,59 @@ describe('an area too large for one sitting is split, and the split must lose no
     expect(source.omitted.length).toBeGreaterThan(0);
   });
 });
+
+describe('a targeted re-check informs a decision and can never satisfy one', () => {
+  /*
+   * `onlyUnits` exists so a defect that survived a fix costs one model call to find rather
+   * than twenty-two. The risk in adding it is obvious — a partial run that could mint would
+   * be a way to buy acceptance cheaply — so the aggregate is what refuses, and it refuses on
+   * the same ground it always did: a missing area is a missing area.
+   */
+  const REPO = { commit: COMMIT, tree: TREE };
+
+  it('reviews only the named unit', async () => {
+    const rt = project();
+    const seen: string[] = [];
+    const runtime = {
+      run: (request: Record<string, unknown>) => {
+        seen.push(
+          String(request['taskDefinition']).split('Area under review: ')[1]?.split('\n')[0] ?? '?',
+        );
+        return Promise.resolve({
+          runId: 'SC-RUN-1',
+          outcome: 'COMPLETED',
+          bundle: {},
+          envelope: {
+            result: {
+              scope: ['x'],
+              findings: [],
+              verdict: ReviewVerdict.ACCEPTED,
+              summary: 'clean',
+            },
+          },
+          claimAssessments: [],
+          attempts: 1,
+          diagnostics: [],
+        });
+      },
+    } as unknown as Parameters<typeof runScopedSecurityReview>[0]['runtime'];
+
+    const outcome = await runScopedSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-30T00:00:00.000Z',
+      allFiles: ['src/engineering/reconcile.ts'],
+      readFile: () => 'export const x = 1;',
+      store: rt.store,
+      onlyUnits: ['Reconciliation'],
+    });
+
+    expect(seen).toEqual(['Reconciliation']);
+    /* And it cannot pretend to be a whole review: the other areas are simply absent. */
+    expect(outcome.review).toBeUndefined();
+    expect(outcome.areas.length).toBe(1);
+  });
+});

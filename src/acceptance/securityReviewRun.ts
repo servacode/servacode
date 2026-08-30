@@ -569,6 +569,15 @@ export interface ScopedReviewInput extends Omit<SecurityReviewRunInput, 'canon'>
   readonly readFile: (path: string) => string;
   /** Called as each area completes, so a long review reports progress honestly. */
   readonly onArea?: (outcome: AreaReviewOutcome) => void;
+  /**
+   * Review only these units, for a targeted re-check of a scope that blocked.
+   *
+   * A PRE-CHECK affordance, never an acceptance one: `aggregateSecurityReview` still demands
+   * every required area, so a partial run can inform a decision and can never satisfy
+   * SECURITY-INDEPENDENT. It exists so a defect that survived a fix costs one model call to
+   * find rather than twenty-two.
+   */
+  readonly onlyUnits?: readonly string[];
 }
 
 export interface ScopedReviewOutcome {
@@ -645,7 +654,11 @@ export async function runScopedSecurityReview(
    * deterministic sub-scopes that between them cover everything the area maps to. Coverage is
    * still decided against REQUIRED_SCOPE — an area counts only when all of its units do.
    */
-  const units = REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area));
+  const allUnits = REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area));
+  const units =
+    input.onlyUnits === undefined
+      ? allUnits
+      : allUnits.filter((u) => input.onlyUnits?.includes(u.unit));
   const unitsByArea = new Map<string, number>();
   for (const u of units) unitsByArea.set(u.area, (unitsByArea.get(u.area) ?? 0) + 1);
   const completedByArea = new Map<string, number>();
@@ -843,6 +856,28 @@ export async function runScopedSecurityReview(
     };
     areas.push(outcome);
     input.onArea?.(outcome);
+  }
+
+  /*
+   * A PARTIAL RUN INFORMS; IT NEVER CONCLUDES.
+   *
+   * `aggregateSecurityReview` would refuse a partial review anyway — a missing area is a
+   * missing area — but a `review` object coming back from a run that examined one unit is
+   * misleading on its face, and misleading shapes are how the wrong thing eventually gets
+   * used. A targeted re-check returns its findings and no verdict.
+   */
+  if (input.onlyUnits !== undefined) {
+    return {
+      areas,
+      refusals: [
+        ...refusals,
+        'this was a targeted re-check of ' +
+          String(input.onlyUnits.length) +
+          ' unit(s), not a review of all ' +
+          String(REQUIRED_SCOPE.length) +
+          ' required areas',
+      ],
+    };
   }
 
   if (refusals.length > 0) return { areas, refusals };
