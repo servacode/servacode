@@ -438,7 +438,31 @@ describe('the Claude transport handles a hostile stream', () => {
     roots.push(root);
     const req = { ...invocation(root), budget: { ...invocation(root).budget, maxWallTimeMs: 20 } };
     const p = adapter.invoke(req);
-    setTimeout(() => child.emit('close', null), 60);
+
+    /*
+     * THE CHILD DIES BECAUSE IT WAS KILLED, NOT BECAUSE 60ms PASSED.
+     *
+     * This emitted `close` on a 60ms timer against a 20ms deadline — a 40ms window in which
+     * the deadline had to fire first. On a loaded machine the timer slips, `close` arrives
+     * before the deadline handler, and the adapter reports ENGINE_ERROR because a child that
+     * exits with a null code on its own is exactly that. The test then failed for a reason
+     * that had nothing to do with the behaviour it names, and it did so twice during the
+     * 1.0.1 acceptance runs — each costing a full verification pass.
+     *
+     * The relationship being tested is causal, not temporal: the deadline fires, the adapter
+     * sends SIGTERM, and the child dies OF that. So the fixture waits for the signal it is
+     * supposed to be responding to. There is no window left to lose, at any machine speed.
+     */
+    await new Promise<void>((resolve) => {
+      const armed = setInterval(() => {
+        if (child.killed.includes('SIGTERM')) {
+          clearInterval(armed);
+          child.emit('close', null);
+          resolve();
+        }
+      }, 5);
+    });
+
     const r = await p;
     expect(r.terminatedBy).toBe(TerminationReason.TIMEOUT);
     expect(child.killed).toContain('SIGTERM');

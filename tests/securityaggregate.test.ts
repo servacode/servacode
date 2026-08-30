@@ -251,13 +251,29 @@ describe('the aggregate refuses anything less than a real review of everything',
   });
 
   it('refuses evidence bound to a different commit', () => {
+    /*
+     * The corrupted unit is DERIVED, not named.
+     *
+     * SPEC: the 1.0.1 security scope triage.
+     *
+     * This said `unit === 'bootstrap'`. When `bootstrap` was partitioned into sub-scopes that
+     * name no longer belonged to any unit, so the override matched nothing, the fixture seeded
+     * a perfectly good review, and the test asserted that a valid review is refused — which it
+     * is not. It failed loudly here, but the shape is the dangerous one: had the assertion been
+     * the other way round it would have passed forever while testing nothing.
+     *
+     * A test that hardcodes a name from a partitionable set is a test with an expiry date on it.
+     */
+    const target = reviewUnitsFor(REQUIRED_SCOPE[0] as string)[0]?.unit;
+    expect(target, 'the scope must yield at least one review unit').toBeDefined();
+
     const rt = project();
     seedCompleteReview(rt.store, (unit) =>
-      unit === 'bootstrap' ? { implementationCommit: 'c'.repeat(40) } : {},
+      unit === target ? { implementationCommit: 'c'.repeat(40) } : {},
     );
     const result = aggregate(rt);
     expect(result.review).toBeUndefined();
-    expect(result.refusals.join(' ')).toContain('bootstrap');
+    expect(result.refusals.join(' ')).toContain(String(target));
   });
 
   it('refuses a reviewer that holds no verifier authority', () => {

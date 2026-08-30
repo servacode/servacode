@@ -7,7 +7,12 @@ import {
   readScopeReview,
 } from '../src/acceptance/scopeReview.js';
 import { ReviewVerdict, Severity } from '../src/acceptance/securityReview.js';
-import { AREA_SOURCES, NON_SECURITY_SOURCES } from '../src/acceptance/securityReviewRun.js';
+import {
+  AREA_SOURCES,
+  NON_SECURITY_SOURCES,
+  reviewUnitsFor,
+} from '../src/acceptance/securityReviewRun.js';
+import { REQUIRED_SCOPE } from '../src/acceptance/securityReview.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ServaRuntime } from '../src/app/runtime.js';
@@ -302,6 +307,82 @@ describe('no source module can be security-relevant and unreviewed by accident',
           true,
         );
       }
+    }
+  });
+});
+
+describe('a review unit stays small enough to actually be read', () => {
+  /*
+   * MEASURED, NOT GUESSED.
+   *
+   * SPEC: the 1.0.1 security scope triage; Phase 6 final acceptance sequence §7.
+   *
+   * `bootstrap` mapped to 23 files across two unrelated trees. The reviewer returned ACCEPTED
+   * having read 22 of them and said nothing about the twenty-third — it did not refuse, it did
+   * not error, it simply stopped. The aggregate caught it because coverage is computed from
+   * the file list rather than taken from the verdict, and refused to mint the proof.
+   *
+   * That is the failure mode this asserts against. An oversized unit does not fail loudly; it
+   * quietly reviews less than it claims, and the claim still says ACCEPTED. The number below
+   * is not a preference — 23 is the size that was observed to truncate, so units are held
+   * comfortably beneath it.
+   *
+   * `AREA_SUBSCOPES` is the remedy and costs nothing in coverage: the sub-scopes of an area
+   * cover exactly what the area covers, which the next test asserts.
+   */
+  const LARGEST_UNIT_OBSERVED_TO_TRUNCATE = 23;
+  const CEILING = 20;
+
+  function sourceFiles(): string[] {
+    const found: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name).split('\\').join('/');
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts')) found.push(full);
+      }
+    };
+    walk('src');
+    return found;
+  }
+
+  const selectFor = (unit: { prefixes: readonly string[]; except?: readonly string[] }): string[] =>
+    sourceFiles().filter(
+      (f) =>
+        unit.prefixes.some((prefix) => f.startsWith(prefix)) &&
+        !(unit.except ?? []).some((prefix) => f.startsWith(prefix)),
+    );
+
+  it('no unit is given more files than a reviewer has been shown to read', () => {
+    const oversized: string[] = [];
+    for (const area of REQUIRED_SCOPE) {
+      for (const unit of reviewUnitsFor(area)) {
+        const count = selectFor(unit).length;
+        if (count > CEILING) oversized.push(unit.unit + ' (' + String(count) + ' files)');
+      }
+    }
+    expect(
+      oversized,
+      'partition these with AREA_SUBSCOPES — at ' +
+        String(LARGEST_UNIT_OBSERVED_TO_TRUNCATE) +
+        ' files a reviewer silently read one fewer than it was given',
+    ).toEqual([]);
+  });
+
+  it('splitting an area loses none of it', () => {
+    /*
+     * The one way partitioning could do harm. Sub-scopes that do not between them cover the
+     * area's own prefixes would shrink the review while making every unit look healthy.
+     */
+    for (const area of REQUIRED_SCOPE) {
+      const areaFiles = sourceFiles().filter((f) =>
+        (AREA_SOURCES[area] ?? []).some((prefix) => f.startsWith(prefix)),
+      );
+      const seen = new Set(reviewUnitsFor(area).flatMap((u) => selectFor(u)));
+      const lost = areaFiles.filter((f) => !seen.has(f));
+      expect(lost, area + ': these files are in the area but in none of its sub-scopes').toEqual(
+        [],
+      );
     }
   });
 });

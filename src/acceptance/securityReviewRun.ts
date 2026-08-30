@@ -333,6 +333,55 @@ export interface SubScope {
 
 export const AREA_SUBSCOPES: Readonly<Record<string, Readonly<Record<string, SubScope>>>> =
   Object.freeze({
+    /*
+     * TWENTY-THREE FILES IN ONE SITTING, AND THE REVIEWER READ TWENTY-TWO.
+     *
+     * SPEC: the 1.0.1 security scope triage.
+     *
+     * `bootstrap` maps to two unrelated trees — the CLI command surface and the execution
+     * substrate — and at 23 files it was the largest unpartitioned unit in the run. The
+     * reviewer returned ACCEPTED having silently not read `src/substrate/types.ts`, and the
+     * aggregate correctly refused to mint a proof: a partial view of an area is not coverage
+     * of it, whatever verdict the part that was read earned.
+     *
+     * Splitting is the mechanism this file already documents for exactly this. Nothing leaves
+     * the review — between them these two cover every path the area maps to — and each
+     * reviewer now gets one coherent subject small enough to actually read.
+     *
+     * Note what is NOT done here: `src/substrate/` is not dropped from `bootstrap` on the
+     * grounds that `qualification transport semantics` reviews it COMPLETE. It does, and
+     * `types.ts` was in fact read there at this same commit — but narrowing an area because
+     * another area happens to overlap it is how scope quietly shrinks. The two areas ask
+     * different questions of the same files, and both are supposed to.
+     */
+    bootstrap: Object.freeze({
+      'bootstrap — the command surface': { prefixes: ['src/cli/commands/'] },
+      'bootstrap — substrate prerequisites': { prefixes: ['src/substrate/'] },
+    }),
+
+    /*
+     * Split for the same reason, before it fails rather than after.
+     *
+     * With `bootstrap` partitioned this became the largest unit in the run at 25 files —
+     * MORE than the 23 that was just silently truncated. It happened to come back COMPLETE
+     * this time, and treating that as evidence it will next time is exactly the reasoning
+     * this whole audit exists to distrust. A full review is forty-five minutes; the cost of
+     * being wrong is paying that again.
+     *
+     * The seam is the real one: how a version is installed and which one runs, versus the
+     * commands an owner types. Both halves keep asking the installation question.
+     */
+    'install/update/rollback': Object.freeze({
+      'install/update/rollback — the installation model': {
+        prefixes: ['src/portability/', 'src/cli/main.ts'],
+      },
+      'install/update/rollback — the command surface': {
+        prefixes: ['src/cli/commands/'],
+        /* The entry point decides which build runs; the commands here write what it reads. */
+        context: ['src/cli/main.ts'],
+      },
+    }),
+
     'organizational learning': Object.freeze({
       'organizational learning — artifacts': { prefixes: ['src/intelligence/artifacts/'] },
       'organizational learning — departments A': {
