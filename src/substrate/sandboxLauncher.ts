@@ -1,4 +1,4 @@
-import { GUEST_PATH, resolveGuestBinary } from './transport.js';
+import { GUEST_PATH, GuestReach, resolveGuestBinary } from './transport.js';
 import type { ExecTransport, TransportCommand } from './transport.js';
 
 /**
@@ -36,6 +36,13 @@ export interface SandboxSpec {
 
 export interface LauncherDetection {
   readonly available: boolean;
+  /**
+   * Whether the guest answered when this was detected.
+   *
+   * SPEC: finding QTS-PREREQ-NOREACH. `available: false` meant both "bubblewrap is not
+   * installed" and "the guest never answered", and the second cannot establish the first.
+   */
+  readonly reach: GuestReach;
   readonly version?: string;
   /** What was actually observed. Never "should be present". */
   readonly detail: string;
@@ -131,9 +138,19 @@ export class BubblewrapLauncher implements SandboxLauncher {
       timeoutMs: 20_000,
       maxOutputBytes: 20_000,
     });
-    if (r.spawnFailed || r.exitCode !== 0) {
+    if (r.spawnFailed || r.reach !== GuestReach.REACHED) {
       return {
         available: false,
+        reach: GuestReach.NOT_REACHED,
+        detail: 'the guest could not be reached to detect ' + this.binary,
+        remedy: 'Check the transport to the execution environment, then try again.',
+        observations: {},
+      };
+    }
+    if (r.exitCode !== 0) {
+      return {
+        available: false,
+        reach: GuestReach.REACHED,
         detail:
           '`' +
           this.binary +
@@ -147,6 +164,7 @@ export class BubblewrapLauncher implements SandboxLauncher {
     this.resolved = (await resolveGuestBinary(transport, this.binary)).path;
     return {
       available: true,
+      reach: GuestReach.REACHED,
       version,
       detail: 'bubblewrap responded: ' + version + ' at ' + (this.resolved ?? '(unresolved)'),
       observations: {
@@ -233,7 +251,13 @@ export class UnimplementedLauncher implements SandboxLauncher {
   }
 
   async detect(): Promise<LauncherDetection> {
-    return { available: false, detail: this.reason, observations: {} };
+    /* Nothing was asked of any guest: this launcher refuses before it would. */
+    return {
+      available: false,
+      reach: GuestReach.UNKNOWN,
+      detail: this.reason,
+      observations: {},
+    };
   }
 
   wrap(command: TransportCommand): TransportCommand {

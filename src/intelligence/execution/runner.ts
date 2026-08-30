@@ -36,6 +36,7 @@ import type { z } from 'zod';
 import type { Store, Transaction } from '../../store/store.js';
 import type { AgentContract } from '../../agents/schema.js';
 import type { IntelligenceMeta } from '../provenance.js';
+import { isAuthoritativeOwnerAnswer } from '../artifacts/governance.js';
 
 /**
  * THE ONE INTELLIGENCE DEPARTMENT RUNNER.
@@ -599,7 +600,15 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     .list()
     .filter(
       (d) =>
-        d.state === 'ANSWERED' &&
+        /*
+         * SPEC: finding F1-OWNER-ANSWER-TRUST.
+         *
+         * This filtered on `state === 'ANSWERED'` plus self-attribution, which is the two
+         * conditions a fabricating department satisfies most easily. What reaches a
+         * department's TRUSTED context as "the owner answered X. Proceed on it." must be an
+         * answer the owner actually gave.
+         */
+        isAuthoritativeOwnerAnswer(d) &&
         (d.chosenOption !== undefined || d.answerValue !== undefined) &&
         d.meta.attribution.agentId === config.agentId &&
         d.meta.workItemId === ctx.workItemId,

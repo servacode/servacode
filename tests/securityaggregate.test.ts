@@ -333,16 +333,43 @@ describe('the aggregate re-resolves the runs it aggregates', () => {
       coverage: ScopeCoverage.COMPLETE,
       filesReviewed: ['src/engineering/reconcile.ts'],
       filesOmitted: [],
-      findings: [],
       verdict: ReviewVerdict.ACCEPTED,
       terminalOutcome: 'COMPLETED',
-      /* Later than the seeded attempt, so this is the one coverage resolves from. */
+      /* Later than the seeded attempt, and it still contributes nothing. */
       reviewedAt: '2026-08-26T00:00:00.000Z',
+      findings: [
+        {
+          id: 'FORGED-1',
+          severity: Severity.INFO,
+          area: 'Reconciliation',
+          statement: 'a finding nobody governed',
+          evidence: ['src/engineering/reconcile.ts:1'],
+          resolved: false,
+        },
+      ],
     });
 
+    /*
+     * A record citing a run nobody made is IGNORED rather than obeyed — in both directions.
+     * It contributes no findings, and it cannot block a legitimate review either, which
+     * matters because anyone who could forge one could otherwise deny acceptance by writing
+     * garbage into the store.
+     */
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+    expect(JSON.stringify(result.review?.findings ?? [])).not.toContain('FORGED-1');
+    expect(result.scopeRunIds).not.toContain('SC-RUN-INVENTED');
+  });
+
+  it('a fabricated record ALONE cannot satisfy a scope', () => {
+    /* Ignored is not accepted: with no legitimate attempt behind it, the scope is uncovered. */
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === 'Reconciliation' ? { reviewerRunId: 'SC-RUN-INVENTED' } : {},
+    );
     const result = aggregate(rt);
     expect(result.review).toBeUndefined();
-    expect(result.refusals.join(' ')).toMatch(/does not resolve|does not exist/i);
+    expect(result.refusals.join(' ')).toMatch(/Reconciliation/);
   });
 
   it('refuses a reviewer run that did not COMPLETE, whatever the record claims', () => {

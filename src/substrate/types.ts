@@ -66,15 +66,76 @@ export interface Prerequisite {
   readonly why: string;
   readonly remedy: string;
   readonly satisfied: boolean;
-  /**
-   * Whether the guest answered when this was checked.
-   *
-   * SPEC: finding QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A. `satisfied: false` used to mean
-   * both "the guest says no" and "the guest never answered", and a qualification cannot be
-   * MEASURED on the second. Optional only because prerequisites established without touching
-   * a guest have no reach to report.
-   */
-  readonly reach?: GuestReach;
+}
+
+/**
+ * A PREREQUISITE ESTABLISHED BY ASKING THE GUEST — WHICH MEANS REACH IS NOT OPTIONAL.
+ *
+ * SPEC: findings QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A and QTS-PREREQ-NOREACH.
+ *
+ * `reach` was added as an optional field and supplied at one of the four guest-derived
+ * producers. The consumer filtered `p.reach !== undefined && p.reach !== REACHED`, so the
+ * three that omitted it could never be counted as unreached — and a partial transport failure
+ * still recorded a MEASURED qualification of a machine nothing had measured.
+ *
+ * That is the same defect twice, and the second time was caused by the shape of the first fix:
+ * an optional field is a field somebody forgets. A discriminated union makes forgetting it a
+ * type error instead, so a producer added later cannot omit reach unnoticed.
+ */
+export interface GuestPrerequisite extends Prerequisite {
+  readonly source: 'GUEST';
+  /** Required. `satisfied: false` from an unreached guest establishes nothing. */
+  readonly reach: GuestReach;
+}
+
+/** A prerequisite established without asking the guest — a local version string, say. */
+export interface LocalPrerequisite extends Prerequisite {
+  readonly source: 'LOCAL';
+}
+
+export type AnyPrerequisite = GuestPrerequisite | LocalPrerequisite;
+
+/**
+ * The only supported way to record a guest-derived prerequisite.
+ *
+ * A constructor rather than a bare object literal, so `reach` is demanded by the compiler and
+ * the structural test can name one canonical path.
+ */
+export function guestPrerequisite(o: {
+  readonly id: string;
+  readonly what: string;
+  readonly why: string;
+  readonly remedy: string;
+  readonly satisfied: boolean;
+  readonly reach: GuestReach;
+}): GuestPrerequisite {
+  return {
+    ...o,
+    source: 'GUEST',
+    /* An unreached guest establishes neither presence nor absence, so it is never satisfied. */
+    satisfied: o.reach === 'REACHED' && o.satisfied,
+  };
+}
+
+/** The only supported way to record a prerequisite no guest was asked about. */
+export function localPrerequisite(o: {
+  readonly id: string;
+  readonly what: string;
+  readonly why: string;
+  readonly remedy: string;
+  readonly satisfied: boolean;
+}): LocalPrerequisite {
+  return { ...o, source: 'LOCAL' };
+}
+
+/**
+ * Was this prerequisite left undecided because the guest never answered?
+ *
+ * The one predicate consumers use. A LOCAL prerequisite is always decided — nothing about a
+ * transport can make a local fact unknown.
+ */
+export function unreachedPrerequisite(p: AnyPrerequisite): boolean {
+  return p.source === 'GUEST' && p.reach !== 'REACHED';
 }
 
 export interface SubstrateProbe {
@@ -95,7 +156,7 @@ export interface SubstrateProbe {
   readonly simulated?: boolean;
   readonly engineVersion: string;
   readonly sandboxVersion?: string;
-  readonly prerequisites: readonly Prerequisite[];
+  readonly prerequisites: readonly AnyPrerequisite[];
   /** Raw, non-secret observations, kept so a reviewer can audit the conclusion. */
   readonly observations: Readonly<Record<string, string>>;
   readonly probedAt: string;

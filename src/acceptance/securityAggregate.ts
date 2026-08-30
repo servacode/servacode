@@ -42,70 +42,145 @@ export interface AggregateOutcome {
 }
 
 /**
- * The most recent attempt at each scope, which decides COVERAGE.
+ * ONE PLACE THAT DECIDES WHETHER A REVIEW ATTEMPT MEANS ANYTHING.
  *
- * Coverage is a property of the latest look: an area reviewed completely today is covered
- * however badly an earlier attempt went. FINDINGS are not treated this way — see below.
+ * SPEC: HIGH findings SC-SSA-F1, SC-SSA-REV-001, SC-SSA-F2.
+ *
+ * Three defects, one cause: raw stored records were consumed in one place while canonical run
+ * resolution happened in another. The aggregate resolved the reviewer run of the LATEST record
+ * per scope and then read findings — and their `resolved` flags — from EVERY record. So a
+ * record whose run nobody resolved could still clear a blocker, as long as it named the right
+ * commit and tree. Commit and tree are public, so that was authority on a boolean plus two
+ * derivable values.
+ *
+ * A stored record is a claim. This is the only function that turns one into evidence, and
+ * nothing downstream may read a raw record again: findings, resolutions, coverage, terminal
+ * outcome and verdict all arrive through here or not at all.
  */
-function latestByScope(reviews: readonly ScopeReview[]): Map<string, ScopeReview> {
-  const latest = new Map<string, ScopeReview>();
-  for (const r of reviews) {
-    const seen = latest.get(r.scopeId);
-    if (seen === undefined || r.reviewedAt >= seen.reviewedAt) latest.set(r.scopeId, r);
+export interface ResolvedAttempt {
+  readonly record: ScopeReview;
+  /** Why this attempt carries no authority. Empty means it does. */
+  readonly refusals: readonly string[];
+}
+
+export function resolveSecurityReviewAttempt(
+  store: Store,
+  record: ScopeReview,
+  repository: RepositoryIdentity,
+  registry: ContractRegistry,
+): ResolvedAttempt {
+  const refusals: string[] = [];
+  const where = '"' + record.scopeName + '"';
+
+  /* The implementation it judged, re-derived rather than read. */
+  if (record.implementationCommit !== repository.commit) {
+    refusals.push(
+      where +
+        ' was reviewed at commit ' +
+        record.implementationCommit.slice(0, 12) +
+        ' and this package is ' +
+        repository.commit.slice(0, 12),
+    );
   }
-  return latest;
+  if (record.treeDigest !== repository.tree) {
+    refusals.push(where + ' was reviewed against a different tree than this package is');
+  }
+
+  /*
+   * The run, resolved for EVERY attempt rather than only the latest. This is SC-SSA-F1: the
+   * per-unit loop checked one record and `currentFindings` read them all.
+   */
+  const run = readRun(store, record.reviewerRunId);
+  if (run === undefined) {
+    refusals.push(
+      where + ' cites reviewer run ' + record.reviewerRunId + ', which does not resolve',
+    );
+  } else {
+    if (run.outcome !== 'COMPLETED') {
+      refusals.push(
+        'reviewer run ' +
+          record.reviewerRunId +
+          ' for ' +
+          where +
+          ' ended ' +
+          String(run.outcome) +
+          ', so it reviewed nothing',
+      );
+    }
+    if (run.agentId !== record.reviewerAgentId) {
+      refusals.push(
+        'reviewer run ' +
+          record.reviewerRunId +
+          ' was made by ' +
+          String(run.agentId) +
+          ', not the ' +
+          record.reviewerAgentId +
+          ' the record names',
+      );
+    }
+  }
+
+  /* The authority, from the contract that binds the reviewer. */
+  const authority = reviewerAuthorityOf(record.reviewerAgentId, registry);
+  if (authority === undefined) {
+    refusals.push(
+      record.reviewerAgentId + ' holds no contract, so it holds no authority to certify',
+    );
+  } else if (!VERIFIER_AUTHORITIES.includes(authority.toUpperCase())) {
+    refusals.push(
+      record.reviewerAgentId +
+        ' holds ' +
+        authority +
+        ', which is not a verifier authority; an agent that can produce cannot certify',
+    );
+  }
+  if (implementationProducersFrom(store).has(record.reviewerAgentId)) {
+    refusals.push(record.reviewerAgentId + ' produced implementation in this store');
+  }
+
+  return { record, refusals };
+}
+
+const VERIFIER_AUTHORITIES: readonly string[] = ['VERIFY', 'REVIEW', 'ASSESS'];
+
+function readRun(
+  store: Store,
+  runId: string,
+): { readonly agentId?: string; readonly outcome?: string } | undefined {
+  try {
+    return store.getCanon<{ agentId?: string; outcome?: string }>('agentRunRecord', runId)?.body;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * WHAT IS UNRESOLVED AT **THIS** IMPLEMENTATION, NOT WHICH IDS HISTORY CAN SUBTRACT.
+ * WHAT IS UNRESOLVED AT THIS IMPLEMENTATION, FROM CANONICALLY RESOLVED ATTEMPTS ONLY.
  *
- * SPEC: HIGH findings SC-SSA-F2 and SC-SSA-REV-001.
+ * Two shapes were wrong before, in opposite directions. Reading only the LATEST attempt let a
+ * retry mute a finding by not re-reporting it; reading EVERY attempt let history — and
+ * unresolved attempts — mute the present.
  *
- * Two defects, one function, and they pull in opposite directions.
- *
- *   Reading only the LATEST attempt let a retry mute a finding by not re-reporting it. A
- *   later silence is not a fix.
- *
- *   Reading EVERY attempt and subtracting any id ever marked `resolved` was worse: a
- *   `resolved: true` written against any past tree permanently suppressed that id at every
- *   later commit. Finding ids are area-namespaced and reviewer-numbered — `F-1` — so a
- *   regression re-introducing the same defect collided with the old id and stayed muted. This
- *   is the one place a blocking CRITICAL can be cleared, and it cleared on a boolean.
- *
- * The question asked is therefore neither of those. Findings are gathered from the attempts
- * bound to the CURRENT commit and tree — every one of them, so a retry cannot mute a sibling
- * attempt — and history is not consulted at all, so it cannot mute the present.
- *
- * A resolution still works, and now says where: it must name the same commit and tree it is
- * being applied to. `resolvedNote` remains free text and remains no authority.
+ * So: every attempt bound to this implementation AND canonically resolved contributes, and
+ * nothing else is consulted. A `{resolved: true}` inside an attempt that does not resolve has
+ * no authority at all, which is what SC-SSA-F1 was about.
  */
 function currentFindings(
-  reviews: readonly ScopeReview[],
+  attempts: readonly ResolvedAttempt[],
   scopeId: string,
   repository: RepositoryIdentity,
 ): readonly ScopeFinding[] {
-  const atThisImplementation = reviews.filter(
-    (r) =>
-      r.scopeId === scopeId &&
-      r.implementationCommit === repository.commit &&
-      r.treeDigest === repository.tree,
-  );
+  const usable = attempts.filter((a) => a.refusals.length === 0 && a.record.scopeId === scopeId);
 
   const byId = new Map<string, ScopeFinding>();
-  for (const r of atThisImplementation) {
-    for (const f of r.findings) {
-      /*
-       * A resolution counts only when it names THIS implementation. Anything else — a bare
-       * boolean, a note, a commit that is not this one — leaves the finding standing.
-       */
-      const resolvedHere =
-        f.resolved &&
-        f.resolvedAtCommit === repository.commit &&
-        f.resolvedAtTree === repository.tree;
-
+  for (const a of usable) {
+    for (const f of a.record.findings) {
       const seen = byId.get(f.id);
       /* Within one implementation a later resolution wins; a later silence still does not. */
-      if (seen === undefined || (!isResolvedHere(seen, repository) && resolvedHere)) {
+      if (
+        seen === undefined ||
+        (!isResolvedHere(seen, repository) && isResolvedHere(f, repository))
+      ) {
         byId.set(f.id, f);
       }
     }
@@ -113,7 +188,13 @@ function currentFindings(
   return [...byId.values()];
 }
 
-/** Is this finding's resolution bound to the implementation being judged? */
+/**
+ * Is this finding's resolution bound to the implementation being judged?
+ *
+ * A resolution is evidence about one defect at one implementation state. Without the state it
+ * is an assertion, and finding ids are reviewer-numbered, so a regression collided with an old
+ * id and stayed muted.
+ */
 function isResolvedHere(f: ScopeFinding, repository: RepositoryIdentity): boolean {
   return (
     f.resolved === true &&
@@ -123,10 +204,17 @@ function isResolvedHere(f: ScopeFinding, repository: RepositoryIdentity): boolea
 }
 
 export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome {
-  const store = input.store;
   const refusals: string[] = [];
-  const all = listScopeReviews(input.store);
-  const latest = latestByScope(all);
+
+  /*
+   * EVERY attempt is resolved, once, here. Nothing below reads a raw stored record: an
+   * attempt that does not resolve contributes no findings, no resolutions, no coverage and no
+   * verdict — which is what SC-SSA-F1 was about.
+   */
+  const attempts = listScopeReviews(input.store).map((record) =>
+    resolveSecurityReviewAttempt(input.store, record, input.repository, input.registry),
+  );
+  const usable = attempts.filter((a) => a.refusals.length === 0);
 
   const contributing: ScopeReview[] = [];
   const findings: ScopeFinding[] = [];
@@ -136,34 +224,35 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
    * COVERAGE IS DECIDED PER UNIT AND REPORTED PER AREA.
    *
    * An area split into sub-scopes is covered only when every one of its units is. Splitting a
-   * thing you cannot finish does not finish it — it only makes the gap easier to see, which is
-   * the whole point of splitting it.
+   * thing you cannot finish does not finish it — it only makes the gap easier to see.
    */
   for (const area of REQUIRED_SCOPE) {
     for (const { unit } of reviewUnitsFor(area)) {
-      const record = latest.get(scopeIdOf(unit));
+      const scopeId = scopeIdOf(unit);
 
-      if (record === undefined) {
-        refusals.push('no security review is recorded for "' + unit + '" (' + area + ')');
+      /* The latest attempt that ACTUALLY RESOLVES decides coverage for this unit. */
+      const forUnit = usable
+        .filter((a) => a.record.scopeId === scopeId)
+        .sort((a, b) => (a.record.reviewedAt < b.record.reviewedAt ? 1 : -1));
+      const resolved = forUnit[0];
+
+      if (resolved === undefined) {
+        /* Say WHY when an attempt exists but carries no authority; silence would mislead. */
+        const rejected = attempts.filter((a) => a.record.scopeId === scopeId);
+        refusals.push(
+          rejected.length === 0
+            ? 'no security review is recorded for "' + unit + '" (' + area + ')'
+            : 'no security review for "' +
+                unit +
+                '" carries authority: ' +
+                rejected.flatMap((a) => a.refusals).join('; '),
+        );
         continue;
       }
 
+      const record = resolved.record;
       contributing.push(record);
       reviewers.add(record.reviewerAgentId);
-
-      if (record.implementationCommit !== input.repository.commit) {
-        refusals.push(
-          '"' +
-            unit +
-            '" was reviewed at commit ' +
-            record.implementationCommit.slice(0, 12) +
-            ' and this package is ' +
-            input.repository.commit.slice(0, 12),
-        );
-      }
-      if (record.treeDigest !== input.repository.tree) {
-        refusals.push('"' + unit + '" was reviewed against a different tree than this package is');
-      }
 
       if (record.coverage !== ScopeCoverage.COMPLETE) {
         refusals.push(
@@ -188,59 +277,11 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
         );
       }
 
-      /*
-       * THE RUN IS RESOLVED, NOT READ OFF THE RECORD.
-       *
-       * SPEC: HIGH finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-F1.
-       *
-       * This module derived authority and independence canonically and then believed each
-       * record's own `terminalOutcome` about whether its run happened at all.
-       * `resolveSecurityReview` performs exactly this check a few files away, with a comment
-       * saying why — so the fix was in view and simply not applied here. Downstream,
-       * `resolveProof` re-verifies only the ONE run the aggregate names, which left the other
-       * twenty-one confirmed by nobody.
-       */
-      const run = store.getCanon<{ agentId?: string; outcome?: string }>(
-        'agentRunRecord',
-        record.reviewerRunId,
-      )?.body;
-
-      if (run === undefined) {
-        refusals.push(
-          '"' + unit + '" cites reviewer run ' + record.reviewerRunId + ', which does not resolve',
-        );
-      } else {
-        if (run.outcome !== 'COMPLETED') {
-          refusals.push(
-            'reviewer run ' +
-              record.reviewerRunId +
-              ' for "' +
-              unit +
-              '" ended ' +
-              String(run.outcome) +
-              ', so it reviewed nothing',
-          );
-        }
-        if (run.agentId !== record.reviewerAgentId) {
-          refusals.push(
-            'reviewer run ' +
-              record.reviewerRunId +
-              ' for "' +
-              unit +
-              '" was made by ' +
-              String(run.agentId) +
-              ', not the ' +
-              record.reviewerAgentId +
-              ' the record names',
-          );
-        }
-      }
-
       if (record.verdict === ReviewVerdict.NOT_VERIFIED) {
         refusals.push('"' + unit + '" returned NOT_VERIFIED, so it decided nothing');
       }
 
-      findings.push(...currentFindings(all, record.scopeId, input.repository));
+      findings.push(...currentFindings(usable, scopeId, input.repository));
     }
   }
 

@@ -6,7 +6,11 @@ import { appendLedgerEntry } from '../../lifecycle/stages.js';
 import { getCatalogues } from '../../catalogue/index.js';
 import { resolveApplicability } from '../applicability.js';
 import { ARTIFACT_TYPES, repository } from '../repository.js';
-import { OwnerDecisionRequestSchema, ownerDecisionRefusal } from '../artifacts/governance.js';
+import {
+  OwnerDecisionRequestSchema,
+  isAuthoritativeOwnerAnswer,
+  ownerDecisionRefusal,
+} from '../artifacts/governance.js';
 import { runDepartment } from './runner.js';
 import { validateDepartmentAuthority } from './authority.js';
 import { dischargeObligations } from './obligations.js';
@@ -295,12 +299,14 @@ export class IntelligenceOrchestrator {
         unresolved.push(id + ' (not found)');
         continue;
       }
-      if (d.state !== 'ANSWERED') {
-        unresolved.push(id + ' (' + d.state + ')');
-        continue;
-      }
+      /*
+       * The same predicate the other consumers use, so there is one definition — and when it
+       * refuses, SAY WHY. "waiting on the owner" and "this answer was written by an agent"
+       * are different situations, and the owner can only act on the second if told.
+       */
+      if (isAuthoritativeOwnerAnswer(d)) continue;
       const refusal = ownerDecisionRefusal(d);
-      if (refusal !== undefined) unresolved.push(id + ': ' + refusal);
+      unresolved.push(refusal === undefined ? id + ' (' + d.state + ')' : id + ': ' + refusal);
     }
     return unresolved;
   }

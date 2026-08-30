@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import { GuestReach } from './transport.js';
 import { fail } from '../core/errors.js';
 import { GUEST_PATH } from './transport.js';
 import type { ExecTransport, TransportCommand } from './transport.js';
@@ -107,9 +108,20 @@ export class ClaudeSandboxLauncher implements SandboxLauncher {
       maxOutputBytes: 200_000,
     });
 
-    if (help.spawnFailed || (help.exitCode !== 0 && help.stdout.length === 0)) {
+    /* Unreached first: a guest that never answered has not told us this is missing. */
+    if (help.spawnFailed || help.reach !== GuestReach.REACHED) {
       return {
         available: false,
+        reach: GuestReach.NOT_REACHED,
+        detail: 'the guest could not be reached to detect the sandbox launcher',
+        remedy: 'Check the transport to the execution environment, then try again.',
+        observations: {},
+      };
+    }
+    if (help.exitCode !== 0 && help.stdout.length === 0) {
+      return {
+        available: false,
+        reach: GuestReach.REACHED,
         detail:
           'The Claude sandbox runtime (`' +
           this.binary +
@@ -124,6 +136,7 @@ export class ClaudeSandboxLauncher implements SandboxLauncher {
     if (flag === undefined) {
       return {
         available: false,
+        reach: GuestReach.REACHED,
         detail:
           'The sandbox runtime responded but exposes none of the settings flags Serva knows how to use (' +
           SETTINGS_FLAGS.join(', ') +
@@ -151,6 +164,7 @@ export class ClaudeSandboxLauncher implements SandboxLauncher {
 
     return {
       available: true,
+      reach: GuestReach.REACHED,
       version: this.version,
       detail: 'Claude sandbox runtime ' + this.version + ', settings flag ' + flag + '.',
       observations: {

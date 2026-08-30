@@ -21,9 +21,9 @@ import {
 } from '../substrate/transport.js';
 import { BoundaryPurpose, executionBoundary } from '../substrate/boundary.js';
 import { buildSandboxProfile } from './sandboxProfile.js';
-import { engineeringAuthorityRefusal } from '../substrate/types.js';
+import { engineeringAuthorityRefusal, guestPrerequisite } from '../substrate/types.js';
 import type { ExecutionBoundary } from '../substrate/boundary.js';
-import type { Prerequisite, SubstrateQualification } from '../substrate/types.js';
+import type { AnyPrerequisite, Prerequisite, SubstrateQualification } from '../substrate/types.js';
 import type { EngineCapabilities, EngineStatus } from '../engine/types.js';
 import type { ProcessLauncher } from '../engine/processLauncher.js';
 import type { Clock } from '../core/clock.js';
@@ -232,36 +232,59 @@ export async function resolveEngineeringEngine(
   const status = await adapter.health();
   const capabilities = await adapter.capabilities();
 
-  const authPrereqs: Prerequisite[] = [];
-  authPrereqs.push({
-    id: 'GUEST_ENGINE_AUTH',
-    what: 'An authenticated Claude Code in the execution environment',
-    why: 'The engine cannot run a session without it, and a Producer dispatched into an unauthenticated engine burns a worktree to discover that.',
-    remedy:
-      'Run `claude` once inside the execution environment and sign in there. Serva never copies credentials across, never extracts a token, and never logs in for you.',
-    satisfied: status.authenticated,
-  });
-  authPrereqs.push({
-    id: 'GUEST_ENGINE_BILLING',
-    what: 'An acceptable billing route in the execution environment',
-    why: "A guest configured for an API-key or third-party-cloud route bills differently from the owner's subscription, and a Producer is not the place to discover that (SC-POL-035).",
-    remedy:
-      'Unset ' +
-      [...API_BILLING_ENV_VARS, ...THIRD_PARTY_ENV_VARS].join(', ') +
-      ' inside the execution environment, or accept that route explicitly.',
-    satisfied: status.state !== EngineHealthState.BILLING_ROUTE_REFUSED,
-  });
-  authPrereqs.push({
-    id: 'GUEST_ENGINE_CAPABILITIES',
-    what: 'An engine that supports structured output, tool restriction and settings isolation',
-    why: 'Serva governs a run through exactly those three mechanisms. An engine missing any of them cannot be governed, only hoped at.',
-    remedy: 'Update Claude Code inside the execution environment.',
-    satisfied:
-      capabilities.supportsStructuredOutput &&
-      capabilities.supportsToolRestriction &&
-      capabilities.supportsAmbientConfigIsolation &&
-      capabilities.supportsNonInteractivePermissions,
-  });
+  /*
+   * Did the engine answer at all?
+   *
+   * SPEC: finding QTS-PREREQ-NOREACH. `UNAVAILABLE` is the health probe saying it could not
+   * reach the engine — which establishes nothing about authentication or billing, and must
+   * not be recorded as a measured absence of either.
+   */
+  const engineReach =
+    status.state === EngineHealthState.UNAVAILABLE ? GuestReach.NOT_REACHED : GuestReach.REACHED;
+
+  const authPrereqs: AnyPrerequisite[] = [];
+  /*
+   * Guest-derived: the engine health probe ran in the execution environment, so an unreached
+   * guest cannot establish that authentication is missing. `status.reach` carries that.
+   */
+  authPrereqs.push(
+    guestPrerequisite({
+      id: 'GUEST_ENGINE_AUTH',
+      what: 'An authenticated Claude Code in the execution environment',
+      why: 'The engine cannot run a session without it, and a Producer dispatched into an unauthenticated engine burns a worktree to discover that.',
+      remedy:
+        'Run `claude` once inside the execution environment and sign in there. Serva never copies credentials across, never extracts a token, and never logs in for you.',
+      satisfied: status.authenticated,
+      reach: engineReach,
+    }),
+  );
+  authPrereqs.push(
+    guestPrerequisite({
+      id: 'GUEST_ENGINE_BILLING',
+      what: 'An acceptable billing route in the execution environment',
+      why: "A guest configured for an API-key or third-party-cloud route bills differently from the owner's subscription, and a Producer is not the place to discover that (SC-POL-035).",
+      remedy:
+        'Unset ' +
+        [...API_BILLING_ENV_VARS, ...THIRD_PARTY_ENV_VARS].join(', ') +
+        ' inside the execution environment, or accept that route explicitly.',
+      satisfied: status.state !== EngineHealthState.BILLING_ROUTE_REFUSED,
+      reach: engineReach,
+    }),
+  );
+  authPrereqs.push(
+    guestPrerequisite({
+      id: 'GUEST_ENGINE_CAPABILITIES',
+      what: 'An engine that supports structured output, tool restriction and settings isolation',
+      why: 'Serva governs a run through exactly those three mechanisms. An engine missing any of them cannot be governed, only hoped at.',
+      remedy: 'Update Claude Code inside the execution environment.',
+      satisfied:
+        capabilities.supportsStructuredOutput &&
+        capabilities.supportsToolRestriction &&
+        capabilities.supportsAmbientConfigIsolation &&
+        capabilities.supportsNonInteractivePermissions,
+      reach: engineReach,
+    }),
+  );
 
   /* ------------------------- 3. qualify the boundary the Producer will really use */
 

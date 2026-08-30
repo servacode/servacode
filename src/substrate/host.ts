@@ -9,7 +9,8 @@ import {
   type ExecuteRequest,
   type ExecuteResult,
   type ExecutionSubstrate,
-  type Prerequisite,
+  type AnyPrerequisite,
+  localPrerequisite,
   type SubstrateCapabilities,
   type SubstrateProbe,
   type SubstrateQualification,
@@ -150,13 +151,13 @@ export async function selectExecutionSubstrate(
         engineVersion: opts.engineVersion,
         hostPlatform: platform,
         prerequisites: [
-          {
+          localPrerequisite({
             id: 'SUPPORTED_PLATFORM',
             what: 'A platform Serva can contain a process on (Linux, WSL2, or macOS)',
             why: 'Containment is platform-specific. Serva has no mechanism for this one, so it cannot measure a boundary here.',
             remedy: 'Run the engineering engine on Linux, or on Windows with WSL2.',
             satisfied: false,
-          },
+          }),
         ],
       }),
       basis: 'Unsupported platform ' + platform + '.',
@@ -181,7 +182,7 @@ export async function selectExecutionSubstrate(
             .join(', '),
         },
         prerequisites: [
-          {
+          localPrerequisite({
             id: 'WSL_DISTRIBUTION',
             what:
               requested === undefined
@@ -193,7 +194,7 @@ export async function selectExecutionSubstrate(
                 ? 'Install WSL2 and a Linux distribution, then re-run `serva engineering doctor`. Serva will not install it for you.'
                 : 'Install that distribution, or unset SERVA_WSL_DISTRO to use the default.',
             satisfied: false,
-          },
+          }),
         ],
       }),
       basis:
@@ -211,13 +212,13 @@ export async function selectExecutionSubstrate(
         hostPlatform: 'win32',
         guestPlatform: selected.name,
         prerequisites: [
-          {
+          localPrerequisite({
             id: 'WSL_VERSION_2',
             what: 'WSL version 2 for ' + selected.name,
             why: 'WSL1 does not provide the kernel features bubblewrap needs, so nothing can be contained there.',
             remedy: 'wsl --set-version ' + selected.name + ' 2',
             satisfied: false,
-          },
+          }),
         ],
       }),
       basis: 'Windows host: ' + selected.name + ' is WSL' + String(selected.version) + '.',
@@ -252,7 +253,7 @@ export class UnqualifiableSubstrate implements ExecutionSubstrate {
     private readonly opts: {
       readonly clock: Clock;
       readonly engineVersion: string;
-      readonly prerequisites: readonly Prerequisite[];
+      readonly prerequisites: readonly AnyPrerequisite[];
       readonly hostPlatform: string;
       readonly guestPlatform?: string;
       readonly observations?: Readonly<Record<string, string>>;

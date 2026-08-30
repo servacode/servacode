@@ -16,6 +16,7 @@ import {
   type SubstrateCapabilities,
   type SubstrateProbe,
   type SubstrateQualification,
+  localPrerequisite,
 } from './types.js';
 import { QUALIFICATION_CASES } from './qualification.js';
 import { BoundaryPurpose, executionBoundary, type ExecutionBoundary } from './boundary.js';
@@ -84,13 +85,13 @@ export class SimulatedExecutionSubstrate implements ExecutionSubstrate {
       simulated: true,
       engineVersion: this.opts.engineVersion ?? '0.0.0-fake',
       prerequisites: [
-        {
+        localPrerequisite({
           id: 'FAKE_READY',
           what: 'the simulated substrate',
           why: 'It exists only for tests and has no external dependency.',
           remedy: 'none',
           satisfied: this.enforcement !== 'NONE',
-        },
+        }),
       ],
       observations: { enforcement: this.enforcement },
       probedAt: this.opts.clock.now(),

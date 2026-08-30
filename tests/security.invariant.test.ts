@@ -11,6 +11,13 @@ import {
   supportedVerdict,
   verdictIsAffirmative,
 } from '../src/intelligence/departments/verdictSupport.js';
+import {
+  guestPrerequisite,
+  localPrerequisite,
+  unreachedPrerequisite,
+} from '../src/substrate/types.js';
+import { GuestReach } from '../src/substrate/transport.js';
+import { isAuthoritativeOwnerAnswer } from '../src/intelligence/artifacts/governance.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -529,6 +536,206 @@ describe('a decision-bearing verdict is resolved, never read raw from a document
       raw,
       'these compare a raw verdict from a document; route them through verdictIsAffirmative:\n' +
         raw.join('\n'),
+    ).toEqual([]);
+  });
+});
+
+/* ====== A: one canonical way to record a guest-derived prerequisite ====== */
+
+describe('a guest prerequisite cannot be built without its reach', () => {
+  /*
+   * SPEC: findings QUALIFICATION-TRANSPORT-SEMANTICS/QTS-A and QTS-PREREQ-NOREACH.
+   *
+   * The first fix added `reach` as an OPTIONAL field and supplied it at one of the four
+   * guest-derived producers. The consumer filtered `p.reach !== undefined && p.reach !==
+   * REACHED`, so the three that omitted it could never be counted as unreached — and the same
+   * defect came back, caused by the shape of its own fix.
+   *
+   * An optional field is a field somebody forgets. `guestPrerequisite` demands reach at the
+   * type level and `unreachedPrerequisite` is the single predicate consumers use, so the
+   * question "did anyone forget?" is answered by the compiler rather than by a reviewer.
+   */
+  it('an unreached guest never satisfies a prerequisite, whatever the caller passes', () => {
+    /* Even asked for `satisfied: true`, an unreached probe establishes nothing. */
+    const p = guestPrerequisite({
+      id: 'GUEST_NODE',
+      what: 'node',
+      why: 'recipes run in the guest',
+      remedy: 'install node',
+      satisfied: true,
+      reach: GuestReach.NOT_REACHED,
+    });
+    expect(p.satisfied).toBe(false);
+    expect(unreachedPrerequisite(p)).toBe(true);
+  });
+
+  it('a reached guest reporting absence is a real negative measurement', () => {
+    const p = guestPrerequisite({
+      id: 'GUEST_NODE',
+      what: 'node',
+      why: 'recipes run in the guest',
+      remedy: 'install node',
+      satisfied: false,
+      reach: GuestReach.REACHED,
+    });
+    expect(p.satisfied).toBe(false);
+    expect(unreachedPrerequisite(p), 'a measured absence is not a transport failure').toBe(false);
+  });
+
+  it('UNKNOWN reach is unreached, not satisfied', () => {
+    const p = guestPrerequisite({
+      id: 'GUEST_NODE',
+      what: 'node',
+      why: 'x',
+      remedy: 'y',
+      satisfied: true,
+      reach: GuestReach.UNKNOWN,
+    });
+    expect(unreachedPrerequisite(p)).toBe(true);
+    expect(p.satisfied).toBe(false);
+  });
+
+  it('a local prerequisite is never unreached, because no guest was asked', () => {
+    const p = localPrerequisite({
+      id: 'ENGINE_VERSION',
+      what: 'a parseable engine version',
+      why: 'x',
+      remedy: 'y',
+      satisfied: false,
+    });
+    expect(unreachedPrerequisite(p)).toBe(false);
+  });
+
+  it('no production code builds a prerequisite by object literal', () => {
+    /*
+     * The structural half. A `prerequisites.push({...})` literal is how three producers came
+     * to omit reach; the constructors are the only supported path, so a new producer that
+     * bypasses them fails here rather than in a security review six weeks later.
+     */
+    const files = execSync('git ls-files src', { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map((f) => f.trim())
+      .filter((f) => f.endsWith('.ts'));
+
+    const literals: string[] = [];
+    for (const file of files) {
+      if (file === 'src/substrate/types.ts') continue; /* where the constructors live */
+      const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+      for (const [i, line] of lines.entries()) {
+        if (!/prerequisites(\.push\(|: \[)\s*\{|prerequisites\.push\(\{/.test(line)) continue;
+        literals.push(file + ':' + String(i + 1) + '  ' + line.trim());
+      }
+    }
+    expect(
+      literals,
+      'build these with guestPrerequisite() or localPrerequisite() so reach cannot be ' +
+        'omitted:\n' +
+        literals.join('\n'),
+    ).toEqual([]);
+  });
+
+  it('the qualification consumer uses the canonical predicate', () => {
+    /* One predicate, so "is this unreached?" cannot be re-answered differently elsewhere. */
+    const source = readFileSync('src/substrate/sandboxed.ts', 'utf8');
+    expect(source).toContain('unreachedPrerequisite');
+    expect(source).not.toMatch(/p\.reach !== undefined/);
+  });
+});
+
+/* ====== C: one predicate decides whether the owner answered ====== */
+
+describe('an owner answer is proved, not asserted by state', () => {
+  /*
+   * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/F1-OWNER-ANSWER-TRUST.
+   *
+   * `ownerDecisionRefusal` always knew what a real owner answer looks like, and only one of
+   * its three consumers asked it. The other two filtered on `state === 'ANSWERED'` alone —
+   * and `OWNER_DECISION_REQUEST` is universal, so a department could persist an ANSWERED
+   * decision attributed to itself, suppress the question the owner should have been asked,
+   * and feed "the owner answered X. Proceed on it." into its own trusted context.
+   *
+   * Enforced in one place and reinvented in two is the shape this whole stabilisation pass is
+   * about, so the fix is one predicate and a structural ban on the alternative.
+   */
+  function decision(over: Record<string, unknown> = {}) {
+    return {
+      id: 'SC-ODR-000001',
+      question: 'Does a reservation take a deposit?',
+      state: 'ANSWERED',
+      answeredBy: 'the owner',
+      chosenOption: 'no deposit',
+      options: [],
+      askedBy: 'SC-AGENT-040',
+      meta: { attribution: { at: '2026-08-30T00:00:00.000Z', agentId: 'SC-AGENT-040' } },
+      ...over,
+    } as never;
+  }
+
+  it('a genuine owner answer is authoritative', () => {
+    expect(isAuthoritativeOwnerAnswer(decision())).toBe(true);
+  });
+
+  it('an answer attributed to an AGENT is refused', () => {
+    /* The attack: a department answers its own question and proceeds on it. */
+    expect(isAuthoritativeOwnerAnswer(decision({ answeredBy: 'SC-AGENT-040' }))).toBe(false);
+  });
+
+  it('an answer attributed to a RUN is refused', () => {
+    expect(isAuthoritativeOwnerAnswer(decision({ answeredBy: 'SC-RUN-01M0V88G2K' }))).toBe(false);
+  });
+
+  it('ANSWERED with nobody recorded as answering is refused', () => {
+    expect(isAuthoritativeOwnerAnswer(decision({ answeredBy: undefined }))).toBe(false);
+    expect(isAuthoritativeOwnerAnswer(decision({ answeredBy: '   ' }))).toBe(false);
+  });
+
+  it('an OPEN decision is not an answer', () => {
+    expect(isAuthoritativeOwnerAnswer(decision({ state: 'OPEN' }))).toBe(false);
+  });
+
+  it('a WITHDRAWN decision is not an answer', () => {
+    expect(isAuthoritativeOwnerAnswer(decision({ state: 'WITHDRAWN' }))).toBe(false);
+  });
+
+  it('ANSWERED with no actual answer in it is refused', () => {
+    expect(
+      isAuthoritativeOwnerAnswer(decision({ chosenOption: undefined, answerValue: undefined })),
+    ).toBe(false);
+  });
+
+  it('no consumer decides owner authority from state alone', () => {
+    /*
+     * The structural half. `state === 'ANSWERED'` is a fact about a field; owner authority is
+     * a fact about who answered. Only the predicate and the refusal it wraps may look at the
+     * field directly.
+     */
+    const files = execSync('git ls-files src', { encoding: 'utf8' })
+      .split(/\r?\n/)
+      .map((f) => f.trim())
+      .filter((f) => f.endsWith('.ts'));
+
+    const ALLOWED = ['src/intelligence/artifacts/governance.ts'];
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (ALLOWED.includes(file)) continue;
+      const lines = readFileSync(file, 'utf8').split(/\r?\n/);
+      for (const [i, line] of lines.entries()) {
+        if (line.trim().startsWith('*') || line.trim().startsWith('//')) continue;
+        if (!/state\s*(===|!==)\s*'ANSWERED'/.test(line)) continue;
+        /*
+         * Only OWNER decisions. An OpenQuestion is a department's own obligation and a
+         * department may legitimately answer one; conflating the two would ban a correct
+         * pattern and teach the next reader that this check is noise.
+         */
+        const context = lines.slice(Math.max(0, i - 18), i + 2).join('\n');
+        if (!/OWNER_DECISION_REQUEST|OwnerDecisionRequest/.test(context)) continue;
+        offenders.push(file + ':' + String(i + 1) + '  ' + line.trim());
+      }
+    }
+    expect(
+      offenders,
+      'these decide owner authority from a field; use isAuthoritativeOwnerAnswer:\n' +
+        offenders.join('\n'),
     ).toEqual([]);
   });
 });

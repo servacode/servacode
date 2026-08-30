@@ -4,6 +4,7 @@ import { OpenQuestionSchema } from '../artifacts/framing.js';
 import { repository } from '../repository.js';
 import type { ArtifactType } from '../repository.js';
 import type { Store } from '../../store/store.js';
+import { isAuthoritativeOwnerAnswer } from '../artifacts/governance.js';
 
 /**
  * MODEL FIELD CHOICE MUST NOT CONTROL GOVERNANCE.
@@ -244,7 +245,15 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
 
   const answeredByKey = new Map<string, string>();
   for (const d of answered) {
-    if (d.state !== 'ANSWERED') continue;
+    /*
+     * SPEC: finding F1-OWNER-ANSWER-TRUST.
+     *
+     * This tested `state !== 'ANSWERED'` and nothing else, so a department that persisted an
+     * ANSWERED decision attributed to itself routed the matching question to ALREADY_ANSWERED
+     * — and the owner was never asked. Authority now comes from the one predicate that knows
+     * what an owner answer is.
+     */
+    if (!isAuthoritativeOwnerAnswer(d)) continue;
     answeredByKey.set(questionKey(d.question), d.id);
   }
   const openByKey = new Set(

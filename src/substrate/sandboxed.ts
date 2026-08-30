@@ -14,7 +14,10 @@ import {
   type ExecuteRequest,
   type ExecuteResult,
   type ExecutionSubstrate,
-  type Prerequisite,
+  type AnyPrerequisite,
+  guestPrerequisite,
+  localPrerequisite,
+  unreachedPrerequisite,
   type QualificationResult,
   type SubstrateCapabilities,
   type SubstrateProbe,
@@ -90,7 +93,7 @@ export interface SandboxedSubstrateOptions {
   /** True when this boundary hosts the engine itself, which must then be present. */
   readonly requiresEngine?: boolean;
   /** Extra prerequisites established by the caller, e.g. guest auth. */
-  readonly extraPrerequisites?: readonly Prerequisite[];
+  readonly extraPrerequisites?: readonly AnyPrerequisite[];
   /** Digest of the sandbox settings profile this boundary is measured under. */
   readonly profileDigest?: string;
 }
@@ -327,7 +330,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       transportKind: t.kind,
       engineVersion: this.opts.engineVersion,
     };
-    const prerequisites: Prerequisite[] = [];
+    const prerequisites: AnyPrerequisite[] = [];
 
     for (const [k, v] of Object.entries(await t.fingerprint())) {
       observations['transport:' + k] = v;
@@ -354,14 +357,16 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
        */
       observations['bin:' + req.bin] =
         found.reach === GuestReach.REACHED ? (found.path ?? 'MISSING') : 'NOT_REACHED';
-      prerequisites.push({
-        id: 'GUEST_' + req.bin.toUpperCase(),
-        what: req.bin + ' inside the execution environment',
-        why: req.why,
-        remedy: req.remedy,
-        satisfied: usable,
-        reach: found.reach,
-      });
+      prerequisites.push(
+        guestPrerequisite({
+          id: 'GUEST_' + req.bin.toUpperCase(),
+          what: req.bin + ' inside the execution environment',
+          why: req.why,
+          remedy: req.remedy,
+          satisfied: usable,
+          reach: found.reach,
+        }),
+      );
     }
 
     let engineBin: string | undefined;
@@ -370,13 +375,16 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       engineBin = claude.reach === GuestReach.REACHED ? claude.path : undefined;
       observations['bin:claude'] =
         claude.reach === GuestReach.REACHED ? (claude.path ?? 'MISSING') : 'NOT_REACHED';
-      prerequisites.push({
-        id: 'GUEST_ENGINE',
-        what: 'Claude Code installed where the sandbox runs',
-        why: 'The engine must run inside the boundary. An install on the other side of the transport cannot be contained by it.',
-        remedy: 'Install Claude Code in the execution environment.',
-        satisfied: engineBin !== undefined && !engineBin.startsWith('/mnt/'),
-      });
+      prerequisites.push(
+        guestPrerequisite({
+          id: 'GUEST_ENGINE',
+          what: 'Claude Code installed where the sandbox runs',
+          why: 'The engine must run inside the boundary. An install on the other side of the transport cannot be contained by it.',
+          remedy: 'Install Claude Code in the execution environment.',
+          satisfied: engineBin !== undefined && !engineBin.startsWith('/mnt/'),
+          reach: claude.reach,
+        }),
+      );
     }
 
     /*
@@ -395,13 +403,16 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     observations['launcher:detail'] = launcher.detail;
     for (const [k, v] of Object.entries(launcher.observations)) observations[k] = v;
     for (const extra of this.opts.extraPrerequisites ?? []) prerequisites.push(extra);
-    prerequisites.push({
-      id: 'SANDBOX_LAUNCHER',
-      what: 'A working sandbox launcher (' + this.opts.launcher.id + ')',
-      why: 'It is the mechanism that contains a process. Without it nothing above can be measured, let alone enforced.',
-      remedy: launcher.remedy ?? 'Install the launcher in the execution environment.',
-      satisfied: launcher.available,
-    });
+    prerequisites.push(
+      guestPrerequisite({
+        id: 'SANDBOX_LAUNCHER',
+        what: 'A working sandbox launcher (' + this.opts.launcher.id + ')',
+        why: 'It is the mechanism that contains a process. Without it nothing above can be measured, let alone enforced.',
+        remedy: launcher.remedy ?? 'Install the launcher in the execution environment.',
+        satisfied: launcher.available,
+        reach: launcher.reach,
+      }),
+    );
 
     // Unprivileged user namespaces: bubblewrap cannot create its namespaces without
     // them, and Ubuntu 24.04+ restricts them by AppArmor policy.
@@ -410,13 +421,16 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
     );
     const usernsValue = userns === UNREACHED ? 'NOT_REACHED' : (userns?.trim() ?? 'unset');
     observations['kernel:apparmor_userns'] = usernsValue;
-    prerequisites.push({
-      id: 'USER_NAMESPACES',
-      what: 'Unprivileged user namespaces available to the launcher',
-      why: 'bubblewrap builds its boundary out of them; a policy that restricts them stops the sandbox starting at all.',
-      remedy: 'Add an AppArmor profile granting bwrap userns capability, or set the sysctl to 0.',
-      satisfied: usernsValue === 'unset' || usernsValue === '0',
-    });
+    prerequisites.push(
+      guestPrerequisite({
+        id: 'USER_NAMESPACES',
+        what: 'Unprivileged user namespaces available to the launcher',
+        why: 'bubblewrap builds its boundary out of them; a policy that restricts them stops the sandbox starting at all.',
+        remedy: 'Add an AppArmor profile granting bwrap userns capability, or set the sysctl to 0.',
+        satisfied: usernsValue === 'unset' || usernsValue === '0',
+        reach: userns === UNREACHED ? GuestReach.NOT_REACHED : GuestReach.REACHED,
+      }),
+    );
 
     /*
      * The engine version is a PRODUCER prerequisite only.
@@ -438,21 +452,23 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
       const parseable = /^\d+\.\d+/.test(this.opts.engineVersion);
       const ok =
         parseable && compareVersions(this.opts.engineVersion, this.opts.minEngineVersion) >= 0;
-      prerequisites.push({
-        id: 'ENGINE_VERSION',
-        what: 'Claude Code >= ' + this.opts.minEngineVersion,
-        why:
-          'Sandbox behaviour is version-dependent, and a qualification measured against one version does not carry to another.' +
-          (parseable
-            ? ''
-            : ' The reported version is "' +
-              this.opts.engineVersion +
-              '", which Serva could not read at all.'),
-        remedy: parseable
-          ? 'Update Claude Code.'
-          : 'Make `claude --version` answer in the execution environment; an unreadable version is not a version.',
-        satisfied: ok,
-      });
+      prerequisites.push(
+        localPrerequisite({
+          id: 'ENGINE_VERSION',
+          what: 'Claude Code >= ' + this.opts.minEngineVersion,
+          why:
+            'Sandbox behaviour is version-dependent, and a qualification measured against one version does not carry to another.' +
+            (parseable
+              ? ''
+              : ' The reported version is "' +
+                this.opts.engineVersion +
+                '", which Serva could not read at all.'),
+          remedy: parseable
+            ? 'Update Claude Code.'
+            : 'Make `claude --version` answer in the execution environment; an unreadable version is not a version.',
+          satisfied: ok,
+        }),
+      );
     }
 
     const interop = await this.readGuestFile('/proc/sys/fs/binfmt_misc/WSLInterop');
@@ -684,9 +700,7 @@ export class SandboxedExecutionSubstrate implements ExecutionSubstrate {
      * measured NONE, and `recordQualification` overwrote a preserved HARD with it — the exact
      * regression the qualification record documents itself as preventing.
      */
-    const unreached = missing.filter(
-      (p) => p.reach !== undefined && p.reach !== GuestReach.REACHED,
-    );
+    const unreached = missing.filter(unreachedPrerequisite);
 
     if (unreached.length > 0) {
       const reason =

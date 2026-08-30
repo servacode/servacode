@@ -563,6 +563,25 @@ export function approvalRefusal(
 }
 
 /** An owner decision answered by anything other than the owner is not a decision. */
+/**
+ * IS THIS AN OWNER ANSWER SERVA MAY ACT ON?
+ *
+ * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/F1-OWNER-ANSWER-TRUST.
+ *
+ * `ownerDecisionRefusal` has always known what a real owner answer looks like, and only one
+ * of its three consumers asked it. The other two filtered on `state === 'ANSWERED'` alone —
+ * and `OWNER_DECISION_REQUEST` is universal, so any department could persist an ANSWERED
+ * decision attributed to itself, suppress the question the owner should have been asked, and
+ * feed "the owner answered X" into its own trusted context.
+ *
+ * The boundary was enforced in one place and reinvented in two. This is the single predicate
+ * every consumer now uses, so `state === 'ANSWERED'` can never again be sufficient by itself.
+ */
+export function isAuthoritativeOwnerAnswer(d: OwnerDecisionRequest): boolean {
+  if (d.state !== 'ANSWERED') return false;
+  return ownerDecisionRefusal(d) === undefined;
+}
+
 export function ownerDecisionRefusal(d: OwnerDecisionRequest): string | undefined {
   if (d.state !== 'ANSWERED') return undefined;
   if (d.answeredBy === undefined || d.answeredBy.trim() === '') {
