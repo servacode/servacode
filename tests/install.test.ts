@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   ChangeOutcome,
   compareVersions,
@@ -13,12 +13,15 @@ import {
   recordInstalled,
   removeVersion,
   renderInstallation,
+  versionEntrypoint,
+  isRunnable,
 } from '../src/portability/install.js';
 import { SCHEMA_VERSION, SERVA_VERSION } from '../src/portability/version.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import { cmdInstall } from '../src/cli/commands/portability.js';
 import { parseArgs } from '../src/cli/main.js';
+import { resolveActive } from '../src/portability/activeVersion.js';
 
 /**
  * AN UPDATE WITH NO WAY BACK IS A GAMBLE.
@@ -44,11 +47,25 @@ function installRoot(): string {
   return root;
 }
 
-/** An install root with the given versions present, and one of them current. */
+/**
+ * An install root with the given versions present, and one of them current.
+ *
+ * Each version gets an entry point as well as a marker.
+ *
+ * SPEC: the 1.0.1 packaging audit, §17.2.
+ *
+ * This used to write markers only, which is precisely the state 1.0.0 shipped in: a version
+ * that is recorded and cannot run. Every switching test in this file was therefore switching
+ * between two things that did not exist, and passed. The fixture now builds what the name
+ * claims, and `installRunnable` below is the one that asserts the difference matters.
+ */
 function withVersions(versions: readonly (readonly [string, number])[], current?: string): string {
   const root = installRoot();
   for (const [version, schema] of versions) {
     recordInstalled(root, version, schema, '2026-08-24T00:00:00.000Z');
+    const entry = versionEntrypoint(root, version);
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, '/* a stand-in for a real build */\n', 'utf8');
   }
   if (current !== undefined) writeFileSync(join(root, 'current'), current + '\n', 'utf8');
   return root;
@@ -548,5 +565,239 @@ describe('an installation nothing ever recorded is an empty one', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('the pointer moves the program, or it is not a rollback', () => {
+  /*
+   * SPEC: the 1.0.1 packaging audit, §17.2.
+   *
+   * 1.0.0 shipped `install use` writing `current`, and `current` being read by exactly one
+   * thing: `install status`, to print it. So a rollback reported success and left the owner
+   * running the build they had just rolled away from — worse than no rollback, because it is
+   * a rollback that lies, discovered on the day it is needed.
+   *
+   * These fail against 1.0.0 by construction.
+   */
+  it('refuses to switch to a version that is recorded but has nothing to run', () => {
+    const root = installRoot();
+    recordInstalled(root, '1.0.0', SCHEMA_VERSION, 'T');
+    recordInstalled(root, '1.1.0', SCHEMA_VERSION, 'T');
+    mkdirSync(join(root, 'versions', '1.1.0', 'package', 'dist', 'cli'), { recursive: true });
+    writeFileSync(join(root, 'versions', '1.1.0', 'package', 'dist', 'cli', 'main.js'), '', 'utf8');
+
+    /* 1.0.0 is a marker and nothing else — exactly the state the old fixture created. */
+    expect(isRunnable(root, '1.0.0')).toBe(false);
+
+    const plan = planSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([], 'no projects on this fixture machine'),
+    );
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toContain('would move the pointer and change nothing');
+  });
+
+  it('does not move the pointer when it refuses', () => {
+    /* A refusal that had already written `current` would be the same bug wearing a warning. */
+    const root = installRoot();
+    recordInstalled(root, '1.0.0', SCHEMA_VERSION, 'T');
+    recordInstalled(root, '1.1.0', SCHEMA_VERSION, 'T');
+    mkdirSync(join(root, 'versions', '1.1.0', 'package', 'dist', 'cli'), { recursive: true });
+    writeFileSync(join(root, 'versions', '1.1.0', 'package', 'dist', 'cli', 'main.js'), '', 'utf8');
+    writeFileSync(join(root, 'current'), '1.1.0\n', 'utf8');
+
+    performSwitch(
+      installation(root),
+      '1.0.0',
+      knownCompleteProjects([], 'no projects on this fixture machine'),
+    );
+    expect(installation(root).current?.version, 'the pointer must not have moved').toBe('1.1.0');
+  });
+
+  it('`adopt` captures a build that can actually be run', () => {
+    const root = mkdtempSync(join(tmpdir(), 'serva-capture-'));
+    try {
+      expect(cmdInstall(parseArgs(['install', 'adopt', '--install-root', root]))).toBe(0);
+      /* The marker alone was 1.0.0's whole story. This is the part that was missing. */
+      expect(isRunnable(root, SERVA_VERSION), 'adopt must capture a runnable build').toBe(true);
+      expect(existsSync(join(root, 'versions', SERVA_VERSION, 'package', 'package.json'))).toBe(
+        true,
+      );
+      /* Its dependencies came too: a captured build resolves them from beside itself, and a
+         global npm install puts them beside the package rather than inside it. */
+      expect(
+        existsSync(join(root, 'versions', SERVA_VERSION, 'package', 'node_modules', 'zod')),
+      ).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('captures the program, not whatever else is in the directory', () => {
+    /*
+     * `packageRoot` is the repository in a developer checkout. The first version of `capture`
+     * copied all of it — `src/`, `out/`, `evidence/`, `.git` — which is both enormously slow
+     * and not a version of Serva but a snapshot of somebody's working tree.
+     */
+    const root = mkdtempSync(join(tmpdir(), 'serva-capture-scope-'));
+    try {
+      cmdInstall(parseArgs(['install', 'adopt', '--install-root', root]));
+      const payload = join(root, 'versions', SERVA_VERSION, 'package');
+      for (const unwanted of ['src', 'tests', 'evidence', 'out', '.git', 'scripts']) {
+        expect(existsSync(join(payload, unwanted)), unwanted + ' is not part of the program').toBe(
+          false,
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('the entry point asks which version should run', () => {
+  /*
+   * SPEC: the 1.0.1 packaging audit, §17.2.
+   *
+   * `resolveActive` is the read that 1.0.0 never performed. Every uncertain case answers "run
+   * yourself" — a pointer that cannot be honoured must not stop `serva` from starting, because
+   * `serva install` is how an owner would fix the pointer.
+   */
+  function root(): string {
+    const r = mkdtempSync(join(tmpdir(), 'serva-active-'));
+    roots.push(r);
+    return r;
+  }
+
+  it('runs in place when nothing is current', () => {
+    const decision = resolveActive({
+      root: root(),
+      runningVersion: SERVA_VERSION,
+      alreadyHandedOff: false,
+    });
+    expect(decision.handOffTo).toBeUndefined();
+    expect(decision.problem).toBeUndefined();
+  });
+
+  it('runs in place when current names the version already running', () => {
+    const r = root();
+    writeFileSync(join(r, 'current'), SERVA_VERSION + '\n', 'utf8');
+    expect(
+      resolveActive({ root: r, runningVersion: SERVA_VERSION, alreadyHandedOff: false }).handOffTo,
+    ).toBeUndefined();
+  });
+
+  it('hands off when current names another version that is really there', () => {
+    const r = root();
+    const entry = versionEntrypoint(r, '0.9.0');
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, '', 'utf8');
+    writeFileSync(join(r, 'current'), '0.9.0\n', 'utf8');
+
+    const decision = resolveActive({
+      root: r,
+      runningVersion: SERVA_VERSION,
+      alreadyHandedOff: false,
+    });
+    expect(decision.handOffTo).toBe(entry);
+  });
+
+  it('runs in place and says so when current names something unrunnable', () => {
+    /* Fail open. Refusing to start would mean a bad pointer bricks the tool that fixes it. */
+    const r = root();
+    writeFileSync(join(r, 'current'), '0.9.0\n', 'utf8');
+    const decision = resolveActive({
+      root: r,
+      runningVersion: SERVA_VERSION,
+      alreadyHandedOff: false,
+    });
+    expect(decision.handOffTo).toBeUndefined();
+    expect(decision.problem).toContain('no runnable build');
+  });
+
+  it('never hands off twice', () => {
+    /* Two builds whose pointers name each other would otherwise fork until the machine died. */
+    const r = root();
+    const entry = versionEntrypoint(r, '0.9.0');
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, '', 'utf8');
+    writeFileSync(join(r, 'current'), '0.9.0\n', 'utf8');
+
+    expect(
+      resolveActive({ root: r, runningVersion: SERVA_VERSION, alreadyHandedOff: true }).handOffTo,
+      'a delegate must never delegate',
+    ).toBeUndefined();
+  });
+});
+
+describe('an unknown inventory only blocks what it could actually protect', () => {
+  /*
+   * SPEC: the 1.0.1 packaging audit, section H.
+   *
+   * The inventory is consulted for one purpose: a project whose store schema is newer than the
+   * target build understands. The refusal did not check that, so it fired on every switch —
+   * and because the CLI always passes UNKNOWN_PROJECTS by design, `serva install use` could
+   * never succeed at all. A safety check that refuses every case protects nobody.
+   */
+  it('allows a same-schema switch without knowing the projects', () => {
+    const root = withVersions(
+      [
+        ['1.0.1', SCHEMA_VERSION],
+        ['1.0.2', SCHEMA_VERSION],
+      ],
+      '1.0.1',
+    );
+    const plan = planSwitch(installation(root), '1.0.2', UNKNOWN_PROJECTS);
+    expect(plan.outcome, plan.reason).toBe(ChangeOutcome.READY);
+  });
+
+  it('allows going back to a build that understands the same schema', () => {
+    /* The rollback an owner actually performs: two builds, one store format. */
+    const root = withVersions(
+      [
+        ['1.0.1', SCHEMA_VERSION],
+        ['1.0.2', SCHEMA_VERSION],
+      ],
+      '1.0.2',
+    );
+    const plan = planSwitch(installation(root), '1.0.1', UNKNOWN_PROJECTS);
+    expect(plan.outcome, plan.reason).toBe(ChangeOutcome.READY);
+  });
+
+  it('still refuses to go back to a build that understands LESS, inventory unknown', () => {
+    /*
+     * The case the refusal exists for, and it must survive this change untouched. A project
+     * written at schema 9 cannot be opened by a build that knows 3, and Serva cannot prove
+     * no such project exists.
+     */
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['2.0.0', 9],
+      ],
+      '2.0.0',
+    );
+    const plan = planSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toContain('cannot prove');
+  });
+
+  it('the ceiling counts every installed build, not just the current one', () => {
+    /*
+     * A build that is installed but not current still wrote projects. Comparing only against
+     * `current` would call a downgrade safe whenever the owner had already stepped back once.
+     */
+    const root = withVersions(
+      [
+        ['1.0.0', 3],
+        ['1.5.0', 7],
+        ['2.0.0', 9],
+      ],
+      '1.5.0',
+    );
+    const plan = planSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
+    expect(plan.outcome, 'schema 9 is installed, so 3 is still a downgrade').toBe(
+      ChangeOutcome.REFUSED,
+    );
   });
 });

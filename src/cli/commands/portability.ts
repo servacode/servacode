@@ -14,12 +14,14 @@ import {
   removeVersion,
   renderInstallation,
   CURRENT_LINK,
+  defaultInstallRoot,
 } from '../../portability/install.js';
 import { buildEngineeringLayer } from '../../app/engineering.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { systemClock } from '../../core/clock.js';
+import { capture, packageRootFromUrl } from '../../portability/activeVersion.js';
 import { verifyBackup } from '../../portability/backup.js';
 import { inspectRestore } from '../../portability/restore.js';
 import {
@@ -323,6 +325,32 @@ export function cmdInstall(args: ParsedArgs): number {
    * from its own existence rather than from an argument it was handed.
    */
   if (sub === 'adopt') {
+    /*
+     * THE BUILD ITSELF, NOT JUST A NOTE SAYING IT EXISTS.
+     *
+     * SPEC: the 1.0.1 packaging audit, §17.2.
+     *
+     * `recordInstalled` writes a marker, and a marker is what `install use` was switching
+     * between — which is why the switch changed nothing. Copying the running build here is
+     * what makes `versions/<v>/` a place you can go back TO.
+     *
+     * A capture that fails is reported and does not abort the recording: an owner whose disk
+     * is full still benefits from `install status` telling the truth about what is running.
+     */
+    const packageRoot = packageRootFromUrl(import.meta.url);
+    let captured: { readonly dependencies: readonly string[] } | undefined;
+    let captureProblem: string | undefined;
+
+    if (packageRoot === undefined) {
+      captureProblem = 'could not locate the running package, so no build was captured';
+    } else {
+      try {
+        captured = capture({ root, version: state.running.version, packageRoot });
+      } catch (e) {
+        captureProblem = e instanceof Error ? e.message : String(e);
+      }
+    }
+
     const marker = recordInstalled(
       root,
       state.running.version,
@@ -340,10 +368,28 @@ export function cmdInstall(args: ParsedArgs): number {
 
     const after = installation(root);
     if (wantsJson(args)) {
-      emitJson({ recorded: marker, becameCurrent: claimed, installation: after });
-      return 0;
+      emitJson({
+        recorded: marker,
+        becameCurrent: claimed,
+        captured: captured !== undefined,
+        ...(captureProblem === undefined ? {} : { captureProblem }),
+        installation: after,
+      });
+      return captureProblem === undefined ? 0 : 1;
     }
     console.log('Recorded Serva ' + marker.version + ' as installed at ' + root + '.');
+    if (captured !== undefined) {
+      console.log(
+        'Captured the build itself, so this version can be returned to' +
+          (captured.dependencies.length === 0
+            ? '.'
+            : ' (with ' + String(captured.dependencies.length) + ' dependency package(s)).'),
+      );
+    } else {
+      /* Said plainly, because the difference decides whether rollback will work later. */
+      console.log('WARNING: ' + String(captureProblem));
+      console.log('This version is recorded but cannot be switched back to.');
+    }
     console.log(
       claimed
         ? 'Nothing was current, so ' + marker.version + ' now is.'
@@ -351,7 +397,7 @@ export function cmdInstall(args: ParsedArgs): number {
     );
     console.log('');
     console.log(renderInstallation(after));
-    return 0;
+    return captureProblem === undefined ? 0 : 1;
   }
 
   if (sub === 'use' || sub === 'remove') {
@@ -415,18 +461,6 @@ export function cmdInstall(args: ParsedArgs): number {
 
   console.error('Usage: serva install status | use <version> | remove <version>');
   return 2;
-}
-
-/**
- * Where Serva keeps its own versions when nobody says otherwise.
- *
- * Under the owner's own data directory rather than a shared system location: this is a
- * single-owner product, and an installation somewhere requiring administrator rights would
- * make every update an escalation.
- */
-function defaultInstallRoot(): string {
-  const home = process.env['USERPROFILE'] ?? process.env['HOME'] ?? process.cwd();
-  return join(home, '.serva-code');
 }
 
 /** `serva library [list|show <id>|forget <id>] --enable` */

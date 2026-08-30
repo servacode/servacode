@@ -55,10 +55,25 @@ to be worse:
 serva install adopt
 ```
 
-This records the version you are running under `~/.serva-code`. Serva downloads nothing; it
-only writes down what you installed. `serva install status` shows what is there, and once you
-have more than one version, `serva install use <version>` moves between them — refusing the
-move if it would strand a project written by a newer build.
+This copies the build you are running into `~/.serva-code/versions/<version>/` and records it.
+Serva downloads nothing — npm delivered the files, and this writes down what arrived.
+
+Doing it after every install is what makes the next paragraph possible.
+
+### If an update turns out to be worse
+
+Install the new version and run `serva install adopt` again. Both versions are now on disk, and
+`serva install status` lists them. To go back:
+
+```
+serva install use 1.0.1 --confirm
+```
+
+`serva` then runs 1.0.1 again — the version npm has installed no longer decides, the pointer
+does. Nothing is deleted, so you can go forward again the same way.
+
+Serva refuses the move if going back would strand a project: a project written by a newer store
+format cannot be opened by an older build, and it tells you which one rather than trying.
 
 ### The extension
 

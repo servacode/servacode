@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { isServaError } from '../core/errors.js';
+import { defaultInstallRoot } from '../portability/install.js';
+import { HANDOFF_ENV, resolveActive } from '../portability/activeVersion.js';
 import { cmdInit } from './commands/init.js';
 import { cmdStatus } from './commands/status.js';
 import { cmdProject } from './commands/project.js';
@@ -203,8 +206,56 @@ export async function run(argv: readonly string[]): Promise<number> {
 const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 
-if (invokedDirectly || process.env['SERVA_CLI_FORCE'] === '1') {
-  void run(process.argv.slice(2)).then((code) => {
-    process.exitCode = code;
+/**
+ * THE POINTER DECIDES WHICH BUILD RUNS, BEFORE ANYTHING ELSE HAPPENS.
+ *
+ * SPEC: the 1.0.1 packaging audit, §17.2.
+ *
+ * `install use` moved `current` and nothing read it, so a rollback reported success and left
+ * the owner on the build they had just rolled away from. This is the read.
+ *
+ * It lives INSIDE the `invokedDirectly` guard on purpose. `parseArgs` and `run` are imported by
+ * the test suite, and a module that handed off at import time would spawn a second Serva every
+ * time a test asked what an argument list parses to.
+ */
+function handOffToCurrentVersion(): boolean {
+  const decision = resolveActive({
+    root: defaultInstallRoot(),
+    runningVersion: SERVA_VERSION,
+    alreadyHandedOff: process.env[HANDOFF_ENV] !== undefined,
+    argv: process.argv.slice(2),
   });
+
+  if (decision.problem !== undefined) console.error(decision.problem);
+  if (decision.handOffTo === undefined) return false;
+
+  /*
+   * A child process rather than an import. The build being handed to may be older than this
+   * one and is entitled to its own module graph — importing it into a process this build has
+   * already started would mix two versions of Serva in one heap.
+   *
+   * `stdio: 'inherit'` so the delegate owns the terminal exactly as if it had been invoked,
+   * and its exit code is adopted unchanged.
+   */
+  const result = spawnSync(process.execPath, [decision.handOffTo, ...process.argv.slice(2)], {
+    stdio: 'inherit',
+    env: { ...process.env, [HANDOFF_ENV]: SERVA_VERSION },
+  });
+
+  if (result.error !== undefined) {
+    console.error('serva: could not start the active version: ' + result.error.message);
+    return false;
+  }
+  /* A signalled child has no numeric status; 70 is what this CLI already uses for "the
+     failure was ours, not the caller's". */
+  process.exitCode = result.status ?? 70;
+  return true;
+}
+
+if (invokedDirectly || process.env['SERVA_CLI_FORCE'] === '1') {
+  if (!handOffToCurrentVersion()) {
+    void run(process.argv.slice(2)).then((code) => {
+      process.exitCode = code;
+    });
+  }
 }

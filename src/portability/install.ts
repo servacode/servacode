@@ -44,6 +44,44 @@ import { fail } from '../core/errors.js';
  *   the pointer moves, and the refusal names them.
  */
 
+/**
+ * Where Serva keeps its own versions when nobody says otherwise.
+ *
+ * Under the owner's own data directory rather than a shared system location: this is a
+ * single-owner product, and an installation somewhere requiring administrator rights would
+ * make every update an escalation.
+ *
+ * Exported from here rather than defined next to the CLI command that first needed it. The
+ * entry point has to resolve the same root the installer writes to, and two functions that
+ * agree today are two functions that can disagree later.
+ */
+export function defaultInstallRoot(): string {
+  const home = process.env['USERPROFILE'] ?? process.env['HOME'] ?? process.cwd();
+  return join(home, '.serva-code');
+}
+
+/**
+ * Where a captured build lives, and its entry point.
+ *
+ * SPEC: the 1.0.1 packaging audit, §17.2.
+ *
+ * The layout lives here with the rest of it. `versions/<v>/` held only a marker until 1.0.1,
+ * which is why switching between versions switched nothing — there was nothing on the other
+ * end of the pointer to run.
+ */
+export function versionPayload(root: string, version: string): string {
+  return join(root, VERSIONS_DIR, version, 'package');
+}
+
+export function versionEntrypoint(root: string, version: string): string {
+  return join(versionPayload(root, version), 'dist', 'cli', 'main.js');
+}
+
+/** Whether a recorded version is one this machine could actually run. */
+export function isRunnable(root: string, version: string): boolean {
+  return existsSync(versionEntrypoint(root, version));
+}
+
 export const CURRENT_LINK = 'current';
 export const VERSIONS_DIR = 'versions';
 const MARKER = 'serva-version.json';
@@ -240,6 +278,32 @@ export function planSwitch(
     };
   }
 
+  /*
+   * RECORDED IS NOT THE SAME AS RUNNABLE.
+   *
+   * SPEC: the 1.0.1 packaging audit, §17.2.
+   *
+   * Through 1.0.0 a version directory held a marker and nothing else, so this function happily
+   * planned a switch to a version that did not exist as a program. The pointer moved, the plan
+   * said READY, and the owner kept running what they had. Refusing here is the difference
+   * between a rollback and a rollback-shaped message.
+   */
+  if (!isRunnable(install.root, toVersion)) {
+    return {
+      outcome: ChangeOutcome.REFUSED,
+      ...(from === undefined ? {} : { from }),
+      to: toVersion,
+      steps: [],
+      reversible: false,
+      reason:
+        'Serva ' +
+        toVersion +
+        ' is recorded on this machine but has no runnable build at ' +
+        versionEntrypoint(install.root, toVersion) +
+        ', so switching to it would move the pointer and change nothing.',
+    };
+  }
+
   if (from === toVersion) {
     return {
       outcome: ChangeOutcome.NOT_REQUIRED,
@@ -257,13 +321,39 @@ export function planSwitch(
    * drop every field it did not recognise.
    */
   /*
+   * A SWITCH THAT CANNOT LOWER THE SCHEMA CEILING CANNOT STRAND ANYTHING.
+   *
+   * SPEC: the 1.0.1 packaging audit, section H; finding INSTALL-UPDATE-ROLLBACK/IUR-REVIEW-1.
+   *
+   * The inventory below is consulted for exactly one purpose: finding a project whose store
+   * schema is NEWER than the target build understands. So when the target already understands
+   * as much as every build recorded on this machine, there is no such project to find, and the
+   * inventory cannot change the answer.
+   *
+   * Without this the refusal was unconditional in practice. The CLI always passes
+   * UNKNOWN_PROJECTS — deliberately, because Serva holds no governed inventory and inventing
+   * one would be inventing authority — so `serva install use` could never succeed at all, not
+   * even for an UPGRADE, where no data risk exists in either direction. A safety check that
+   * refuses every case is not protecting anyone; it is a feature that does not work.
+   *
+   * This narrows the refusal to what the module's own header promised: ROLLBACK IS REFUSED
+   * WHEN IT WOULD LOSE DATA. Going BACK to a build that understands less still requires
+   * knowing the projects, and still refuses when it does not.
+   */
+  const ceiling = Math.max(
+    install.running.storeSchema,
+    ...install.installed.map((v) => v.storeSchema),
+  );
+  const cannotLoseData = target.storeSchema >= ceiling;
+
+  /*
    * UNKNOWN FAILS CLOSED.
    *
    * There is no governed inventory of the projects on this machine, so when the caller has not
    * established which are affected, this cannot say the rollback is safe. Refusing is the only
    * honest answer, and it is the one the header already promised.
    */
-  if (projectRoots === UNKNOWN_PROJECTS) {
+  if (projectRoots === UNKNOWN_PROJECTS && !cannotLoseData) {
     return {
       outcome: ChangeOutcome.REFUSED,
       ...(from === undefined ? {} : { from }),
@@ -280,8 +370,10 @@ export function planSwitch(
     };
   }
 
+  /* Reached with UNKNOWN_PROJECTS only when the switch cannot lower the ceiling, and then
+     there is nothing for this loop to find. */
   const tooNew: string[] = [];
-  for (const projectRoot of projectRoots.roots) {
+  for (const projectRoot of projectRoots === UNKNOWN_PROJECTS ? [] : projectRoots.roots) {
     /*
      * AN UNREADABLE SCHEMA MARKER FAILS CLOSED.
      *
