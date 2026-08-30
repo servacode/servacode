@@ -7,6 +7,7 @@ import {
   readScopeReview,
 } from '../src/acceptance/scopeReview.js';
 import { ReviewVerdict, Severity } from '../src/acceptance/securityReview.js';
+import { AREA_SOURCES } from '../src/acceptance/securityReviewRun.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 
@@ -172,5 +173,47 @@ describe('every scoped review attempt is durable, whatever its outcome', () => {
     const rt = project();
     recordScopeReview(rt.store, attempt());
     expect(rt.store.listCanonIds(SCOPE_REVIEW_CANON_TYPE).length).toBe(1);
+  });
+});
+
+describe('the code that obeys the pointer is reviewed, not only the code that writes it', () => {
+  /*
+   * SPEC: the 1.0.1 packaging audit, §17.2; Phase 6 final acceptance sequence §7.
+   *
+   * The install area mapped to `src/portability/` and `src/cli/commands/`. In 1.0.1 the CLI
+   * ENTRY POINT became the thing that reads `~/.serva-code/current` and hands the path it finds
+   * to a process launcher — and `src/cli/main.ts` matched neither prefix. The security review
+   * would have read the installer that writes the pointer and never read the code that obeys it,
+   * and reported COMPLETE coverage while doing so.
+   *
+   * A missing prefix does not fail. It quietly narrows what "reviewed" means.
+   */
+  it('the install area covers the entry point that resolves the active version', () => {
+    const prefixes = AREA_SOURCES['install/update/rollback'] ?? [];
+    expect(
+      prefixes.some((prefix) => 'src/cli/main.ts'.startsWith(prefix)),
+      'the delegation entry point must be inside the install review area',
+    ).toBe(true);
+  });
+
+  it('every file the delegation is implemented in is inside some review area', () => {
+    /*
+     * By behaviour rather than by name: whichever files carry the version-switching logic,
+     * they must be reviewable. Adding a third file and forgetting the scope is the same
+     * defect wearing a different filename.
+     */
+    const delegation = [
+      'src/portability/activeVersion.ts',
+      'src/portability/install.ts',
+      'src/cli/main.ts',
+      'src/cli/commands/portability.ts',
+    ];
+    const allPrefixes = Object.values(AREA_SOURCES).flat();
+    for (const file of delegation) {
+      expect(
+        allPrefixes.some((prefix) => file.startsWith(prefix)),
+        file + ' is not covered by any security review area',
+      ).toBe(true);
+    }
   });
 });

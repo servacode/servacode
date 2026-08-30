@@ -190,7 +190,18 @@ export const AREA_SOURCES: Readonly<Record<string, readonly string[]>> = Object.
   'backup/restore': ['src/portability/'],
   migration: ['src/portability/', 'src/store/'],
   bootstrap: ['src/cli/commands/', 'src/substrate/'],
-  'install/update/rollback': ['src/portability/', 'src/cli/commands/'],
+  /*
+   * `src/cli/main.ts` is here because the entry point now DECIDES WHICH BUILD RUNS.
+   *
+   * SPEC: the 1.0.1 packaging audit, §17.2.
+   *
+   * It reads `~/.serva-code/current` and `spawnSync`s the entry point of whatever that names.
+   * That is the most security-relevant line in the CLI — a path taken from a file on disk and
+   * handed to a process launcher — and the area's prefixes were `src/portability/` and
+   * `src/cli/commands/`, neither of which matches `src/cli/main.ts`. The review would have
+   * covered the installer that WRITES the pointer while never reading the code that OBEYS it.
+   */
+  'install/update/rollback': ['src/portability/', 'src/cli/commands/', 'src/cli/main.ts'],
   'organizational learning': ['src/learning/', 'src/intelligence/'],
   'release/handover': ['src/portability/', 'src/lifecycle/'],
   'Serva self-acceptance authority': ['src/acceptance/'],
