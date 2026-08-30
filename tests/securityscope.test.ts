@@ -7,7 +7,9 @@ import {
   readScopeReview,
 } from '../src/acceptance/scopeReview.js';
 import { ReviewVerdict, Severity } from '../src/acceptance/securityReview.js';
-import { AREA_SOURCES } from '../src/acceptance/securityReviewRun.js';
+import { AREA_SOURCES, NON_SECURITY_SOURCES } from '../src/acceptance/securityReviewRun.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 
@@ -214,6 +216,92 @@ describe('the code that obeys the pointer is reviewed, not only the code that wr
         allPrefixes.some((prefix) => file.startsWith(prefix)),
         file + ' is not covered by any security review area',
       ).toBe(true);
+    }
+  });
+});
+
+describe('no source module can be security-relevant and unreviewed by accident', () => {
+  /*
+   * THE GUARD THE SCOPE MAP NEVER HAD.
+   *
+   * SPEC: the 1.0.1 security scope triage; Phase 6 final acceptance sequence §7.
+   *
+   * `REQUIRED_SCOPE` was written once and the code kept moving. By 1.0.1, 22 of 195 modules
+   * matched no area — including the module that owns every Git invocation, the secrets
+   * scanner, the module asserting an accepted commit equals the verified ChangeSet, and the
+   * validated-command surface the webview reaches Serva through. The review passed every
+   * area it knew about and reported COMPLETE, which was true and meant much less than it
+   * sounded.
+   *
+   * Nothing detected that, because "outside every area" and "reviewed and found irrelevant"
+   * were the same observable state: absence.
+   *
+   * So absence is no longer permitted to mean anything. The two sets must PARTITION the
+   * source tree — every module either inside an area or named in NON_SECURITY_SOURCES with
+   * a reason. A module added later belongs to neither and fails here, which forces the
+   * decision to be made once, in the open, by whoever added it.
+   *
+   * This is deliberately not a list of filenames to keep in step. It is the statement that
+   * the tree and the scope map describe the same set of files.
+   */
+  function sourceFiles(): string[] {
+    const found: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name).split('\\').join('/');
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name.endsWith('.ts')) found.push(full);
+      }
+    };
+    walk('src');
+    return found;
+  }
+
+  const covered = (file: string): boolean =>
+    Object.values(AREA_SOURCES)
+      .flat()
+      .some((prefix) => file.startsWith(prefix));
+
+  it('every source module is either in a review area or explicitly excluded', () => {
+    const unaccounted = sourceFiles().filter(
+      (f) => !covered(f) && NON_SECURITY_SOURCES[f] === undefined,
+    );
+    expect(
+      unaccounted,
+      'these are in no review area and carry no exclusion rationale — classify each one',
+    ).toEqual([]);
+  });
+
+  it('nothing is both reviewed and excluded', () => {
+    /* An entry that is covered AND excluded means the exclusion is dead text nobody will
+       re-read, and the rationale stops describing anything. */
+    const both = Object.keys(NON_SECURITY_SOURCES).filter((f) => covered(f));
+    expect(both, 'excluded, yet inside a review area').toEqual([]);
+  });
+
+  it('every exclusion names a file that exists, and says why', () => {
+    /* An exclusion for a deleted file is a rationale that outlived its subject, and would
+       silently keep a future file of the same name out of review. */
+    const all = new Set(sourceFiles());
+    for (const [file, reason] of Object.entries(NON_SECURITY_SOURCES)) {
+      expect(all.has(file), file + ' is excluded but does not exist').toBe(true);
+      expect(reason.length, file + ' is excluded without a reason').toBeGreaterThan(40);
+    }
+  });
+
+  it('the modules that spawn processes or touch credentials are reviewed', () => {
+    /*
+     * The specific capabilities the triage found outside the map, asserted by capability
+     * rather than by name: whichever module ends up owning them, it must be reviewed.
+     */
+    for (const file of sourceFiles()) {
+      const text = readFileSync(file, 'utf8');
+      const spawns = /from 'node:child_process'/.test(text);
+      if (spawns) {
+        expect(covered(file), file + ' spawns processes and is outside every review area').toBe(
+          true,
+        );
+      }
     }
   });
 });

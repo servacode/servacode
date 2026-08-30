@@ -171,7 +171,17 @@ const NEVER_GRANTED: readonly string[] = Object.freeze([
  * such instead of quietly returning an empty bundle.
  */
 export const AREA_SOURCES: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  'Core Store/integrity': ['src/store/', 'src/events/', 'src/core/'],
+  'Core Store/integrity': [
+    'src/store/',
+    'src/events/',
+    'src/core/',
+    /* The parse boundary: what a record is allowed to be before it is trusted. */
+    'src/domain/schemas.ts',
+    /* Validity is derived, never stored — and acceptance reads it. */
+    'src/validity/derive.ts',
+    /* Loads the generated catalogues off disk at startup. */
+    'src/catalogue/index.ts',
+  ],
   'Owner authority': ['src/app/conversation.ts', 'src/gates/', 'src/policy/', 'src/app/owner'],
   'AI Runtime': ['src/agents/', 'src/engine/', 'src/orchestration/'],
   'Engineering HARD boundary': [
@@ -205,6 +215,74 @@ export const AREA_SOURCES: Readonly<Record<string, readonly string[]>> = Object.
   'organizational learning': ['src/learning/', 'src/intelligence/'],
   'release/handover': ['src/portability/', 'src/lifecycle/'],
   'Serva self-acceptance authority': ['src/acceptance/'],
+
+  /*
+   * THE ENGINEERING MODULES THE 'HARD boundary' AREA NEVER NAMED.
+   *
+   * SPEC: the 1.0.1 security scope triage.
+   *
+   * 'Engineering HARD boundary' lists five files by name, which was right for what it meant
+   * — the sandbox decision — and left the rest of `src/engineering/` uncovered. That rest
+   * includes the module that spawns Git, the one that scans for committed credentials, and
+   * the one that decides a change may be accepted.
+   */
+  'engineering Git and commit integrity': [
+    'src/engineering/git.ts',
+    'src/engineering/integration.ts',
+    'src/engineering/changeset.ts',
+  ],
+  'engineering secrets and execution evidence': [
+    'src/engineering/secrets.ts',
+    'src/engineering/execution.ts',
+  ],
+  'engineering acceptance authority': [
+    'src/engineering/gate.ts',
+    'src/engineering/review.ts',
+    'src/engineering/factory.ts',
+    'src/engineering/executors.ts',
+    'src/engineering/recipe.ts',
+  ],
+
+  /*
+   * The application layer the extension actually calls. `actions.ts` states the invariant
+   * itself — "EVERY CONSEQUENTIAL ACTION IS A VALIDATED COMMAND. UI STATE IS NEVER AUTHORITY"
+   * — and no review area contained it.
+   */
+  'application action authority': [
+    'src/app/actions.ts',
+    'src/app/services.ts',
+    'src/app/ai.ts',
+    'src/app/doctor.ts',
+    'src/app/engineering.ts',
+    'src/app/reconciliation.ts',
+  ],
+});
+
+/**
+ * WHAT WAS LOOKED AT AND DELIBERATELY NOT REVIEWED, WITH THE REASON.
+ *
+ * SPEC: the 1.0.1 security scope triage.
+ *
+ * The scope map going stale was not caught by anything, because "not in any area" and
+ * "reviewed and found irrelevant" were indistinguishable — both were simply absence.
+ *
+ * So absence is no longer allowed to mean anything. Every source module is either inside a
+ * review area or named here with why it is not, and a structural test asserts the two sets
+ * cover the tree exactly. A module added later is in neither, and fails — which is the point:
+ * somebody has to decide, once, in the open.
+ *
+ * These three were classified by reading them, not by their names.
+ */
+export const NON_SECURITY_SOURCES: Readonly<Record<string, string>> = Object.freeze({
+  'src/index.ts':
+    're-exports only. No statements, no I/O, no authority — the symbols it publishes are ' +
+    'reviewed where they are implemented.',
+  'src/vocab/index.ts':
+    'canonical value sets fixed by 31_RESULT_AND_VERDICT_TAXONOMY. Constants and one total ' +
+    'helper over them; no I/O and no decision that could be influenced by input.',
+  'src/coverage/index.ts':
+    'derives lifecycle and gate coverage from the generated catalogues. Pure computation, no ' +
+    'I/O, and it reports rather than authorises — nothing downstream is gated on it.',
 });
 
 /**

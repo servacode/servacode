@@ -55,7 +55,32 @@ export const ReviewVerdict = {
 } as const;
 export type ReviewVerdict = (typeof ReviewVerdict)[keyof typeof ReviewVerdict];
 
-/** Everything §7 requires the review to have looked at. */
+/**
+ * Everything §7 requires the review to have looked at.
+ *
+ * THE LIST IS NOT THE PRODUCT, AND SAYING IT IS DOES NOT MAKE IT SO.
+ *
+ * SPEC: Phase 6 final acceptance sequence §7; the 1.0.1 security scope triage.
+ *
+ * These names were written when the areas were written, and the code kept moving. By 1.0.1,
+ * 22 of 195 source modules matched no area at all — among them the module that owns every
+ * Git operation in the system, the secrets scanner, the module asserting that an accepted
+ * commit contains exactly the verified ChangeSet, and the validated-command surface the
+ * webview reaches Serva through.
+ *
+ * A review of every listed area passed while none of those was read, and reported COMPLETE.
+ * That is the difference between "every area we happened to name was reviewed" and "every
+ * security-relevant implementation in this release was reviewed" — and only the second one
+ * is worth calling ACCEPTED.
+ *
+ * The four areas below close that gap. They are grouped by security responsibility rather
+ * than by file, because a reviewer given one coherent boundary reads it, and a reviewer given
+ * a list of unrelated files skims them.
+ *
+ * `NON_SECURITY_SOURCES` in securityReviewRun.ts holds the other half of the answer: what was
+ * deliberately excluded, and why. Between them they account for every file, which is what
+ * stops this list from silently falling behind again.
+ */
 export const REQUIRED_SCOPE: readonly string[] = Object.freeze([
   'Core Store/integrity',
   'Owner authority',
@@ -71,6 +96,10 @@ export const REQUIRED_SCOPE: readonly string[] = Object.freeze([
   'migration',
   'bootstrap',
   'install/update/rollback',
+  'engineering Git and commit integrity',
+  'engineering secrets and execution evidence',
+  'engineering acceptance authority',
+  'application action authority',
   'organizational learning',
   'release/handover',
   'Serva self-acceptance authority',
