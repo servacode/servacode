@@ -1,4 +1,4 @@
-import { lastValidQualification } from '../substrate/qualificationRecord.js';
+import { qualificationForRun } from '../substrate/qualificationRecord.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -392,7 +392,20 @@ function liveInput(store: Store, ref: RunRef): LiveEngineeringInput {
    * drives. The comment above even listed what could not be re-derived and named only the
    * fingerprint, while the fabricated qualification sat beside it unmentioned.
    *
-   * `lastValidQualification` is the persisted measurement for this store, and
+   * READ BY RUN, NOT BY RECENCY.
+   *
+   * The first fix here read `lastValidQualification`, which answers "what did this machine
+   * most recently measure" — and the question is "what did THAT Producer run under". Those
+   * come apart the moment anything measures again, and they did: running
+   * `serva engineering doctor` against a preserved live store wrote a fresh measurement hours
+   * after the run it was being used to judge, so a proof reading it would have credited a
+   * later measurement to an earlier run. A historical HARD is not evidence that a particular
+   * execution happened inside one.
+   *
+   * `qualificationForRun` is written at dispatch against the run id, so nothing measured
+   * afterwards can move it.
+   *
+   * `recordRunQualification` is the persisted measurement for this run, and
    * `recordQualification` writes one ONLY for a MEASURED attempt — so its existence is the
    * evidence that a measurement happened, and its class is what was measured.
    *
@@ -400,7 +413,7 @@ function liveInput(store: Store, ref: RunRef): LiveEngineeringInput {
    * qualification, which is the correct answer: a machine that never measured its boundary has
    * not shown a Producer ran inside one.
    */
-  const measured = lastValidQualification(store);
+  const measured = qualificationForRun(store, ref.runId);
 
   return {
     store,

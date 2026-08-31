@@ -59,6 +59,20 @@ const digest = (path) => createHash('sha256').update(readFileSync(path)).digest(
  * in wearing a different name.
  */
 const measured = candidate.qualification;
+
+/*
+ * The measurement must belong to the run being proved, not merely to the machine.
+ *
+ * SPEC: finding SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review — second pass.
+ *
+ * The first fix read the store's `last-valid`, which any later measurement overwrites. The
+ * live suite now reads `qualificationForRun` against the Producer, so a candidate carrying a
+ * qualification but naming no Producer run has nothing to bind it to.
+ */
+if (candidate.hints?.producerRunId === undefined || candidate.hints.producerRunId === null) {
+  console.error('prove-live: the candidate names no Producer run, so no boundary binds to it.');
+  process.exit(1);
+}
 if (measured === null || measured === undefined) {
   console.error('prove-live: the recorded live run carries no qualification measurement.');
   console.error('  LIVE-ENGINEERING claims a Producer ran under a measured HARD boundary, and');

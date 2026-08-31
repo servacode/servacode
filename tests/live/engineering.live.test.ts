@@ -1,4 +1,4 @@
-import { lastValidQualification } from '../../src/substrate/qualificationRecord.js';
+import { qualificationForRun } from '../../src/substrate/qualificationRecord.js';
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -578,15 +578,20 @@ describe('PHASE 4 — live acceptance', () => {
        * clause of LIVE-ENGINEERING, "a Producer under a measured HARD boundary", was therefore
        * asserted rather than evidenced, in both directions, for the whole of 1.0.
        *
-       * `lastValidQualification` is the persisted measurement, and `recordQualification` writes
-       * one ONLY when the attempt was MEASURED — so the existence of this record is itself the
-       * evidence that a measurement happened, and its `enforcementClass` is what was measured.
+       * Read against the PRODUCER RUN rather than by recency. `lastValidQualification` answers
+       * "what did this machine most recently measure", which is a different question from "what
+       * did that run run under" — and they come apart as soon as anything measures again.
+       * `recordRunQualification` is written at dispatch against the run id, and only for a
+       * MEASURED attempt, so its existence is the evidence and nothing later can move it.
        *
        * `fingerprintComplete` is copied as it stands. When part of a machine's fingerprint
        * could not be read the fingerprint identifies nothing, and saying otherwise here would
        * claim a machine identity the evidence does not support.
        */
-      const measured = lastValidQualification(rt.store);
+      const measured =
+        accepted?.producerRunId === undefined
+          ? undefined
+          : qualificationForRun(rt.store, accepted.producerRunId);
 
       const candidate = {
         producedBy: 'tests/live/engineering.live.test.ts',

@@ -58,6 +58,63 @@ export function lastValidQualification(store: Store): QualificationRecord | unde
 }
 
 /**
+ * THE BOUNDARY ONE RUN RAN UNDER, WHICH IS NOT THE SAME AS THE LATEST ONE MEASURED.
+ *
+ * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review.
+ *
+ * `last-valid` answers "what did this machine most recently measure", and acceptance was
+ * reading it to answer "what did that Producer run under". Those are different questions and
+ * they come apart the moment anything measures again — which is not hypothetical: running
+ * `serva engineering doctor` against a preserved live store overwrote `last-valid` hours after
+ * the run it was being used to judge, and the proof would have read the newer measurement.
+ *
+ * A historical HARD is not evidence that a particular execution happened inside one. So the
+ * qualification in force is written against the RUN as well, at dispatch, and acceptance reads
+ * it by run id. A later measurement cannot move it, because it is not the same key.
+ */
+export function runQualificationId(runId: string): string {
+  return 'run-' + runId;
+}
+
+export function qualificationForRun(store: Store, runId: string): QualificationRecord | undefined {
+  const envelope = store.getWorking<unknown>(WORKING_TYPE, runQualificationId(runId));
+  if (envelope === undefined) return undefined;
+  const parsed = QualificationRecordSchema.safeParse(envelope.body);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Bind the qualification in force to the run it governed.
+ *
+ * Same MEASURED guard as `recordQualification`, and for the same reason: an attempt that
+ * measured nothing must never be written down as though it had.
+ */
+export function recordRunQualification(
+  store: Store,
+  runId: string,
+  qualification: SubstrateQualification,
+): QualificationRecord | undefined {
+  if (qualification.attempt !== QualificationAttempt.MEASURED) return undefined;
+
+  const record: QualificationRecord = QualificationRecordSchema.parse({
+    enforcementClass: qualification.enforcementClass,
+    fingerprint: qualification.fingerprint,
+    boundaryId: qualification.boundary.boundaryId,
+    measuredAt: qualification.qualifiedAt,
+    engineVersion: qualification.engineVersion,
+    ...(qualification.fingerprintComplete === undefined
+      ? {}
+      : { fingerprintComplete: qualification.fingerprintComplete }),
+    ...(qualification.blockedBy === undefined ? {} : { blockedBy: qualification.blockedBy }),
+  });
+
+  const tx = store.begin();
+  tx.putWorking(WORKING_TYPE, runQualificationId(runId), record);
+  tx.commit();
+  return record;
+}
+
+/**
  * Record a qualification, but ONLY if it measured something.
  *
  * The guard is the whole point of this function and it is deliberately not optional. An

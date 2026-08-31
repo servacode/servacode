@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import {
+  lastValidQualification,
+  qualificationForRun,
+  runQualificationId,
+} from '../src/substrate/qualificationRecord.js';
 import { EnforcementClass } from '../src/vocab/index.js';
 import { ExecutionAvailability, QualificationAttempt } from '../src/substrate/types.js';
 import {
@@ -1217,8 +1222,10 @@ describe('the measured boundary is read from the measurement, never supplied', (
       .split(String.fromCharCode(10))
       .filter((l) => !l.trim().startsWith(String.fromCharCode(42)))
       .join(String.fromCharCode(10));
+    /* Superseded by the run-binding pass: reading the measurement is necessary but not
+       sufficient, since last-valid answers a different question. See the suite below. */
     expect(code, 'liveInput must CALL the measurement reader').toContain(
-      'lastValidQualification(store)',
+      'qualificationForRun(store, ref.runId)',
     );
     expect(body).not.toContain('EnforcementClass.HARD');
 
@@ -1227,5 +1234,149 @@ describe('the measured boundary is read from the measurement, never supplied', (
       'candidate.qualification',
     );
     expect(prove, 'and must refuse when there is none').toMatch(/carries no qualification/);
+  });
+});
+
+describe('the boundary is bound to the run, not to the machine', () => {
+  /*
+   * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review —
+   * second pass.
+   *
+   * The first fix replaced two hardcoded HARDs with a read of `lastValidQualification`. That
+   * closed the literal and left a subtler hole: last-valid answers "what did this machine most
+   * recently measure", and acceptance needs "what did THAT Producer run under".
+   *
+   * They are not the same, and they came apart in practice — running
+   * `serva engineering doctor` against a preserved live store wrote a fresh measurement hours
+   * after the run being judged. A proof reading last-valid would have credited that newer
+   * measurement to the older run.
+   *
+   * A historical HARD is not evidence that a particular execution happened inside one. The
+   * qualification is now written at dispatch against the run id, and read the same way.
+   */
+  function seedRunQualification(rt: ServaRuntime, runId: string, enforcementClass: string): void {
+    const tx = rt.store.begin();
+    tx.putWorking('substrateQualification', runQualificationId(runId), {
+      enforcementClass,
+      fingerprint: 'fp-' + runId,
+      boundaryId: 'SC-BOUNDARY-RECIPE',
+      measuredAt: '2026-08-31T00:00:00.000Z',
+      engineVersion: 'UNKNOWN',
+      fingerprintComplete: false,
+    });
+    tx.commit();
+  }
+
+  /** last-valid, as a stale machine-wide measurement that must never stand in. */
+  function seedMachineWideHard(rt: ServaRuntime): void {
+    const tx = rt.store.begin();
+    tx.putWorking('substrateQualification', 'last-valid', {
+      enforcementClass: 'HARD',
+      fingerprint: 'machine-wide',
+      boundaryId: 'SC-BOUNDARY-RECIPE',
+      measuredAt: '2026-08-31T23:59:00.000Z',
+      engineVersion: 'UNKNOWN',
+      fingerprintComplete: false,
+    });
+    tx.commit();
+  }
+
+  it('1. no measurement bound to the run refuses the proof', () => {
+    const rt = project();
+    honestChain(rt);
+    const out = resolve(rt, { qualification: qualificationForRun(rt.store, 'SC-RUN-000004') });
+    expect(out.refusals.some((r) => r.check === 'QUALIFICATION')).toBe(true);
+  });
+
+  it('2. a historical HARD in the store does NOT stand in for the run', () => {
+    /*
+     * THE ONE THAT MATTERS. The machine has measured HARD — it says so in last-valid — and the
+     * run being judged has no measurement of its own. Reading by recency passes this; reading
+     * by run refuses it, which is the correct answer.
+     */
+    const rt = project();
+    honestChain(rt);
+    seedMachineWideHard(rt);
+
+    expect(lastValidQualification(rt.store)?.enforcementClass, 'the fixture is set up').toBe(
+      'HARD',
+    );
+    expect(
+      qualificationForRun(rt.store, 'SC-RUN-000004'),
+      'and the run itself has none',
+    ).toBeUndefined();
+
+    const out = resolve(rt, { qualification: qualificationForRun(rt.store, 'SC-RUN-000004') });
+    expect(
+      out.refusals.some((r) => r.check === 'QUALIFICATION'),
+      'a machine-wide HARD must not be credited to a run that has no measurement',
+    ).toBe(true);
+  });
+
+  it('3. a measurement bound to the run passes the qualification guard', () => {
+    const rt = project();
+    honestChain(rt);
+    seedRunQualification(rt, 'SC-RUN-000004', 'HARD');
+
+    const bound = qualificationForRun(rt.store, 'SC-RUN-000004');
+    expect(bound?.enforcementClass).toBe('HARD');
+
+    const out = resolve(rt, {
+      qualification: {
+        attempt: QualificationAttempt.MEASURED,
+        availability: ExecutionAvailability.AVAILABLE,
+        enforcementClass: bound?.enforcementClass,
+      },
+    });
+    expect(
+      out.refusals.some((r) => r.check === 'QUALIFICATION'),
+      'a run-bound HARD must satisfy the guard: ' + out.refusals.map((r) => r.detail).join('; '),
+    ).toBe(false);
+  });
+
+  it('4. a run-bound SOFT is refused even when an older HARD exists', () => {
+    const rt = project();
+    honestChain(rt);
+    seedMachineWideHard(rt);
+    seedRunQualification(rt, 'SC-RUN-000004', 'SOFT');
+
+    const bound = qualificationForRun(rt.store, 'SC-RUN-000004');
+    const out = resolve(rt, {
+      qualification: {
+        attempt: QualificationAttempt.MEASURED,
+        availability: ExecutionAvailability.AVAILABLE,
+        enforcementClass: bound?.enforcementClass,
+      },
+    });
+    expect(out.refusals.some((r) => r.check === 'QUALIFICATION')).toBe(true);
+  });
+
+  it('5. a measurement written against another run does not transfer', () => {
+    /*
+     * Correlation by run id, which is the only correlation the evidence actually supports.
+     * The fingerprint is NOT used to strengthen this: `fingerprintComplete` is false on this
+     * machine, so it identifies nothing and claiming otherwise would invent authority.
+     */
+    const rt = project();
+    honestChain(rt);
+    seedRunQualification(rt, 'SC-RUN-999999', 'HARD');
+
+    expect(qualificationForRun(rt.store, 'SC-RUN-000004')).toBeUndefined();
+    const out = resolve(rt, { qualification: qualificationForRun(rt.store, 'SC-RUN-000004') });
+    expect(out.refusals.some((r) => r.check === 'QUALIFICATION')).toBe(true);
+  });
+
+  it('the acceptance path reads by run, and never by recency', () => {
+    /* Structural: the identifier that reintroduces the hole is the one to watch for. */
+    const status = readFileSync('src/acceptance/status.ts', 'utf8');
+    const liveInput = status.slice(status.indexOf('function liveInput'));
+    const body = liveInput.slice(0, liveInput.indexOf(String.fromCharCode(10) + '}'));
+    const code = body
+      .split(String.fromCharCode(10))
+      .filter((l) => !l.trim().startsWith(String.fromCharCode(42)))
+      .join(String.fromCharCode(10));
+
+    expect(code).toContain('qualificationForRun(store, ref.runId)');
+    expect(code, 'reading last-valid here is the defect').not.toContain('lastValidQualification');
   });
 });

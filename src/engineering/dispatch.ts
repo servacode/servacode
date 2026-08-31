@@ -1,3 +1,4 @@
+import { recordRunQualification } from '../substrate/qualificationRecord.js';
 import { z } from 'zod';
 import { existsSync, readFileSync } from 'node:fs';
 import { canonicalJson, digestOf } from '../core/hash.js';
@@ -572,6 +573,23 @@ export async function dispatchProducer(
       },
     });
     tx.commit();
+
+    /*
+     * BIND THE BOUNDARY TO THE RUN THAT RAN INSIDE IT.
+     *
+     * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review.
+     *
+     * The audit entry above already names the class, but an audit line is a narrative record,
+     * not something a resolver reads to decide authority. Acceptance was reading `last-valid`
+     * instead — "what did this machine most recently measure" — to answer "what did THIS run
+     * run under". They come apart as soon as anything measures again, and they did: running
+     * `serva engineering doctor` against a preserved live store overwrote `last-valid` hours
+     * after the run being judged.
+     *
+     * Written after the dispatch rather than before it, so what is recorded is the boundary a
+     * run that actually happened ran inside.
+     */
+    recordRunQualification(deps.store, run.runId, deps.qualification);
 
     return {
       runId: run.runId,

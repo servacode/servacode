@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { projectSnapshot } from '../src/app/services.js';
-import { ACTIONS, invokeAction } from '../src/app/actions.js';
+import { ACTIONS, ActionConsequence, invokeAction } from '../src/app/actions.js';
 import {
   WEBVIEW_INVOCABLE,
   parseWebviewMessage,
@@ -515,6 +515,61 @@ describe('the webview is not an authority, and the guards say so', () => {
     expect(actions).toMatch(
       /consequence\s*!==\s*ActionConsequence\.READ\s*&&\s*request\.confirmed\s*!==\s*true/,
     );
+  });
+
+  it('an agent cannot answer an owner decision, through the action the panel invokes', async () => {
+    /*
+     * BEHAVIOURAL, through `invokeAction` — the same entry point the webview reaches.
+     *
+     * SPEC: finding APPLICATION-ACTION-AUTHORITY/AAA-2 (MEDIUM), 1.0.1 review.
+     *
+     * The structural check below pins the refusal in `answerOwnerDecision`; this one proves the
+     * application path actually reaches it, because a guard that exists in a module nothing
+     * calls protects nothing.
+     */
+    const rt = project();
+    try {
+      for (const impostor of ['SC-AGENT-150', 'SC-RUN-000004']) {
+        const result = await invokeAction(
+          { rt },
+          {
+            id: 'owner.answer',
+            input: {
+              decisionId: 'SC-DEC-000001',
+              answeredBy: impostor,
+              option: 'yes',
+            },
+            confirmed: true,
+          },
+        );
+        expect(result.ok, impostor + ' must not be able to answer as the owner').toBe(false);
+        expect(String(result.refusal), impostor).toMatch(/SC-AGENT-|SC-RUN-|owner|cannot/i);
+      }
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('a consequential action is refused when the caller confirms nothing', async () => {
+    /*
+     * The gate the native modal feeds, exercised rather than read.
+     *
+     * SPEC: finding AAA-1. The extension derives `confirmed` from a VS Code modal and never
+     * from the page's boolean, so what the page can reach is this: an action with no
+     * confirmation at all, which must refuse.
+     */
+    const rt = project();
+    try {
+      const consequential = [...ACTIONS.values()].find(
+        (a) => a.consequence !== ActionConsequence.READ,
+      );
+      expect(consequential, 'the fixture needs a non-READ action').toBeDefined();
+
+      const result = await invokeAction({ rt }, { id: String(consequential?.id), input: {} });
+      expect(result.ok, 'no confirmation means no action').toBe(false);
+    } finally {
+      rt.close();
+    }
   });
 
   it('an agent cannot answer an owner decision, however the payload is written', () => {
