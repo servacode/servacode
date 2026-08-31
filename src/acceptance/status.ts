@@ -1,3 +1,4 @@
+import { lastValidQualification } from '../substrate/qualificationRecord.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -24,7 +25,6 @@ import {
   resolveLiveEngineering,
   resolveLiveServa,
 } from './liveProof.js';
-import { EnforcementClass } from '../vocab/index.js';
 import { ExecutionAvailability, QualificationAttempt } from '../substrate/types.js';
 import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
 import { aggregateSecurityReview } from './securityAggregate.js';
@@ -380,16 +380,42 @@ export const LIVE_ASSESSORS: Readonly<
  */
 function liveInput(store: Store, ref: RunRef): LiveEngineeringInput {
   const fingerprint = 'resolver-does-not-remeasure';
+
+  /*
+   * THE QUALIFICATION IS READ, NOT SUPPLIED.
+   *
+   * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 security review.
+   *
+   * This handed `MEASURED / HARD / AVAILABLE` to the resolver as literals, which made the
+   * QUALIFICATION branch of `resolveLiveEngineering` — the one enforcing that a Producer ran
+   * under a measured HARD boundary — permanently inert on the only path `acceptanceStatus`
+   * drives. The comment above even listed what could not be re-derived and named only the
+   * fingerprint, while the fabricated qualification sat beside it unmentioned.
+   *
+   * `lastValidQualification` is the persisted measurement for this store, and
+   * `recordQualification` writes one ONLY for a MEASURED attempt — so its existence is the
+   * evidence that a measurement happened, and its class is what was measured.
+   *
+   * When there is none, NOTHING is supplied. The resolver then refuses for want of a
+   * qualification, which is the correct answer: a machine that never measured its boundary has
+   * not shown a Producer ran inside one.
+   */
+  const measured = lastValidQualification(store);
+
   return {
     store,
     repoRoot: store.paths.root,
     machineFingerprint: fingerprint,
     recordedFingerprint: fingerprint,
-    qualification: {
-      attempt: QualificationAttempt.MEASURED,
-      availability: ExecutionAvailability.AVAILABLE,
-      enforcementClass: EnforcementClass.HARD,
-    },
+    ...(measured === undefined
+      ? {}
+      : {
+          qualification: {
+            attempt: QualificationAttempt.MEASURED,
+            availability: ExecutionAvailability.AVAILABLE,
+            enforcementClass: measured.enforcementClass,
+          },
+        }),
     hints: { producerRunId: ref.runId },
   } as LiveEngineeringInput;
 }

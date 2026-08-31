@@ -44,12 +44,22 @@ function project(): ServaRuntime {
 function seedCompleteReview(
   store: Store,
   over: (unit: string) => Record<string, unknown> = () => ({}),
+  /*
+   * Distinguishes one seeded ATTEMPT from another.
+   *
+   * SPEC: finding SC-SSA-RESOLVE-1, 1.0.1 review.
+   *
+   * Records are keyed by scope and reviewer run, so seeding twice with the same ids replaced
+   * the first set instead of adding a second attempt — which silently turned a test about two
+   * governed re-reviews into a test about one. Corroboration cannot be tested without two.
+   */
+  salt = '',
 ): void {
   let n = 0;
   for (const area of REQUIRED_SCOPE) {
     for (const { unit } of reviewUnitsFor(area)) {
       n += 1;
-      const runId = 'SC-RUN-' + String(n).padStart(6, '0');
+      const runId = 'SC-RUN-' + salt + String(n).padStart(6, '0');
       /*
        * The run is seeded too, because the aggregate now RESOLVES it rather than believing the
        * record. A fixture that recorded reviews for runs that never happened was describing a
@@ -223,7 +233,16 @@ describe('the aggregate refuses anything less than a real review of everything',
   });
 
   it('accepts a HIGH finding that is recorded as resolved', () => {
-    /* Resolution is a recorded fact, not an absence. A fixed finding stays in the evidence. */
+    /*
+     * Resolution is a recorded fact, not an absence. A fixed finding stays in the evidence.
+     *
+     * NOW ALSO CORROBORATED. SPEC: finding SC-SSA-RESOLVE-1 (MEDIUM), 1.0.1 review.
+     *
+     * This used to pass with the claim alone, which is exactly the defect: three fields inside
+     * the record making the claim were enough to mute a HIGH, and nothing in the product ever
+     * writes them. The claim still disambiguates the silence — but a governed re-review of the
+     * same area at this commit, which looked and did not report it, is what now evidences it.
+     */
     const rt = project();
     seedCompleteReview(rt.store, (unit) =>
       unit === 'Owner authority'
@@ -245,6 +264,13 @@ describe('the aggregate refuses anything less than a real review of everything',
           }
         : {},
     );
+    /* The re-review that backs the claim up: same area, same implementation, found nothing. */
+    seedCompleteReview(
+      rt.store,
+      (unit) => (unit === 'Owner authority' ? { findings: [] } : {}),
+      'B',
+    );
+
     const result = aggregate(rt);
     expect(result.refusals, result.refusals.join('; ')).toEqual([]);
     expect(result.review?.findings.length).toBe(1);
@@ -761,5 +787,123 @@ describe('a historical resolution cannot mute a current finding', () => {
     seedAt(rt.store, 'Owner authority', { findings: [finding('HIGH')] });
     seedAt(rt.store, 'Owner authority', { findings: [] }, 901);
     expect(aggregate(rt).review).toBeUndefined();
+  });
+});
+
+describe('a resolution is evidence, not a field that asserts itself', () => {
+  /*
+   * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-RESOLVE-1 (MEDIUM), 1.0.1 review.
+   *
+   * A blocking CRITICAL or HIGH was muted by three fields that all live inside the record making
+   * the claim: `resolved`, `resolvedAtCommit`, `resolvedAtTree`. The record's provenance was
+   * checked — commit, tree, and that its `reviewerRunId` resolves to a COMPLETED verifier run
+   * with authority — but the run's OUTPUT was never compared against what the record claimed, so
+   * one legitimate run could be cited by a record it never produced.
+   *
+   * And the mechanism has no legitimate writer: `persist()` writes `resolved: false` for every
+   * finding of every reviewer run, and nothing in the product ever writes `true`. Every
+   * resolution that has ever existed was authored outside the review path.
+   *
+   * A resolution must now also be CORROBORATED — a governed re-review of the same area, at this
+   * commit and tree, that looked and did not report the finding. Neither half is forgeable
+   * alone: a claim cannot conjure a run's silence, and silence with no claim means only that
+   * nobody looked.
+   */
+  it('refuses a forged resolution: right fields, no re-review behind it', () => {
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === REQUIRED_SCOPE[0]
+        ? {
+            findings: [
+              {
+                id: 'FORGED-1',
+                severity: Severity.HIGH,
+                area: String(REQUIRED_SCOPE[0]),
+                statement: 'a real defect somebody wanted to disappear',
+                evidence: ['src/somewhere.ts:1'],
+                /* Everything the old check asked for, and nothing behind it. */
+                resolved: true,
+                resolvedAtCommit: COMMIT,
+                resolvedAtTree: TREE,
+                resolvedNote: 'fixed, honestly',
+              },
+            ],
+          }
+        : {},
+    );
+
+    const result = aggregate(rt);
+    expect(result.review, 'a self-asserted resolution must not mint a review').toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('FORGED-1');
+  });
+
+  it('honours a resolution that a re-review corroborates by not finding it', () => {
+    /*
+     * The legitimate shape, so the fix does not make resolution impossible: two governed
+     * attempts at this implementation for the same area — one carrying the closed finding, one
+     * that looked and reported nothing.
+     */
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === REQUIRED_SCOPE[0]
+        ? {
+            findings: [
+              {
+                id: 'CLOSED-1',
+                severity: Severity.HIGH,
+                area: String(REQUIRED_SCOPE[0]),
+                statement: 'was real, and was fixed',
+                evidence: ['src/somewhere.ts:1'],
+                resolved: true,
+                resolvedAtCommit: COMMIT,
+                resolvedAtTree: TREE,
+                resolvedNote: 'fixed: the guard now reads the fact rather than the label',
+              },
+            ],
+          }
+        : {},
+    );
+    /* The corroborating re-review of the same area, which looked and found nothing. */
+    seedCompleteReview(
+      rt.store,
+      (unit) => (unit === REQUIRED_SCOPE[0] ? { findings: [] } : {}),
+      'B',
+    );
+
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+    expect(result.review).toBeDefined();
+  });
+
+  it('silence alone still does not close anything', () => {
+    /*
+     * The other half. A re-review that does not mention a finding may mean it was fixed or that
+     * nobody looked for it — which is why the explicit claim is still required.
+     */
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === REQUIRED_SCOPE[0]
+        ? {
+            findings: [
+              {
+                id: 'STILL-OPEN-1',
+                severity: Severity.HIGH,
+                area: String(REQUIRED_SCOPE[0]),
+                statement: 'never claimed resolved',
+                evidence: ['src/somewhere.ts:1'],
+              },
+            ],
+          }
+        : {},
+    );
+    seedCompleteReview(
+      rt.store,
+      (unit) => (unit === REQUIRED_SCOPE[0] ? { findings: [] } : {}),
+      'B',
+    );
+
+    const result = aggregate(rt);
+    expect(result.review).toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('STILL-OPEN-1');
   });
 });

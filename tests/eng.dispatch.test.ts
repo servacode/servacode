@@ -273,7 +273,7 @@ describe('the Producer is dispatched through the one runtime, or not at all', ()
     });
 
     expect(d.outcome).toBe(RunOutcome.COMPLETED);
-    const request = f.engine.seen[0];
+    const request = f.engine.seen.at(-1);
     expect(request).toBeDefined();
     // The working directory is the WORKTREE, which is what makes every relative
     // permission rule in the grant mean "inside this worktree" and nothing wider.
@@ -418,16 +418,44 @@ describe('the reviewer is a separate, independent, read-only run', () => {
   async function verified(f: Fixture) {
     const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
     const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+
+    /*
+     * A REAL PRODUCER RUN, because the reviewer is judged against one.
+     *
+     * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-1 (MEDIUM), 1.0.1 security review.
+     *
+     * This fixture wrote the file itself and then dispatched a reviewer with no Producer run
+     * to name — a shape production never takes, since app/implement.ts always passes
+     * producerRunRef. Independence used to be SKIPPED when the reference was absent, so the
+     * gap in the validator and the gap in the fixture agreed with each other, and neither
+     * matched the product. Requiring the reference exposed both at once.
+     */
+    f.engine.script(PRODUCER, {
+      structuredOutput: envelope({
+        summary: 'fix total',
+        claimedPaths: ['src/total.js'],
+        observations: [],
+        blockers: [],
+      }),
+    });
+    const produced = await dispatchProducer(f.dispatchDeps, {
+      item,
+      workspace: w,
+      taskDefinition: 'Fix total().',
+      reviewerAvailable: true,
+      executorsAvailable: true,
+    });
+
     writeFileSync(join(w.path, 'src', 'total.js'), 'module.exports = 2;\n', 'utf8');
     const v = await f.factory.verifyAttempt(item, w, {
       required: { ...DEFAULT_REQUIRED_CHECKS, build: false, lint: false, codeReview: false },
     });
-    return { item, w, v };
+    return { item, w, v, producerRunRef: produced.runId };
   }
 
   it('is dispatched with no write tool, into its own run', async () => {
     const f = await setup();
-    const { item, w, v } = await verified(f);
+    const { item, w, v, producerRunRef } = await verified(f);
     f.engine.script(REVIEWER, {
       structuredOutput: envelope({
         criterionId: 'EC-REVIEW',
@@ -445,10 +473,11 @@ describe('the reviewer is a separate, independent, read-only run', () => {
       changeSet: v.changeSet,
       evidence: v.evidence,
       diff: await f.git.diff(f.base, w.path),
+      producerRunRef,
     });
 
     expect(d.review?.outcome).toBe('PASS');
-    const request = f.engine.seen[0];
+    const request = f.engine.seen.at(-1);
     expect(request?.tools.available).not.toContain('Edit');
     expect(request?.tools.available).not.toContain('Bash');
     expect(request?.tools.filesystem.write).toEqual([]);
@@ -458,7 +487,7 @@ describe('the reviewer is a separate, independent, read-only run', () => {
 
   it('sees the evidence and the diff, and not the Producer reasoning', async () => {
     const f = await setup();
-    const { item, w, v } = await verified(f);
+    const { item, w, v, producerRunRef } = await verified(f);
     f.engine.script(REVIEWER, {
       structuredOutput: envelope({
         criterionId: 'EC-REVIEW',
@@ -475,9 +504,11 @@ describe('the reviewer is a separate, independent, read-only run', () => {
       changeSet: v.changeSet,
       evidence: v.evidence,
       diff: 'DIFF-MARKER-TEXT',
+      producerRunRef,
     });
 
-    const prompt = (f.engine.seen[0]?.systemPrompt ?? '') + (f.engine.seen[0]?.prompt ?? '');
+    const reviewerCall = f.engine.seen.at(-1);
+    const prompt = (reviewerCall?.systemPrompt ?? '') + (reviewerCall?.prompt ?? '');
     expect(prompt).toContain(v.changeSet.changeSetId);
     expect(prompt).toContain('DIFF-MARKER-TEXT');
     expect(prompt).toContain('SC-RTC-012');
@@ -487,7 +518,7 @@ describe('the reviewer is a separate, independent, read-only run', () => {
 
   it('a verdict about a different ChangeSet is refused, not recorded', async () => {
     const f = await setup();
-    const { item, w, v } = await verified(f);
+    const { item, w, v, producerRunRef } = await verified(f);
     f.engine.script(REVIEWER, {
       structuredOutput: envelope({
         criterionId: 'EC-REVIEW',
@@ -506,6 +537,7 @@ describe('the reviewer is a separate, independent, read-only run', () => {
         changeSet: v.changeSet,
         evidence: v.evidence,
         diff: '',
+        producerRunRef,
       }),
     ).rejects.toThrowError(/reports on ChangeSet SC-CS-SOMETHING-ELSE/);
     expect(listReviews(f.store)).toHaveLength(0);
@@ -513,7 +545,7 @@ describe('the reviewer is a separate, independent, read-only run', () => {
 
   it('a rejection with no findings is not a usable verdict', async () => {
     const f = await setup();
-    const { item, w, v } = await verified(f);
+    const { item, w, v, producerRunRef } = await verified(f);
     f.engine.script(REVIEWER, {
       structuredOutput: envelope({
         criterionId: 'EC-REVIEW',
@@ -532,6 +564,7 @@ describe('the reviewer is a separate, independent, read-only run', () => {
       changeSet: v.changeSet,
       evidence: v.evidence,
       diff: '',
+      producerRunRef,
     });
     expect(d.review).toBeUndefined();
     expect(d.problems.join(' ')).toMatch(/NO EVIDENCE = NOT VERIFIED/);
@@ -839,6 +872,24 @@ describe('a governed change goes all the way to an accepted commit', () => {
     const measured = await f.factory.verifyAttempt(item, w, {
       required: { ...DEFAULT_REQUIRED_CHECKS, build: false, lint: false, codeReview: false },
     });
+
+    /* A Producer to be independent OF — see the note on `verified` above. */
+    f.engine.script(PRODUCER, {
+      structuredOutput: envelope({
+        summary: 'fix total',
+        claimedPaths: ['src/total.js'],
+        observations: [],
+        blockers: [],
+      }),
+    });
+    const produced = await dispatchProducer(f.dispatchDeps, {
+      item,
+      workspace: w,
+      taskDefinition: 'Fix total().',
+      reviewerAvailable: true,
+      executorsAvailable: true,
+    });
+
     f.engine.script(REVIEWER, {
       structuredOutput: envelope({
         criterionId: 'EC-REVIEW',
@@ -855,6 +906,7 @@ describe('a governed change goes all the way to an accepted commit', () => {
       changeSet: measured.changeSet,
       evidence: measured.evidence,
       diff: '',
+      producerRunRef: produced.runId,
     });
 
     const final = await f.factory.verifyAttempt(item, w, {
@@ -866,3 +918,87 @@ describe('a governed change goes all the way to an accepted commit', () => {
     await expect(f.factory.acceptChange(item, w, final)).rejects.toThrowError(/is not accepted/);
   }, 120_000);
 });
+
+describe('independence is established, never assumed from a missing field', () => {
+  /*
+   * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-1 (MEDIUM), 1.0.1 security review.
+   *
+   * The session-distinctness check lived inside `if (input.producerRunRef !== undefined)`, and
+   * the field is optional on both the input and the persisted schema. Omitting it therefore did
+   * not fail the check — it REMOVED the check. A reviewer that had shared the Producer's engine
+   * session, reviewing the argument rather than the artifact (19 SM-3), validated and persisted
+   * cleanly whenever the caller left the reference out.
+   *
+   * Independence then rested on an optional input rather than on the validator, which is the
+   * one place it cannot rest: the caller supplying the reference is the same caller whose
+   * independence is in question.
+   */
+  it('a reviewer that names no Producer run cannot be shown to be independent', async () => {
+    const f = await setup();
+    const { item, w, v } = await verifiedFor(f);
+
+    f.engine.script(REVIEWER, {
+      structuredOutput: envelope({
+        criterionId: 'EC-REVIEW',
+        outcome: 'PASS',
+        changeSetId: v.changeSet.changeSetId,
+        summary: 'Looks fine.',
+        findings: [],
+        confidence: 'HIGH',
+      }),
+    });
+
+    await expect(
+      dispatchReviewer(f.dispatchDeps, {
+        item,
+        workspace: w,
+        changeSet: v.changeSet,
+        evidence: v.evidence,
+        diff: '',
+        /* producerRunRef deliberately absent — the shape the defect allowed through. */
+      }),
+    ).rejects.toThrowError(/Producer run was not identified/);
+  }, 60_000);
+
+  it('a Producer reference that resolves to nothing is refused', async () => {
+    /*
+     * Otherwise the requirement is satisfiable by inventing a run id, which is a weaker
+     * check than no check at all — it looks like evidence.
+     */
+    const f = await setup();
+    const { item, w, v } = await verifiedFor(f);
+
+    f.engine.script(REVIEWER, {
+      structuredOutput: envelope({
+        criterionId: 'EC-REVIEW',
+        outcome: 'PASS',
+        changeSetId: v.changeSet.changeSetId,
+        summary: 'Looks fine.',
+        findings: [],
+        confidence: 'HIGH',
+      }),
+    });
+
+    await expect(
+      dispatchReviewer(f.dispatchDeps, {
+        item,
+        workspace: w,
+        changeSet: v.changeSet,
+        evidence: v.evidence,
+        diff: '',
+        producerRunRef: 'SC-RUN-000000000000000000000',
+      }),
+    ).rejects.toThrowError(/does not resolve to a recorded run/);
+  }, 60_000);
+});
+
+/** A verified attempt with no Producer dispatched, for the two refusals above. */
+async function verifiedFor(f: Fixture) {
+  const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+  const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+  writeFileSync(join(w.path, 'src', 'total.js'), 'module.exports = 2;\n', 'utf8');
+  const v = await f.factory.verifyAttempt(item, w, {
+    required: { ...DEFAULT_REQUIRED_CHECKS, build: false, lint: false, codeReview: false },
+  });
+  return { item, w, v };
+}

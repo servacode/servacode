@@ -42,7 +42,7 @@ import {
   resolveReviewerPolicy,
 } from '../src/engineering/capability.js';
 import { EngineeringFactory, routeVerdict } from '../src/engineering/factory.js';
-import { scanText } from '../src/engineering/secrets.js';
+import { SECRET_RULES, redactSecrets, scanText } from '../src/engineering/secrets.js';
 import { buildSandboxProfile } from '../src/engineering/sandboxProfile.js';
 import { FAKE_CAPABILITIES } from '../src/engine/fake.js';
 import {
@@ -716,12 +716,29 @@ describe('the secrets scanner reports without disclosing', () => {
   });
 
   it('a placeholder is downgraded but never suppressed', () => {
-    const f = scanText('x', 'const k = "sk-ant-abcdefghijklmnop123"; // placeholder');
+    /*
+     * REWRITTEN, because it asserted the defect.
+     *
+     * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-2 (MEDIUM), 1.0.1 review.
+     *
+     * This used `"sk-ant-abcdefghijklmnop123"; // placeholder` and expected MEDIUM — which
+     * passed only because the comment downgraded it. Its own note said "the scanner does not
+     * get to decide that a comment is telling the truth", and the code was doing precisely
+     * that: `looksLikePlaceholder` read the whole LINE.
+     *
+     * Since `blocking` is `some(f => f.severity === 'HIGH')`, that let anyone disarm the scan
+     * by typing a word next to a live credential. The downgrade now rests on the value.
+     */
+    const f = scanText('x', 'const k = "sk-ant-aaaaaaaaaaaaaaaaaaaa";');
     expect(f).toHaveLength(1);
-    // Downgraded, because the scanner does not get to decide that a comment is telling
-    // the truth — and never dropped, because a real key labelled "placeholder" would
-    // then disappear entirely.
+    /* Downgraded because the VALUE is a masked run, and never dropped — a "placeholder" that
+       turns out to be real must still be reported. */
     expect(f[0]?.severity).toBe('MEDIUM');
+
+    /* And the comment on its own changes nothing. */
+    const captioned = scanText('x', 'const k = "sk-ant-R7kQ2mZ9pL4xW1nT8vB6"; // placeholder');
+    expect(captioned).toHaveLength(1);
+    expect(captioned[0]?.severity, 'a caption must not disarm the scan').toBe('HIGH');
   });
 
   it('a high-confidence finding blocks, and the report withholds the value', async () => {
@@ -1078,3 +1095,129 @@ describe('an unqualified substrate blocks the factory entirely', () => {
     expect(soft.qualification.blockedBy).toBeDefined();
   });
 });
+
+describe('the words around a secret do not decide how serious it is', () => {
+  /*
+   * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-2 (MEDIUM), 1.0.1 review.
+   *
+   * `looksLikePlaceholder` tested `line + ' ' + matched` — the WHOLE line. Since
+   * `blocking` is `findings.some(f => f.severity === 'HIGH')`, writing `// example` beside a
+   * live credential downgraded it to MEDIUM and acceptance stopped being blocked.
+   *
+   * The text on the line is written by whoever wrote the line. Letting it decide enforcement
+   * hands the control to the one party it is meant to constrain.
+   *
+   * The judgement now rests on the matched value itself: a real key stays HIGH however it is
+   * captioned, and an actually-placeholder-shaped value is still downgraded.
+   */
+  const REAL_AWS = 'AKIA' + 'Q7X4ZL2MN8VBCD3R';
+  const REAL_ANTHROPIC = 'sk-ant-' + 'api03R7kQ2mZ9pL4xW1nT8vB6cD5hJ3';
+
+  it('a real key stays HIGH however the line is captioned', () => {
+    for (const caption of [
+      '// example',
+      '# sample only',
+      '/* test_only */',
+      '-- placeholder',
+      '// changeme',
+      '// this is a fake, honestly',
+      '// your_key here',
+    ]) {
+      const findings = scanText('src/config.ts', 'const k = "' + REAL_AWS + '"; ' + caption);
+      expect(findings.length, caption).toBeGreaterThan(0);
+      expect(findings[0]?.severity, 'caption ' + caption + ' must not downgrade a real key').toBe(
+        'HIGH',
+      );
+    }
+  });
+
+  it('the same holds for an API key, and the scan still blocks', () => {
+    const findings = scanText('src/config.ts', 'const k = "' + REAL_ANTHROPIC + '"; // example');
+    expect(findings[0]?.severity).toBe('HIGH');
+  });
+
+  it('a value that is itself a placeholder is still downgraded', () => {
+    /*
+     * The negative case, so the fix does not simply make everything HIGH. A scanner that
+     * cannot distinguish documentation from a credential is one people learn to ignore.
+     */
+    const masked = scanText('README.md', 'AKIA' + 'XXXXXXXXXXXXXXXX');
+    expect(masked.length).toBeGreaterThan(0);
+    expect(masked[0]?.severity, 'an all-X value is documentation').toBe('MEDIUM');
+  });
+
+  it('never suppresses the finding, whichever way it is graded', () => {
+    /* Downgrade, never disappear — a placeholder that turns out to be real must still show. */
+    const masked = scanText('README.md', 'AKIA' + 'XXXXXXXXXXXXXXXX');
+    expect(masked.length).toBe(1);
+  });
+});
+
+describe('a credential printed by a build does not become permanent record', () => {
+  /*
+   * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-1 (MEDIUM), 1.0.1 review.
+   *
+   * `runRecipe` wrote 2000 bytes of raw stdout and stderr into T-CANON, which is immutable and
+   * travels in every backup and export. The module's own header says that output "routinely
+   * carries paths, tokens and environment fragments", and the secrets scanner only ever ran
+   * over ChangeSet FILES — so a credential printed by a build was persisted verbatim, forever,
+   * having gone around the boundary that exists to catch it.
+   *
+   * Canon cannot be repaired afterwards, which is the whole reason this has to happen before
+   * the write rather than after it.
+   */
+  const LIVE_KEY = 'AKIA' + 'Q7X4ZL2MN8VBCD3R';
+
+  it('redacts the credential and says how many it removed', () => {
+    const r = redactSecrets('building...\nAWS_ACCESS_KEY_ID=' + LIVE_KEY + '\ndone');
+    expect(r.text, 'the value itself must not survive').not.toContain(LIVE_KEY);
+    expect(r.text).toContain('[REDACTED:');
+    expect(r.count).toBe(1);
+    /* The shape is safe to name; it describes what matched, never the value. */
+    expect(r.categories.length).toBeGreaterThan(0);
+  });
+
+  it('leaves ordinary output exactly as it was', () => {
+    /* A redactor that rewrites innocent text makes every excerpt untrustworthy. */
+    const plain = 'tsc --noEmit\n0 errors\nBuild succeeded in 4.1s';
+    const r = redactSecrets(plain);
+    expect(r.text).toBe(plain);
+    expect(r.count).toBe(0);
+  });
+
+  it('removes a credential that straddles the excerpt boundary', () => {
+    /*
+     * The ordering that matters. Truncating first would cut the key in half at 2000 bytes, and
+     * the surviving half is both a disclosure and a shape the rules no longer match — so it
+     * would pass through in silence.
+     */
+    /* A separator, because the rules require a word boundary: a key embedded inside a longer
+       alphanumeric run is not a standalone key, and correctly does not match. */
+    const padding = 'x'.repeat(1_994) + '\n';
+    const r = redactSecrets(padding + LIVE_KEY + ' trailing');
+    expect(r.text.slice(0, 2_000)).not.toContain('AKIA');
+    expect(r.count).toBe(1);
+  });
+
+  it('every rule the scanner enforces is one the redactor also removes', () => {
+    /*
+     * One detector, not two. If these ever diverge, the day they disagree is the day one of
+     * them is wrong about a secret — so this asserts they are driven by the same rule set
+     * rather than by two lists somebody has to remember to update together.
+     */
+    for (const rule of SECRET_RULES) {
+      const sample = SAMPLE_FOR.get(rule.category);
+      if (sample === undefined) continue;
+      const r = redactSecrets('value=' + sample);
+      expect(r.text, rule.category + ' is scanned but not redacted').not.toContain(sample);
+    }
+  });
+});
+
+/** Realistic-shaped values, one per rule, used only to prove the redactor covers each rule. */
+const SAMPLE_FOR = new Map<string, string>([
+  ['ANTHROPIC_KEY', 'sk-ant-' + 'api03R7kQ2mZ9pL4xW1nT8vB6cD5hJ3'],
+  ['AWS_ACCESS_KEY', 'AKIA' + 'Q7X4ZL2MN8VBCD3R'],
+  ['GITHUB_TOKEN', 'ghp_' + 'R7kQ2mZ9pL4xW1nT8vB6cD5hJ3aF1g'],
+  ['PRIVATE_KEY', '-----BEGIN RSA PRIVATE KEY-----'],
+]);

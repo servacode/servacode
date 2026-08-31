@@ -41,16 +41,58 @@ const candidate = JSON.parse(readFileSync(candidatePath, 'utf8'));
 const digest = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 /*
- * The qualification in force for the run.
+ * The qualification in force for the run, READ from what the run measured.
  *
- * Taken from the live suite's own record of the boundary it measured. A proof that assumed
- * HARD would be asserting the very thing it is supposed to be evidence for.
+ * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 security review.
+ *
+ * The comment above this block used to say exactly what it says now — "taken from the live
+ * suite's own record of the boundary it measured", and "a proof that assumed HARD would be
+ * asserting the very thing it is supposed to be evidence for" — directly above three hardcoded
+ * literals. It was taken from nothing. The headline clause of LIVE-ENGINEERING, that a Producer
+ * ran under a measured HARD boundary, was asserted rather than evidenced for the whole of 1.0.
+ *
+ * The live suite now writes the persisted measurement into the candidate.
+ * `recordQualification` stores one ONLY when the attempt was MEASURED, so the existence of that
+ * record is the evidence that a measurement happened, and its class is what was measured.
+ *
+ * Absence REFUSES. There is no fallback to HARD, because a fallback is how a literal gets back
+ * in wearing a different name.
  */
+const measured = candidate.qualification;
+if (measured === null || measured === undefined) {
+  console.error('prove-live: the recorded live run carries no qualification measurement.');
+  console.error('  LIVE-ENGINEERING claims a Producer ran under a measured HARD boundary, and');
+  console.error('  nothing in this candidate evidences that. Re-run the live suite:');
+  console.error('    SERVA_PRESERVE_LIVE=1 npm run test:engineering-live');
+  process.exit(1);
+}
+if (measured.enforcementClass !== 'HARD') {
+  console.error(
+    'prove-live: the boundary this run measured was ' +
+      String(measured.enforcementClass) +
+      ', not HARD.',
+  );
+  console.error('  LIVE-ENGINEERING is not provable on a machine that did not measure HARD.');
+  process.exit(1);
+}
+
 const qualification = {
+  /* MEASURED is not asserted here: a persisted record exists only for a measured attempt. */
   attempt: 'MEASURED',
+  /* The guest was reachable, evidenced by the Producer run having actually executed in it. */
   availability: 'AVAILABLE',
-  enforcementClass: 'HARD',
+  enforcementClass: measured.enforcementClass,
 };
+
+console.log(
+  'prove-live: boundary ' +
+    measured.enforcementClass +
+    ' measured at ' +
+    String(measured.measuredAt) +
+    (measured.fingerprintComplete === true
+      ? ''
+      : ' (machine fingerprint incomplete, so it identifies nothing)'),
+);
 
 if (candidate.outcome !== 'ACCEPTED') {
   console.error('prove-live: the recorded live run ended ' + candidate.outcome + ', not ACCEPTED.');

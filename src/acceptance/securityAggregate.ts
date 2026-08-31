@@ -203,6 +203,39 @@ function isResolvedHere(f: ScopeFinding, repository: RepositoryIdentity): boolea
   );
 }
 
+/**
+ * A RESOLUTION HAS TO BE BACKED BY A RE-REVIEW THAT DID NOT FIND IT.
+ *
+ * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-RESOLVE-1 (MEDIUM), 1.0.1 review.
+ *
+ * `isResolvedHere` reads three fields that all sit inside the record making the claim. The
+ * record's provenance is checked — its commit, its tree, that its `reviewerRunId` resolves to
+ * a COMPLETED verifier run with authority — but the run's OUTPUT is never compared against what
+ * the record says. Nothing stops one legitimate run being cited by a record it did not produce,
+ * declaring any finding id closed.
+ *
+ * And the mechanism has no legitimate writer at all: `persist()` in securityReviewRun.ts writes
+ * `resolved: false` for every finding of every reviewer run, and nothing anywhere in the product
+ * writes `true`. So every resolution that has ever existed was authored outside the review path,
+ * and honouring one on its own word can only ever admit something hand-written into canon.
+ *
+ * Corroboration closes it without discarding the design. The header's argument for recording
+ * resolutions is right — absence is ambiguous, since a finding may stop appearing because it was
+ * fixed OR because nobody looked. But the CLAIM disambiguates the absence, and the absence
+ * evidences the claim: a governed re-review of the same scope, at this commit and tree, that
+ * examined the area and did not report the finding.
+ *
+ * Neither half is forgeable alone. The claim cannot conjure a run's silence, and silence with no
+ * claim still means only that nobody looked.
+ */
+function resolutionIsCorroborated(f: ScopeFinding, attempts: readonly ResolvedAttempt[]): boolean {
+  const reReviews = attempts.filter(
+    (a) =>
+      a.refusals.length === 0 && (a.record.scopeName === f.area || a.record.scopeId === f.area),
+  );
+  return reReviews.some((a) => !a.record.findings.some((g) => g.id === f.id));
+}
+
 export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome {
   const refusals: string[] = [];
 
@@ -316,7 +349,7 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
    */
   const blocking = findings.filter(
     (f) =>
-      !isResolvedHere(f, input.repository) &&
+      !(isResolvedHere(f, input.repository) && resolutionIsCorroborated(f, attempts)) &&
       (f.severity === Severity.CRITICAL || f.severity === Severity.HIGH),
   );
   for (const f of blocking) {

@@ -121,8 +121,16 @@ export interface LiveEngineeringInput {
   readonly repoRoot: string;
   /** This machine, measured now. */
   readonly machineFingerprint: string;
-  /** The qualification in force for the run. */
-  readonly qualification: SubstrateQualification;
+  /**
+   * The qualification in force for the run, as MEASURED.
+   *
+   * SPEC: finding SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review.
+   *
+   * Optional because a machine that never measured its boundary has none to report, and the
+   * resolver must be able to say so. It was required, so every caller satisfied it with a
+   * literal and the guard below could never fail.
+   */
+  readonly qualification?: SubstrateQualification;
   /** The fingerprint recorded when the run happened. */
   readonly recordedFingerprint: string;
   /** Lookup hints. Never authority. */
@@ -634,7 +642,26 @@ export function resolveLiveEngineering(
    * never reached the guest measured nothing at all — the transport invariant reaching the
    * acceptance layer, where it matters most.
    */
-  if (input.qualification.attempt !== QualificationAttempt.MEASURED) {
+  if (input.qualification === undefined) {
+    /*
+     * NO MEASUREMENT IS NOT A PASS, AND IT IS NOT A CRASH EITHER.
+     *
+     * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review.
+     *
+     * The field was typed as required and every caller satisfied it with a literal, so the
+     * absent case had never occurred — and dereferencing it threw. Now that callers read the
+     * measurement instead of supplying one, absence is a state that genuinely happens: a
+     * machine that never measured its boundary has none to report.
+     *
+     * It refuses, because "we did not measure" and "we measured HARD" must not be the same
+     * answer, and a thrown error is not a verdict anyone can act on.
+     */
+    refuse(
+      'QUALIFICATION',
+      'no substrate qualification was measured for this store, so nothing shows the Producer ' +
+        'ran under a HARD boundary',
+    );
+  } else if (input.qualification.attempt !== QualificationAttempt.MEASURED) {
     refuse(
       'QUALIFICATION',
       'the qualification attempt was ' + input.qualification.attempt + ', so nothing was measured',

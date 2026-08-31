@@ -453,3 +453,79 @@ describe('the extension manifest is deliberate about authority', () => {
     expect(css).toContain('prefers-reduced-motion');
   });
 });
+
+describe('the webview is not an authority, and the guards say so', () => {
+  /*
+   * SPEC: findings APPLICATION-ACTION-AUTHORITY/AAA-1 and AAA-2 (MEDIUM), 1.0.1 review.
+   *
+   * Both were reported against `src/app/actions.ts` read in isolation, and both are answered
+   * one layer up — in files the reviewing unit could not see. Rather than leave that as an
+   * argument in a report, it is pinned here, because the reasoning only holds while the code
+   * above still behaves the way the disposition claimed.
+   *
+   * AAA-1: `request.confirmed` is a boolean on the same message channel the module itself
+   * calls "untrusted input in exactly the sense a captured web page is". The extension host
+   * does not forward the webview's value — it asks the person, through a native modal, and
+   * uses the answer. A webview can set `confirmed` on any message it sends; it cannot make
+   * somebody click a VS Code dialog.
+   *
+   * AAA-2: `owner.answer` takes `answeredBy` from the payload. The agent-id protection the
+   * reviewer could not verify lives in `answerOwnerDecision`, and it is real.
+   *
+   * The single-owner, local assumption stands for 1.0.1 and is stated rather than implied:
+   * caller-supplied attribution is not authentication. On a machine with one owner, driving
+   * their own editor, the person at the keyboard IS the owner — and nothing here should be
+   * read as claiming more than that.
+   */
+  it('the extension asks the person, rather than believing the message', () => {
+    /*
+     * Structural, because the alternative is launching an editor to prove a negative. What
+     * matters is that the value sent by the page is not what reaches the action.
+     */
+    const host = readFileSync('extension/src/extension.ts', 'utf8');
+
+    /* The modal is the source of the confirmation. */
+    expect(host, 'a consequential action must be confirmed by a native modal').toMatch(
+      /showWarningMessage[\s\S]{0,400}modal:\s*true/,
+    );
+    expect(host, 'and the answer to it is what becomes the confirmation').toMatch(
+      /confirmed\s*=\s*answer\s*===/,
+    );
+
+    /*
+     * The page's boolean IS read, as an initial value, and that is safe only because every
+     * action that is not READ overwrites it from the modal and returns early when the answer
+     * was no. Both halves are asserted, since either one alone would leave the flag standing.
+     *
+     * Noted while writing this: the comment above handleMessage says the panel's flag is
+     * "accepted only for CONSEQUENTIAL actions", which is not what the code does — the modal
+     * fires for everything that is not READ, so the code is STRICTER than its own description.
+     */
+    expect(host, 'the modal branch must cover every non-READ action').toMatch(
+      /consequence\s*!==\s*ActionConsequence\.READ/,
+    );
+    expect(host, 'and a refused modal must stop the action').toMatch(
+      /if\s*\(!confirmed\)\s*return;/,
+    );
+  });
+
+  it('a consequential action is refused without a confirmation at all', () => {
+    /* The gate the modal feeds. Absent confirmation is a refusal, not a default. */
+    const actions = readFileSync('src/app/actions.ts', 'utf8');
+    expect(actions).toMatch(
+      /consequence\s*!==\s*ActionConsequence\.READ\s*&&\s*request\.confirmed\s*!==\s*true/,
+    );
+  });
+
+  it('an agent cannot answer an owner decision, however the payload is written', () => {
+    /*
+     * Through the real refusal rather than a helper: agent and run identities are not people,
+     * and an owner decision answered by one would be the product deciding for its owner.
+     */
+    const app = readFileSync('src/intelligence/app.ts', 'utf8');
+    expect(app, 'agent ids must be refused as owner answers').toMatch(
+      /answeredBy\.startsWith\('SC-AGENT-'\)/,
+    );
+    expect(app, 'and so must run ids').toMatch(/answeredBy\.startsWith\('SC-RUN-'\)/);
+  });
+});

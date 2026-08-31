@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { EnforcementClass } from '../src/vocab/index.js';
 import { ExecutionAvailability, QualificationAttempt } from '../src/substrate/types.js';
 import {
@@ -1124,5 +1125,107 @@ describe('the live chain proves reviewer authority, not merely a different name'
     honestChain(rt);
     const result = resolve(rt);
     expect(result.resolved, JSON.stringify(result.refusals)).toBe(true);
+  });
+});
+
+describe('the measured boundary is read from the measurement, never supplied', () => {
+  /*
+   * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review.
+   *
+   * LIVE-ENGINEERING's headline clause is that a Producer ran under a MEASURED HARD boundary.
+   * Both paths that could establish it supplied the answer as literals:
+   *
+   *   `acceptance/status.ts` built `liveInput` with MEASURED/HARD/AVAILABLE hardcoded, under a
+   *   comment that listed what could not be re-derived and named only the fingerprint;
+   *
+   *   `scripts/prove-live.mjs` hardcoded the same three values under a comment reading "taken
+   *   from the live suite's own record of the boundary it measured".
+   *
+   * So the QUALIFICATION branch of `resolveLiveEngineering` could never fail, and the clause was
+   * asserted rather than evidenced for the whole of 1.0. The measurement is now read from the
+   * persisted record — which `recordQualification` writes only for a MEASURED attempt — and its
+   * absence refuses rather than falling back.
+   */
+  it('refuses when no qualification is supplied at all', () => {
+    /*
+     * The shape `liveInput` now produces on a machine that never measured its boundary: the
+     * key is absent rather than filled in with something agreeable.
+     */
+    const rt = project();
+    honestChain(rt);
+    const out = resolve(rt, { qualification: undefined });
+
+    expect(
+      out.refusals.some((r) => r.check === 'QUALIFICATION'),
+      'a missing measurement must refuse, not default: ' +
+        out.refusals.map((r) => r.detail).join('; '),
+    ).toBe(true);
+    expect(out.resolved).toBe(false);
+  });
+
+  it('refuses a measurement that did not reach HARD', () => {
+    /* SOFT is a real measurement and still not the boundary the requirement names. */
+    const rt = project();
+    honestChain(rt);
+    const out = resolve(rt, {
+      qualification: {
+        attempt: QualificationAttempt.MEASURED,
+        availability: ExecutionAvailability.AVAILABLE,
+        enforcementClass: EnforcementClass.SOFT,
+      },
+    });
+
+    expect(
+      out.refusals.some((r) => r.check === 'QUALIFICATION'),
+      'SOFT must not satisfy a HARD requirement',
+    ).toBe(true);
+  });
+
+  it('refuses an attempt that measured nothing, whatever class it names', () => {
+    /*
+     * The combination the transport-semantics area exists to prevent, arriving here: a class
+     * with NOT_MEASURED beside it is not evidence about any machine.
+     */
+    const rt = project();
+    honestChain(rt);
+    const out = resolve(rt, {
+      qualification: {
+        attempt: QualificationAttempt.NOT_MEASURED,
+        availability: ExecutionAvailability.UNREACHABLE,
+        enforcementClass: EnforcementClass.HARD,
+      },
+    });
+
+    expect(out.refusals.some((r) => r.check === 'QUALIFICATION')).toBe(true);
+  });
+
+  it('the acceptance path no longer contains a hardcoded HARD', () => {
+    /*
+     * Structural, and deliberately so. The defect was not a wrong value — it was a literal
+     * standing where a reading belonged, and a literal is easy to reintroduce while the
+     * behavioural tests still pass because the machine really is HARD.
+     */
+    const status = readFileSync('src/acceptance/status.ts', 'utf8');
+    const liveInput = status.slice(status.indexOf('function liveInput'));
+    const body = liveInput.slice(0, liveInput.indexOf('\n}'));
+    /*
+     * The CALL, not the word. An earlier version of this test looked for the identifier and
+     * passed against a reverted implementation, because the doc comment above the call still
+     * mentioned it — a check that reads the wrong thing does not fail, it quietly agrees.
+     */
+    const code = body
+      .split(String.fromCharCode(10))
+      .filter((l) => !l.trim().startsWith(String.fromCharCode(42)))
+      .join(String.fromCharCode(10));
+    expect(code, 'liveInput must CALL the measurement reader').toContain(
+      'lastValidQualification(store)',
+    );
+    expect(body).not.toContain('EnforcementClass.HARD');
+
+    const prove = readFileSync('scripts/prove-live.mjs', 'utf8');
+    expect(prove, 'prove-live must read the candidate measurement').toContain(
+      'candidate.qualification',
+    );
+    expect(prove, 'and must refuse when there is none').toMatch(/carries no qualification/);
   });
 });

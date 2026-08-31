@@ -203,6 +203,63 @@ export function scanChangeSetForSecrets(
   };
 }
 
+/**
+ * WHAT A CREDENTIAL IS REPLACED BY WHEN IT MUST NOT BE KEPT.
+ *
+ * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-1 (MEDIUM), 1.0.1 review.
+ *
+ * Named rather than blank, because a reader who cannot tell that something was removed will
+ * eventually conclude nothing was there. The category is safe to state: it describes the shape
+ * that matched, never the value.
+ */
+export interface Redaction {
+  /** The text with every matched credential replaced. */
+  readonly text: string;
+  /** How many were replaced. Zero means the text is unchanged, not that it was unchecked. */
+  readonly count: number;
+  /** Which shapes were found, so a reader knows what kind of thing was removed. */
+  readonly categories: readonly SecretCategory[];
+}
+
+/**
+ * Remove credentials from text that is about to be stored.
+ *
+ * SPEC: finding SEC-1.
+ *
+ * `execution.ts` wrote 2000 bytes of raw stdout and stderr straight into T-CANON, which is
+ * immutable and travels in every backup and export. The module's own header says that output
+ * "routinely carries paths, tokens and environment fragments", and the secrets scanner only
+ * ever ran over ChangeSet FILES — so a credential printed by a build was persisted verbatim,
+ * permanently, having bypassed the boundary meant to catch exactly that.
+ *
+ * This uses SECRET_RULES, the same rules `scanText` uses. A second detector would drift from
+ * the first, and the day they disagreed would be the day one of them was wrong about a secret.
+ *
+ * Redaction happens BEFORE persistence and is never a repair afterwards: canon is immutable,
+ * so "write it now and clean it later" is not a thing that can be done.
+ */
+export function redactSecrets(text: string): Redaction {
+  const categories = new Set<SecretCategory>();
+  let count = 0;
+  let out = text;
+
+  for (const rule of SECRET_RULES) {
+    /* A fresh global regex per call: the shared rule patterns are not global and carry no
+       lastIndex, and mutating them here would leak state into `scanText`. */
+    const all = new RegExp(
+      rule.pattern.source,
+      rule.pattern.flags.includes('g') ? rule.pattern.flags : rule.pattern.flags + 'g',
+    );
+    out = out.replace(all, () => {
+      count += 1;
+      categories.add(rule.category);
+      return '[REDACTED:' + rule.category + ']';
+    });
+  }
+
+  return { text: out, count, categories: [...categories] };
+}
+
 export function scanText(path: string, text: string): SecretFinding[] {
   const out: SecretFinding[] = [];
   const lines = text.split('\n');
@@ -218,7 +275,7 @@ export function scanText(path: string, text: string): SecretFinding[] {
         path,
         line: i + 1,
         category: rule.category,
-        severity: looksLikePlaceholder(line, matched) ? 'MEDIUM' : rule.severity,
+        severity: looksLikePlaceholder(matched) ? 'MEDIUM' : rule.severity,
         description: rule.description,
         matchDigest: digestOf(matched),
         matchLength: matched.length,
@@ -234,14 +291,43 @@ export function scanText(path: string, text: string): SecretFinding[] {
  * Downgrades severity, never suppresses the finding. A placeholder that turns out to
  * be real would otherwise disappear entirely, and the cost of being wrong in that
  * direction is much higher than the cost of a reported MEDIUM.
+ *
+ * THE VALUE DECIDES, NOT THE SENTENCE AROUND IT.
+ *
+ * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-2 (MEDIUM), 1.0.1 review.
+ *
+ * This took the whole LINE. `blocking` is `findings.some(f => f.severity === 'HIGH')`, so
+ * writing `// example` beside a live credential downgraded it and the scan stopped blocking
+ * acceptance. The text on a line is written by whoever wrote the line — letting it decide
+ * enforcement hands control to the party the check exists to constrain.
+ *
+ * Everything below is intrinsic to the matched value:
+ *
+ *   a placeholder word INSIDE the credential itself — AWS's own documented example key is
+ *   `AKIAIOSFODNN7EXAMPLE`, and nobody is issued a real key containing EXAMPLE;
+ *
+ *   a long run of one character, which is how a masked value is written;
+ *
+ *   a value made only of x, 0 or *.
+ *
+ * None of these can be arranged around a real credential by adding a comment.
  */
-function looksLikePlaceholder(line: string, matched: string): boolean {
-  const lower = (line + ' ' + matched).toLowerCase();
-  return (
-    /\b(example|sample|placeholder|dummy|fake|redacted|xxxx+|your[_-]?key|changeme|test[_-]?only)\b/.test(
-      lower,
-    ) || /^[x0*]+$/i.test(matched.replace(/[^A-Za-z0-9]/g, ''))
-  );
+function looksLikePlaceholder(matched: string): boolean {
+  const value = matched.toLowerCase();
+  const alnum = matched.replace(/[^A-Za-z0-9]/g, '');
+
+  if (
+    /(example|sample|placeholder|dummy|fake|redacted|your[_-]?key|changeme|test[_-]?only)/.test(
+      value,
+    )
+  ) {
+    return true;
+  }
+
+  /* A masked value: `AKIAXXXXXXXXXXXXXXXX`, `sk-ant-0000000000000000`. */
+  if (/(.)\1{3,}/.test(alnum)) return true;
+
+  return /^[x0*]+$/i.test(alnum);
 }
 
 /** A report safe to show a model or write to a trace: no values, ever. */

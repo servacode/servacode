@@ -1,3 +1,4 @@
+import { lastValidQualification } from '../../src/substrate/qualificationRecord.js';
 import { afterAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -565,12 +566,44 @@ describe('PHASE 4 — live acceptance', () => {
      */
     if (process.env['SERVA_PRESERVE_LIVE'] === '1') {
       const accepted = result.attempts[result.attempts.length - 1];
+
+      /*
+       * THE BOUNDARY THIS RUN ACTUALLY RAN UNDER, READ FROM THE MEASUREMENT.
+       *
+       * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SC-SSA-REV-Q1 (MEDIUM), 1.0.1 review.
+       *
+       * The candidate recorded a boundary fingerprint and nothing about the qualification, so
+       * both `prove-live.mjs` and `acceptance/status.ts` supplied `MEASURED/HARD/AVAILABLE` as
+       * literals — each under a comment claiming it came from the measurement. The headline
+       * clause of LIVE-ENGINEERING, "a Producer under a measured HARD boundary", was therefore
+       * asserted rather than evidenced, in both directions, for the whole of 1.0.
+       *
+       * `lastValidQualification` is the persisted measurement, and `recordQualification` writes
+       * one ONLY when the attempt was MEASURED — so the existence of this record is itself the
+       * evidence that a measurement happened, and its `enforcementClass` is what was measured.
+       *
+       * `fingerprintComplete` is copied as it stands. When part of a machine's fingerprint
+       * could not be read the fingerprint identifies nothing, and saying otherwise here would
+       * claim a machine identity the evidence does not support.
+       */
+      const measured = lastValidQualification(rt.store);
+
       const candidate = {
         producedBy: 'tests/live/engineering.live.test.ts',
         storeRoot: root,
         repoRoot: repo,
         outcome: result.outcome,
         boundaryFingerprint: result.boundaryFingerprint ?? null,
+        qualification:
+          measured === undefined
+            ? null
+            : {
+                enforcementClass: measured.enforcementClass,
+                boundaryId: measured.boundaryId,
+                fingerprint: measured.fingerprint,
+                fingerprintComplete: measured.fingerprintComplete ?? false,
+                measuredAt: measured.measuredAt,
+              },
         hints: {
           producerRunId: accepted?.producerRunId ?? null,
           reviewerRunId: accepted?.reviewerRunId ?? null,

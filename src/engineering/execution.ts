@@ -1,3 +1,4 @@
+import { redactSecrets } from './secrets.js';
 import { z } from 'zod';
 import { canonicalJson, digestOf } from '../core/hash.js';
 import { AuditAction, audit } from '../events/audit.js';
@@ -76,6 +77,16 @@ export const CommandExecutionRecordSchema = z
     stderrDigest: z.string().length(64),
     stdoutExcerpt: z.string(),
     stderrExcerpt: z.string(),
+    /*
+     * How many credentials were removed before this record was written.
+     *
+     * SPEC: finding SEC-1. Recorded rather than silent: an excerpt with the interesting line
+     * taken out, and no sign that anything was taken, is how somebody later concludes the
+     * build printed nothing. `stdoutDigest` still covers the RAW bytes, so integrity of what
+     * actually ran is unaffected by what this record is allowed to keep.
+     */
+    redactions: z.number().int().nonnegative().default(0),
+    redactedCategories: z.array(z.string()).default([]),
     truncated: z.object({ stdout: z.boolean(), stderr: z.boolean() }).strict(),
     toolVersions: z.record(z.string()).default({}),
     correlationId: z.string().optional(),
@@ -86,6 +97,34 @@ export const CommandExecutionRecordSchema = z
 export type CommandExecutionRecord = z.output<typeof CommandExecutionRecordSchema>;
 
 const EXCERPT_LIMIT = 2_000;
+
+/**
+ * The excerpts, with any credential removed before they are written down.
+ *
+ * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-1 (MEDIUM), 1.0.1 review.
+ *
+ * Redacted BEFORE slicing, not after. Truncating first would cut a credential in half at the
+ * 2000-byte boundary, and the surviving half is still a disclosure — as well as being a shape
+ * the rules no longer match, so it would pass through silently.
+ */
+function excerpts(
+  stdout: string,
+  stderr: string,
+): {
+  stdoutExcerpt: string;
+  stderrExcerpt: string;
+  redactions: number;
+  redactedCategories: string[];
+} {
+  const out = redactSecrets(stdout);
+  const err = redactSecrets(stderr);
+  return {
+    stdoutExcerpt: out.text.slice(0, EXCERPT_LIMIT),
+    stderrExcerpt: err.text.slice(0, EXCERPT_LIMIT),
+    redactions: out.count + err.count,
+    redactedCategories: [...new Set([...out.categories, ...err.categories])],
+  };
+}
 
 export interface ExecutorDeps {
   readonly store: Store;
@@ -195,8 +234,7 @@ export async function runRecipe(
         : 'exited ' + String(result.exitCode),
     stdoutDigest: digestOf(result.stdout),
     stderrDigest: digestOf(result.stderr),
-    stdoutExcerpt: result.stdout.slice(0, EXCERPT_LIMIT),
-    stderrExcerpt: result.stderr.slice(0, EXCERPT_LIMIT),
+    ...excerpts(result.stdout, result.stderr),
     truncated: result.truncated,
     ...(req.correlationId === undefined ? {} : { correlationId: req.correlationId }),
   });

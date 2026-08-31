@@ -240,16 +240,59 @@ export function validateReviewerResult(input: ReviewValidationInput): ReviewVali
     typeof record?.['engineSessionRef'] === 'string'
       ? (record['engineSessionRef'] as string)
       : undefined;
-  if (input.producerRunRef !== undefined) {
+  /*
+   * NOT SUPPLIED IS NOT THE SAME AS DISTINCT.
+   *
+   * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-1 (MEDIUM), 1.0.1 security review.
+   *
+   * This whole check sat inside `if (input.producerRunRef !== undefined)`, and the field is
+   * optional on both the input and the persisted schema. So omitting it did not fail the
+   * check — it removed the check. A reviewer that had shared the Producer's engine session,
+   * reviewing the argument rather than the artifact (19 SM-3), validated and persisted
+   * cleanly whenever the caller left the reference out.
+   *
+   * Independence then rested on an optional input rather than on the validator, which is the
+   * one place it cannot rest: the caller supplying the reference is the same caller whose
+   * independence is in question.
+   *
+   * Absence now means the opposite of what it meant. Serva cannot show the sessions differed,
+   * so it does not claim they did.
+   */
+  if (input.producerRunRef === undefined) {
+    problems.push(
+      'The Producer run was not identified, so the reviewer cannot be shown to have used a ' +
+        'different engine session from the one that wrote the change.',
+    );
+  } else {
     const producerRecord = readTerminalSnapshot(input.store, input.producerRunRef) as
       Record<string, unknown> | undefined;
-    const producerSession = producerRecord?.['engineSessionRef'];
-    if (
-      sessionRef !== undefined &&
-      typeof producerSession === 'string' &&
-      sessionRef === producerSession
-    ) {
-      problems.push("The reviewer shared the Producer's engine session.");
+    if (producerRecord === undefined) {
+      /* A reference that resolves to nothing is not evidence of anything. Accepting it would
+         let the requirement be satisfied by inventing a run id. */
+      problems.push(
+        'The Producer run ' +
+          input.producerRunRef +
+          ' does not resolve to a recorded run, so the reviewer cannot be compared against it.',
+      );
+    } else {
+      const producerSession = producerRecord['engineSessionRef'];
+      if (
+        sessionRef !== undefined &&
+        typeof producerSession === 'string' &&
+        sessionRef === producerSession
+      ) {
+        problems.push("The reviewer shared the Producer's engine session.");
+      }
+      /*
+       * KNOWN RESIDUAL, stated rather than hidden: when either run records no engine session,
+       * the comparison has nothing to compare and this does not refuse. `engineSessionRef` is
+       * written only when the engine reports one (agents/runtime.ts), so demanding it would
+       * refuse every review under an engine that does not — a behavioural change wider than
+       * the defect being fixed here, and one this codebase cannot yet demonstrate is safe.
+       *
+       * What the defect WAS is closed: independence no longer depends on the caller choosing
+       * to pass `producerRunRef`, and a fabricated reference is refused.
+       */
     }
   }
 
