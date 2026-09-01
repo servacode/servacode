@@ -238,10 +238,56 @@ export interface Redaction {
  * Redaction happens BEFORE persistence and is never a repair afterwards: canon is immutable,
  * so "write it now and clean it later" is not a thing that can be done.
  */
+/**
+ * SECRETS WHOSE EXTENT IS LARGER THAN THE THING THAT DETECTS THEM.
+ *
+ * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-EXEC-1 (HIGH), 1.0.1 review.
+ *
+ * `SECRET_RULES` exists to DETECT, and a detector only needs an anchor distinctive enough to
+ * flag the line. The PRIVATE_KEY rule matches `-----BEGIN … PRIVATE KEY-----` and stops, which
+ * is everything a scanner needs and nowhere near enough to redact.
+ *
+ * Reusing those patterns to redact produced the worst possible outcome: the header was replaced
+ * with `[REDACTED:PRIVATE_KEY]`, the base64 body and END marker were written to canon verbatim,
+ * and the marker LABELLED the key that followed it. Worse than no redaction, because it tells a
+ * reader where to look.
+ *
+ * Detection and redaction are different questions about the same rule set, and one pattern
+ * cannot answer both. These cover the whole block. The unterminated form is deliberate: build
+ * output is truncated all the time, and a key whose END marker never arrived is still a key.
+ */
+const REDACTION_EXTENTS: readonly {
+  readonly category: SecretCategory;
+  readonly pattern: RegExp;
+}[] = Object.freeze([
+  {
+    category: SecretCategory.PRIVATE_KEY,
+    pattern:
+      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
+  },
+  {
+    /* Truncated output: a BEGIN with no END takes everything after it. */
+    category: SecretCategory.PRIVATE_KEY,
+    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*/g,
+  },
+]);
+
 export function redactSecrets(text: string): Redaction {
   const categories = new Set<SecretCategory>();
   let count = 0;
   let out = text;
+
+  /*
+   * Extents first. A per-rule pattern would otherwise consume the header this needs as its
+   * opening anchor, and the body would survive with a label in front of it.
+   */
+  for (const extent of REDACTION_EXTENTS) {
+    out = out.replace(extent.pattern, () => {
+      count += 1;
+      categories.add(extent.category);
+      return '[REDACTED:' + extent.category + ']';
+    });
+  }
 
   for (const rule of SECRET_RULES) {
     /* A fresh global regex per call: the shared rule patterns are not global and carry no

@@ -268,14 +268,41 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
    * would re-route the same question and produce a second research request or a second
    * upstream obligation for work already outstanding.
    */
+  /*
+   * A DEPARTMENT'S OWN RECORD CANNOT SETTLE A QUESTION RESERVED TO THE OWNER.
+   *
+   * SPEC: finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/SEC-1 (HIGH), 1.0.1 review.
+   *
+   * This wrote into `answeredByKey` — the same map the loop above fills — with no
+   * authoritativeness check and no `workItemId` filter, twenty lines after that loop was
+   * hardened to require `isAuthoritativeOwnerAnswer` and a matching work item. So the guard
+   * was added to one writer and the other was left open, which is the same map reaching the
+   * same routing decision by a different road.
+   *
+   * It matters because `OPEN_QUESTION` is UNIVERSAL in authority.ts — any department may
+   * write one — and ALREADY_ANSWERED is evaluated BEFORE the OWNER_RESERVED rule. A
+   * department could therefore pre-write a self-attributed ANSWERED OpenQuestion whose text
+   * keys to a money, policy or scope question, and the owner would never be asked. An agent
+   * deciding, on its own record, that the owner has already decided.
+   *
+   * The two kinds of settlement are now kept apart. An owner decision settles anything; a
+   * department's OpenQuestion settles only what is not reserved to the owner. Both still
+   * survive a restart, which is what this bookkeeping is for.
+   */
+  const settledByDepartment = new Map<string, string>();
+
   const outstanding = new Map<string, string>();
   for (const q of repository(
     input.store,
     ARTIFACT_TYPES.OPEN_QUESTION,
     OpenQuestionSchema,
   ).list()) {
+    /* Scoped like the decisions above. A question settled under another work item says
+       nothing about this one. */
+    if (q.meta.workItemId !== undefined && q.meta.workItemId !== input.workItemId) continue;
+
     if (q.state === 'ANSWERED' || q.state === 'WITHDRAWN') {
-      answeredByKey.set(questionKey(q.question), q.id);
+      settledByDepartment.set(questionKey(q.question), q.id);
       continue;
     }
     outstanding.set(questionKey(q.question), q.askedOf);
@@ -293,7 +320,7 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
       ...(input.runId === undefined ? {} : { runId: input.runId }),
     };
 
-    /* Already settled. A restart must not ask a question the owner has answered. */
+    /* Already settled by the OWNER. A restart must not ask a question they have answered. */
     const already = answeredByKey.get(key);
     if (already !== undefined) {
       out.push({
@@ -301,6 +328,28 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
         routing: QuestionRouting.ALREADY_ANSWERED,
         why: 'the owner already answered this, on ' + already,
         answeredBy: already,
+      });
+      continue;
+    }
+
+    /*
+     * Settled by a department's own OpenQuestion — which cannot close an owner-reserved
+     * question, however the record was written.
+     *
+     * SPEC: finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/SEC-1 (HIGH).
+     *
+     * Checked against OWNER_RESERVED here rather than relying on the rule further down,
+     * because that rule is only reached by questions this branch does not already consume.
+     * Ordering was the whole exploit: ALREADY_ANSWERED ran first, so a department record
+     * settled the question before anything asked whether the owner owned it.
+     */
+    const departmentSettled = settledByDepartment.get(key);
+    if (departmentSettled !== undefined && !OWNER_RESERVED.test(text)) {
+      out.push({
+        ...base,
+        routing: QuestionRouting.ALREADY_ANSWERED,
+        why: 'this question was already settled and recorded, on ' + departmentSettled,
+        answeredBy: departmentSettled,
       });
       continue;
     }

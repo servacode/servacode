@@ -6,7 +6,7 @@ import {
   questionKey,
 } from '../src/intelligence/execution/questions.js';
 import { OwnerDecisionRequestSchema } from '../src/intelligence/artifacts/governance.js';
-import { ProjectGoalSchema } from '../src/intelligence/artifacts/framing.js';
+import { OpenQuestionSchema, ProjectGoalSchema } from '../src/intelligence/artifacts/framing.js';
 import { cleanup, freshStore } from './helpers.js';
 import type { Store, StoreDeps } from '../src/store/store.js';
 
@@ -302,5 +302,142 @@ describe('provenance and restart', () => {
     const [q] = normalize(f, { unresolved: ['Is a deposit required at reservation?'] });
     expect(q?.routing).toBe(QuestionRouting.ALREADY_ANSWERED);
     expect(q?.why).toContain('already open');
+  });
+});
+
+describe('a department cannot decide that the owner has already decided', () => {
+  /*
+   * SPEC: finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/SEC-1 (HIGH), 1.0.1 review.
+   *
+   * `normalizeOpenQuestions` builds ONE map, `answeredByKey`, from TWO writers. The first —
+   * owner decisions — was hardened to require `isAuthoritativeOwnerAnswer` and a matching work
+   * item, and carries a comment saying so. The second, twenty lines below it, wrote into the
+   * same map from any ANSWERED or WITHDRAWN OpenQuestion with neither check.
+   *
+   * `OPEN_QUESTION` is UNIVERSAL in authority.ts, so any department may write one, and
+   * ALREADY_ANSWERED is evaluated BEFORE the OWNER_RESERVED rule. So a department could
+   * pre-write a self-attributed ANSWERED OpenQuestion whose text keys to a money, policy or
+   * scope question, and the owner was never asked — an agent deciding, on the strength of its
+   * own record, that the owner had decided.
+   *
+   * The guard reached one writer and not the other: the same map, the same routing decision,
+   * by a different road.
+   */
+  function settledByDepartment(f: { store: Store; deps: StoreDeps }, question: string): string {
+    const id = f.deps.ids.next('SC-OQ');
+    const tx = f.store.begin();
+    repository(f.store, ARTIFACT_TYPES.OPEN_QUESTION, OpenQuestionSchema).put(tx, {
+      id,
+      createdAt: f.deps.clock.now(),
+      question,
+      blocks: [],
+      askedOf: 'OWNER',
+      state: 'ANSWERED',
+      answer: 'the department recorded this as settled',
+      resolvedByRefs: [],
+      sourceFields: [],
+      meta: {
+        provenance: { marking: 'SYSTEM', component: 'a department' },
+        attribution: { at: f.deps.clock.now() },
+        workItemId: WORK_ITEM,
+      },
+    } as never);
+    tx.commit();
+    return id;
+  }
+
+  it('an ANSWERED OpenQuestion does not close an owner-reserved question', () => {
+    const f = setup();
+    const question = 'What is the monthly budget for the payment provider?';
+    settledByDepartment(f, question);
+
+    const [q] = normalize(f, { unresolved: [question] });
+
+    expect(
+      q?.routing,
+      'a department record must not answer a money question on the owner behalf',
+    ).not.toBe(QuestionRouting.ALREADY_ANSWERED);
+  });
+
+  it('the same holds across the reserved vocabulary', () => {
+    /*
+     * OBSERVED WHILE WRITING THIS, and deliberately left alone: OWNER_RESERVED covers money,
+     * policy, legal, brand, deadline, priority and trade-offs — but not the word "scope". A
+     * question phrased purely as scope, carrying none of the reserved vocabulary, is not
+     * treated as reserved, so a department may settle it.
+     *
+     * That is a question about the VOCABULARY rather than about this authority fix, and
+     * widening it would newly route a large class of questions to the owner — a product
+     * behaviour change well beyond the finding being closed here. Recorded, not quietly
+     * patched.
+     */
+    for (const question of [
+      'Which refund policy should apply to cancelled orders?',
+      'What is the deadline for the launch?',
+      'Which trade-off do you prefer for the brand?',
+    ]) {
+      const f = setup();
+      settledByDepartment(f, question);
+      const [q] = normalize(f, { unresolved: [question] });
+      expect(q?.routing, question).not.toBe(QuestionRouting.ALREADY_ANSWERED);
+    }
+  });
+
+  it('an ordinary question it settled is still not asked twice', () => {
+    /*
+     * The fix must not make the bookkeeping useless. Surviving a restart is what this map is
+     * for, and everything the owner does not own still settles normally.
+     */
+    const f = setup();
+    const question = 'Which logging library does this repository already use?';
+    const id = settledByDepartment(f, question);
+
+    const [q] = normalize(f, { unresolved: [question] });
+
+    expect(q?.routing).toBe(QuestionRouting.ALREADY_ANSWERED);
+    expect(q?.answeredBy).toBe(id);
+  });
+
+  it('an owner decision still closes an owner-reserved question', () => {
+    /* The authoritative path is untouched: this is about who may settle, not about whether. */
+    const f = setup();
+    const question = 'What is the monthly budget for the payment provider?';
+    const decisionId = answeredDecision(f, question);
+
+    const [q] = normalize(f, { unresolved: [question] });
+
+    expect(q?.routing).toBe(QuestionRouting.ALREADY_ANSWERED);
+    expect(q?.answeredBy).toBe(decisionId);
+  });
+
+  it('a question settled under another work item says nothing about this one', () => {
+    /*
+     * The decisions loop filters by work item and this one did not, so a settlement recorded
+     * anywhere in the store suppressed a question everywhere in it.
+     */
+    const f = setup();
+    const question = 'Which logging library does this repository already use?';
+    const id = f.deps.ids.next('SC-OQ');
+    const tx = f.store.begin();
+    repository(f.store, ARTIFACT_TYPES.OPEN_QUESTION, OpenQuestionSchema).put(tx, {
+      id,
+      createdAt: f.deps.clock.now(),
+      question,
+      blocks: [],
+      askedOf: 'RESEARCH',
+      state: 'ANSWERED',
+      answer: 'pino',
+      resolvedByRefs: [],
+      sourceFields: [],
+      meta: {
+        provenance: { marking: 'SYSTEM', component: 'a department' },
+        attribution: { at: f.deps.clock.now() },
+        workItemId: 'SC-WI-999999',
+      },
+    } as never);
+    tx.commit();
+
+    const [q] = normalize(f, { unresolved: [question] });
+    expect(q?.routing).not.toBe(QuestionRouting.ALREADY_ANSWERED);
   });
 });

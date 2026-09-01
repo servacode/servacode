@@ -1221,3 +1221,75 @@ const SAMPLE_FOR = new Map<string, string>([
   ['GITHUB_TOKEN', 'ghp_' + 'R7kQ2mZ9pL4xW1nT8vB6cD5hJ3aF1g'],
   ['PRIVATE_KEY', '-----BEGIN RSA PRIVATE KEY-----'],
 ]);
+
+describe('a private key is removed whole, not labelled', () => {
+  /*
+   * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-EXEC-1 (HIGH), 1.0.1 review.
+   *
+   * The SEC-1 fix reused SECRET_RULES to redact. Those rules exist to DETECT, and a detector
+   * only needs an anchor: the PRIVATE_KEY pattern matches the BEGIN line and stops. Redacting
+   * with it replaced the header, wrote the base64 body and END marker into canon verbatim, and
+   * left '[REDACTED:PRIVATE_KEY]' sitting directly above the key — worse than not redacting,
+   * because it tells a reader where to look.
+   *
+   * Detection and redaction are different questions about the same rules, and one pattern
+   * cannot answer both.
+   */
+  const BODY = 'MIIEowIBAAKCAQEA3Zx8Kq2mNvB7pL4wQ9sT1uYbC6dE8fG0hJ2kL4mN6oP8qR0sT';
+
+  it('removes the body and the END marker, not just the header', () => {
+    const key =
+      '-----BEGIN RSA PRIVATE KEY-----' +
+      String.fromCharCode(10) +
+      BODY +
+      String.fromCharCode(10) +
+      '-----END RSA PRIVATE KEY-----';
+    const r = redactSecrets(
+      'building' + String.fromCharCode(10) + key + String.fromCharCode(10) + 'done',
+    );
+
+    expect(r.text, 'the key body must not survive').not.toContain(BODY);
+    expect(r.text, 'nor the END marker, which proves the block was cut short').not.toContain(
+      'END RSA PRIVATE KEY',
+    );
+    expect(r.text).toContain('[REDACTED:PRIVATE_KEY]');
+    /* The surrounding output is still readable, which is the point of an excerpt. */
+    expect(r.text).toContain('building');
+    expect(r.text).toContain('done');
+  });
+
+  it('removes a key whose END marker never arrived', () => {
+    /*
+     * Build output is truncated all the time. A key that lost its terminator is still a key,
+     * and a redactor that needs the closing marker fails exactly when output was cut off.
+     */
+    const r = redactSecrets(
+      'log' +
+        String.fromCharCode(10) +
+        '-----BEGIN OPENSSH PRIVATE KEY-----' +
+        String.fromCharCode(10) +
+        BODY,
+    );
+    expect(r.text).not.toContain(BODY);
+    expect(r.count).toBe(1);
+  });
+
+  it('every rule that can appear in output leaves nothing of the value behind', () => {
+    /*
+     * The general form. A sample per rule, asserted absent rather than merely "changed" —
+     * the SEC-1 fix passed a weaker version of this test while leaving the key body in place.
+     */
+    const samples: readonly [string, string][] = [
+      ['ANTHROPIC_KEY', 'sk-ant-' + 'api03R7kQ2mZ9pL4xW1nT8vB6cD5hJ3'],
+      ['AWS_ACCESS_KEY', 'AKIA' + 'Q7X4ZL2MN8VBCD3R'],
+      ['GITHUB_TOKEN', 'ghp_' + 'R7kQ2mZ9pL4xW1nT8vB6cD5hJ3aF1g'],
+      ['SLACK_TOKEN', 'xoxb-' + '2847362912-R7kQ2mZ9pL4x'],
+      ['GOOGLE_API_KEY', 'AIza' + 'SyR7kQ2mZ9pL4xW1nT8vB6cD5hJ3aF1gQ2m'],
+    ];
+    for (const [label, value] of samples) {
+      const r = redactSecrets('env: ' + value);
+      expect(r.text, label + ' survived redaction').not.toContain(value);
+      expect(r.count, label + ' was not counted').toBeGreaterThan(0);
+    }
+  });
+});
