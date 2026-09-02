@@ -377,8 +377,33 @@ export const AREA_SUBSCOPES: Readonly<Record<string, Readonly<Record<string, Sub
       },
       'install/update/rollback — the command surface': {
         prefixes: ['src/cli/commands/'],
-        /* The entry point decides which build runs; the commands here write what it reads. */
-        context: ['src/cli/main.ts'],
+        /*
+         * A CALL SITE WITHOUT ITS GUARD IS NOT REVIEWABLE.
+         *
+         * SPEC: the 1.0.1 security scope triage, second pass.
+         *
+         * This carried `main.ts` alone as context, so the reviewer saw
+         * `spawnSync(process.execPath, [decision.handOffTo, …])` and could not see
+         * `resolveActive`, which is what validates the pointer before that path exists. It
+         * returned NOT_VERIFIED and said why: "whether it can resolve to attacker-influenced
+         * code depends on resolveActive/defaultInstallRoot, which are not in the supplied
+         * files. Cannot be confirmed or refuted from this source."
+         *
+         * It was right to refuse. Splitting the area put the delegation's call site in one
+         * unit and its validation in the sibling, and a reviewer shown a process launcher and
+         * denied the guard that constrains it cannot honestly certify either way. That is the
+         * `bootstrap` omission wearing different clothes: a partition that leaves a unit
+         * unable to answer its own question.
+         *
+         * `activeVersion.ts` decides WHETHER to hand off and to what; `install.ts` owns the
+         * layout the pointer names. Both are read by the sibling unit as its subject — here
+         * they are context, so nothing is reviewed twice as though it were two findings.
+         */
+        context: [
+          'src/cli/main.ts',
+          'src/portability/activeVersion.ts',
+          'src/portability/install.ts',
+        ],
       },
     }),
 

@@ -386,3 +386,60 @@ describe('a review unit stays small enough to actually be read', () => {
     }
   });
 });
+
+describe('a unit that sees a call site also sees the guard on it', () => {
+  /*
+   * SPEC: the 1.0.1 security scope triage, second pass.
+   *
+   * `install/update/rollback — the command surface` returned NOT_VERIFIED at 88285e2e, and the
+   * aggregate treats that as "decided nothing". The reviewer explained itself precisely: it
+   * could see `spawnSync(process.execPath, [decision.handOffTo, …])` in main.ts and could not
+   * see `resolveActive`, which is what validates the pointer before that path can exist —
+   * "cannot be confirmed or refuted from this source".
+   *
+   * It was right to refuse. Partitioning the area had put the delegation's call site in one
+   * unit and its validation in the sibling, so the unit was asked a question its file set could
+   * not answer. Same class as the bootstrap omission: not a wrong answer, an unanswerable one.
+   *
+   * The invariant is about the pair, not the filenames: wherever the entry point is visible,
+   * the module deciding whether it hands off must be visible too.
+   */
+  const unitsWith = (file: string) =>
+    REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area)).filter((u) =>
+      [...u.prefixes, ...(u.context ?? [])].some((p) => file.startsWith(p)),
+    );
+
+  it('every unit shown the entry point is also shown the resolver it delegates through', () => {
+    const seeMain = unitsWith('src/cli/main.ts');
+    expect(seeMain.length, 'the entry point must be reviewed somewhere').toBeGreaterThan(0);
+
+    for (const unit of seeMain) {
+      const visible = [...unit.prefixes, ...(unit.context ?? [])];
+      expect(
+        visible.some((p) => 'src/portability/activeVersion.ts'.startsWith(p)),
+        unit.unit +
+          ' can see the spawn in main.ts but not resolveActive, so it cannot judge either',
+      ).toBe(true);
+    }
+  });
+
+  it('context does not smuggle a file out of being reviewed as a subject', () => {
+    /*
+     * Context is for reading, not for coverage: a file that appears ONLY as context is never
+     * anybody's subject, and would be read by reviewers while being judged by none.
+     */
+    const asSubject = new Set(
+      REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area)).flatMap((u) => [...u.prefixes]),
+    );
+    const asContext = new Set(
+      REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area)).flatMap((u) => [...(u.context ?? [])]),
+    );
+
+    for (const file of asContext) {
+      expect(
+        [...asSubject].some((p) => file.startsWith(p)),
+        file + ' is context to some unit but the subject of none',
+      ).toBe(true);
+    }
+  });
+});
