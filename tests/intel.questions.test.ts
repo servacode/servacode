@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
 import {
   QuestionRouting,
@@ -510,17 +511,51 @@ describe('an owner-reserved question is only suppressed by something that asks t
     }
   });
 
-  it('but an obligation held BY the owner does — they already have it', () => {
+  it('nor one a department addressed TO the owner — that is not the owner seeing it', () => {
     /*
-     * The legitimate case the branch exists for. Raising a second obligation for a question
-     * already sitting with the owner is noise, not safety.
+     * REVERSED, because the assertion it replaced was the bypass.
+     *
+     * SPEC: finding OLER-ROUTE-1 (MEDIUM), 1.0.1 review.
+     *
+     * This used to expect ALREADY_ROUTED, on the reasoning that a question owed BY the owner
+     * is already with them. That property was invented. The owner's surface —
+     * `serva intelligence decisions` and `projectSnapshot` — reads OWNER_DECISION_REQUEST and
+     * nothing else, and OPEN_QUESTION is shown to nobody. A department writing
+     * `askedOf: 'OWNER'` therefore suppressed the question without it ever reaching anyone.
+     *
+     * The test was asserting my description of the mechanism instead of the mechanism.
      */
     const f = setup();
     openQuestion(f, { question: MONEY, askedOf: 'OWNER', state: 'OPEN' });
 
     const [q] = normalize(f, { unresolved: [MONEY] });
 
-    expect(q?.routing).toBe(QuestionRouting.ALREADY_ROUTED);
+    expect(
+      q?.routing,
+      'an OpenQuestion addressed to the owner is not a record the owner can read',
+    ).toBe(QuestionRouting.OWNER_DECISION);
+  });
+
+  it('what reaches the owner is OWNER_DECISION_REQUEST, and nothing else does', () => {
+    /*
+     * The mechanism itself, so no future guard can be built on a claim about what the owner
+     * sees without that claim being true. The owner surface is asserted at its source.
+     */
+    const surfaces = [
+      readFileSync('src/cli/commands/intelligence.ts', 'utf8'),
+      readFileSync('src/app/services.ts', 'utf8'),
+    ];
+    for (const src of surfaces) {
+      const decisionsSection = src.slice(Math.max(0, src.indexOf('OWNER_DECISION_REQUEST') - 400));
+      expect(decisionsSection).toContain('OWNER_DECISION_REQUEST');
+    }
+    /* And an OpenQuestion is not part of it. */
+    for (const src of surfaces) {
+      expect(
+        src.includes('ARTIFACT_TYPES.OPEN_QUESTION'),
+        'if the owner surface ever reads OpenQuestions, the suppression rule must be revisited',
+      ).toBe(false);
+    }
   });
 
   it('an ordinary question parked with research is still not raised twice', () => {
@@ -544,6 +579,7 @@ describe('an owner-reserved question is only suppressed by something that asks t
       { askedOf: 'RESEARCH', state: 'OPEN' },
       { askedOf: 'EXPERT', state: 'OPEN' },
       { askedOf: 'UPSTREAM_DEPARTMENT', state: 'OPEN' },
+      { askedOf: 'OWNER', state: 'OPEN' },
       { askedOf: 'OWNER', state: 'ANSWERED' },
       { askedOf: 'RESEARCH', state: 'ANSWERED' },
       { askedOf: 'OWNER', state: 'WITHDRAWN' },

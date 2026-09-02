@@ -384,12 +384,28 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
      * question is with them right now. An obligation held BY the owner qualifies. A
      * department's own record, and an obligation parked on research or another department, do
      * not: none of them ends with the owner being asked.
+     *
+     * WHAT ACTUALLY REACHES THE OWNER, CHECKED RATHER THAN ASSUMED.
+     *
+     * SPEC: finding OLER-ROUTE-1 (MEDIUM), 1.0.1 review — the third pass on this rule.
+     *
+     * The previous fix let an obligation through when `askedOf === 'OWNER'`, reasoning that a
+     * question owed by the owner is already with them. That was an invented property, and the
+     * reviewer was right to refuse to certify it rather than guess.
+     *
+     * The owner's surface — `serva intelligence decisions` and `projectSnapshot` — reads
+     * OWNER_DECISION_REQUEST and nothing else. OPEN_QUESTION is internal obligation
+     * bookkeeping and is shown to nobody. So a department could write an OPEN OpenQuestion
+     * with `askedOf: 'OWNER'` keyed to a money question and the real question was suppressed
+     * with no OwnerDecisionRequest ever existing: the same harm, through the exception added
+     * while fixing it.
+     *
+     * NO obligation qualifies, because no obligation reaches the owner. Only OWNER_DECISION
+     * routing creates the record the owner reads. The correct code is simpler than the version
+     * with the exception in it.
      */
     const outstandingWith = outstanding.get(key);
-    if (
-      outstandingWith !== undefined &&
-      (!OWNER_RESERVED.test(text) || outstandingWith === 'OWNER')
-    ) {
+    if (outstandingWith !== undefined && !OWNER_RESERVED.test(text)) {
       out.push({
         ...base,
         routing: QuestionRouting.ALREADY_ROUTED,
