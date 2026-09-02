@@ -441,3 +441,123 @@ describe('a department cannot decide that the owner has already decided', () => 
     expect(q?.routing).not.toBe(QuestionRouting.ALREADY_ANSWERED);
   });
 });
+
+describe('an owner-reserved question is only suppressed by something that asks the owner', () => {
+  /*
+   * SPEC: findings SEC-1 and OLER-1 (both HIGH), 1.0.1 security review.
+   *
+   * SEC-1 reported that ALREADY_ANSWERED ran before OWNER_RESERVED, so a department's own
+   * record could close a money question. That was fixed. OLER-1 then reported the same defect
+   * one branch across: ALREADY_ROUTED also runs before OWNER_RESERVED, and `outstanding` is
+   * filled from any OPEN OpenQuestion — UNIVERSAL canon any department may write. Parking a
+   * money question with RESEARCH made the owner's question ALREADY_ROUTED: not answered
+   * falsely, simply never asked.
+   *
+   * Two findings, one cause, because the first fix addressed the reported branch instead of
+   * the class. This suite tests the RULE across every branch that can suppress:
+   *
+   *   an owner-reserved question may only be suppressed by something that puts it in front of
+   *   the owner.
+   *
+   * A new suppressing branch added later, with no owner-facing check, fails here.
+   */
+  const MONEY = 'What is the monthly budget for the payment provider?';
+
+  function openQuestion(
+    f: { store: Store; deps: StoreDeps },
+    o: { question: string; askedOf: string; state: string },
+  ): string {
+    const id = f.deps.ids.next('SC-OQ');
+    const tx = f.store.begin();
+    repository(f.store, ARTIFACT_TYPES.OPEN_QUESTION, OpenQuestionSchema).put(tx, {
+      id,
+      createdAt: f.deps.clock.now(),
+      question: o.question,
+      blocks: [],
+      askedOf: o.askedOf,
+      state: o.state,
+      ...(o.state === 'ANSWERED' ? { answer: 'a department wrote this' } : {}),
+      resolvedByRefs: [],
+      sourceFields: [],
+      meta: {
+        provenance: { marking: 'SYSTEM', component: 'a department' },
+        attribution: { at: f.deps.clock.now() },
+        workItemId: WORK_ITEM,
+      },
+    } as never);
+    tx.commit();
+    return id;
+  }
+
+  it('an obligation parked with RESEARCH does not discharge an owner question', () => {
+    const f = setup();
+    openQuestion(f, { question: MONEY, askedOf: 'RESEARCH', state: 'OPEN' });
+
+    const [q] = normalize(f, { unresolved: [MONEY] });
+
+    expect(
+      q?.routing,
+      'parking a money question with research does not end with the owner being asked',
+    ).not.toBe(QuestionRouting.ALREADY_ROUTED);
+  });
+
+  it('nor one parked with an expert or another department', () => {
+    for (const askedOf of ['EXPERT', 'UPSTREAM_DEPARTMENT']) {
+      const f = setup();
+      openQuestion(f, { question: MONEY, askedOf, state: 'OPEN' });
+      const [q] = normalize(f, { unresolved: [MONEY] });
+      expect(q?.routing, askedOf).not.toBe(QuestionRouting.ALREADY_ROUTED);
+    }
+  });
+
+  it('but an obligation held BY the owner does — they already have it', () => {
+    /*
+     * The legitimate case the branch exists for. Raising a second obligation for a question
+     * already sitting with the owner is noise, not safety.
+     */
+    const f = setup();
+    openQuestion(f, { question: MONEY, askedOf: 'OWNER', state: 'OPEN' });
+
+    const [q] = normalize(f, { unresolved: [MONEY] });
+
+    expect(q?.routing).toBe(QuestionRouting.ALREADY_ROUTED);
+  });
+
+  it('an ordinary question parked with research is still not raised twice', () => {
+    /* The fix must not make the obligation bookkeeping useless for everything else. */
+    const f = setup();
+    const ordinary = 'Which logging library does this repository already use?';
+    openQuestion(f, { question: ordinary, askedOf: 'RESEARCH', state: 'OPEN' });
+
+    const [q] = normalize(f, { unresolved: [ordinary] });
+
+    expect(q?.routing).toBe(QuestionRouting.ALREADY_ROUTED);
+  });
+
+  it('no suppressing branch closes an owner question without asking the owner', () => {
+    /*
+     * The class, asserted over every shape a department can write. Whatever a department
+     * records about an owner-reserved question — settled, withdrawn, or parked with anyone
+     * but the owner — that question must still reach OWNER_DECISION.
+     */
+    const departmentWritten = [
+      { askedOf: 'RESEARCH', state: 'OPEN' },
+      { askedOf: 'EXPERT', state: 'OPEN' },
+      { askedOf: 'UPSTREAM_DEPARTMENT', state: 'OPEN' },
+      { askedOf: 'OWNER', state: 'ANSWERED' },
+      { askedOf: 'RESEARCH', state: 'ANSWERED' },
+      { askedOf: 'OWNER', state: 'WITHDRAWN' },
+    ];
+
+    for (const shape of departmentWritten) {
+      const f = setup();
+      openQuestion(f, { question: MONEY, ...shape });
+      const [q] = normalize(f, { unresolved: [MONEY] });
+
+      expect(
+        q?.routing,
+        JSON.stringify(shape) + ' suppressed a question reserved to the owner',
+      ).toBe(QuestionRouting.OWNER_DECISION);
+    }
+  });
+});

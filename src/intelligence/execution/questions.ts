@@ -362,9 +362,34 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
       continue;
     }
 
-    /* An obligation already exists for this, on somebody. Do not raise a second. */
+    /*
+     * An obligation already exists for this, on somebody. Do not raise a second — unless the
+     * question is the owner's and the obligation is parked with somebody else.
+     *
+     * SPEC: finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/OLER-1 (HIGH), 1.0.1 review.
+     *
+     * The SEC-1 fix guarded the SETTLED path and left this one open, which is the same defect
+     * one branch across: `outstanding` is filled from any OPEN OpenQuestion, OPEN_QUESTION is
+     * UNIVERSAL so any department may write one, and this branch runs before OWNER_RESERVED.
+     * A department could park a money question with RESEARCH and the owner's own question then
+     * resolved to ALREADY_ROUTED — not answered falsely, simply never asked.
+     *
+     * Fixing the reported branch and not the class is what produced the second finding, so the
+     * rule is now stated once and every branch above obeys it:
+     *
+     *   AN OWNER-RESERVED QUESTION MAY ONLY BE SUPPRESSED BY SOMETHING THAT PUTS IT IN FRONT
+     *   OF THE OWNER.
+     *
+     * An authoritative owner answer qualifies. An OPEN owner decision request qualifies — the
+     * question is with them right now. An obligation held BY the owner qualifies. A
+     * department's own record, and an obligation parked on research or another department, do
+     * not: none of them ends with the owner being asked.
+     */
     const outstandingWith = outstanding.get(key);
-    if (outstandingWith !== undefined) {
+    if (
+      outstandingWith !== undefined &&
+      (!OWNER_RESERVED.test(text) || outstandingWith === 'OWNER')
+    ) {
       out.push({
         ...base,
         routing: QuestionRouting.ALREADY_ROUTED,
