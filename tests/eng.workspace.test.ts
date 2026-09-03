@@ -377,6 +377,54 @@ describe('Serva computes the change set and judges it against the declared scope
     }, 'SC-WI-000011');
     expect(first.changeSet.digest).not.toBe(second.changeSet.digest);
   });
+
+  describe('a scope that allows nothing allows nothing', () => {
+    /*
+     * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/F1 (HIGH), 1.0.1 security review.
+     *
+     * `ScopeOptions.allow` is documented "Empty means nothing is in scope", and the guard read
+     * `options.allow.length > 0 && …` — so an empty list produced no finding at all and every
+     * path was reported conformant. The comment described a closed door and the code held it
+     * open.
+     *
+     * The factory cannot reach it: its schema requires `allowedScope` to have at least one
+     * entry. That is exactly why it survived — nothing exercised the case the contract was
+     * written for. `checkScopeConformance` is exported, its contract is what a caller reads,
+     * and a fail-open only a future caller can reach is still a fail-open.
+     */
+    it('an empty allow list puts every path out of scope', async () => {
+      const { changeSet, workspace } = await withChange((w) => {
+        writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+      });
+
+      const r = checkScopeConformance(workspace, changeSet, { allow: [], forbid: [] });
+
+      expect(r.conformant, 'an undeclared scope must not wave everything through').toBe(false);
+      expect(r.findings.map((finding) => finding.kind)).toContain('OUTSIDE_ALLOWED_SCOPE');
+    });
+
+    it('and says the scope was never declared, rather than naming an empty list', async () => {
+      const { changeSet, workspace } = await withChange((w) => {
+        writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 3;\n', 'utf8');
+      });
+
+      const r = checkScopeConformance(workspace, changeSet, { allow: [], forbid: [] });
+      const outside = r.findings.find((finding) => finding.kind === 'OUTSIDE_ALLOWED_SCOPE');
+
+      expect(outside?.detail).toContain('No scope was declared');
+    });
+
+    it('a declared scope still admits what it declares', async () => {
+      /* The fix must not put every change out of scope. */
+      const { changeSet, workspace } = await withChange((w) => {
+        writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 4;\n', 'utf8');
+      });
+
+      const r = checkScopeConformance(workspace, changeSet, { allow: ['src/'], forbid: [] });
+
+      expect(r.findings.map((finding) => finding.kind)).not.toContain('OUTSIDE_ALLOWED_SCOPE');
+    });
+  });
 });
 
 /* ============================================= sandbox profile */

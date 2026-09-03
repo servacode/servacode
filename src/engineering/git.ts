@@ -38,14 +38,39 @@ import { fail } from '../core/errors.js';
  * property is "a closed verb set enforced at the choke point" and the choke point was inspecting
  * the wrong token: `['-c', 'x=y', 'push']` would have passed it.
  *
- * `-c` and `-C` consume the token after them; everything else beginning with `-` is a flag. The
- * first token that survives both is the subcommand.
+ * EVERY value-taking global, not the two this file happens to use.
+ *
+ * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/F2 (MEDIUM), second pass.
+ *
+ * The first fix skipped `-c` and `-C`, because those are what `commit()` builds. Git has more
+ * globals that consume the following token, and the reviewer named them: for
+ * `['--git-dir', '/x', 'push']` the loop stepped over `--git-dir`, returned `/x` as the verb,
+ * and `push` was never examined — the same desync the fix was for, one option across.
+ *
+ * So the set is enumerated from git's documented globals rather than from this module's usage,
+ * because what a caller MAY write is the thing being guarded, and the next caller is not
+ * obliged to write what the current ones do.
+ *
+ * The `--opt=value` forms need nothing: they are a single token beginning with `-`, so the flag
+ * rule already covers them.
  */
+const GIT_GLOBALS_TAKING_A_VALUE: ReadonlySet<string> = new Set([
+  '-c',
+  '-C',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--exec-path',
+  '--super-prefix',
+  '--config-env',
+  '--attr-source',
+]);
+
 export function gitVerb(args: readonly string[]): string | undefined {
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i];
     if (a === undefined) continue;
-    if (a === '-c' || a === '-C') {
+    if (GIT_GLOBALS_TAKING_A_VALUE.has(a)) {
       i += 1;
       continue;
     }

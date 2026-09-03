@@ -379,14 +379,32 @@ export function checkScopeConformance(
           detail: 'The work item forbids this path.',
         });
       }
-      if (options.allow.length > 0 && !options.allow.some((a) => matchesPrefix(normal, a))) {
+      /*
+       * AN EMPTY ALLOW LIST ALLOWS NOTHING, WHICH IS WHAT IT SAYS IT DOES.
+       *
+       * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/F1 (HIGH), 1.0.1 security review.
+       *
+       * `ScopeOptions.allow` is documented "Empty means nothing is in scope", and the guard
+       * read `options.allow.length > 0 && …` — so an empty list produced no finding at all and
+       * every path was reported conformant. The comment described a closed door and the code
+       * held it open.
+       *
+       * Not reachable through the factory, whose schema requires `allowedScope` to have at
+       * least one entry, and that is exactly why it survived: nothing exercised the case the
+       * contract was written for. `assessScope` is exported, its contract is what a caller
+       * reads, and a fail-open that only a future caller can reach is still a fail-open.
+       */
+      if (!options.allow.some((a) => matchesPrefix(normal, a))) {
         findings.push({
           kind: ScopeFindingKind.OUTSIDE_ALLOWED_SCOPE,
           path: rel,
           detail:
-            'Not within the declared scope [' +
-            options.allow.join(', ') +
-            ']. Material discoveries outside scope become an Observation, not a silent edit.',
+            options.allow.length === 0
+              ? 'No scope was declared for this change, so nothing is in scope. Material ' +
+                'discoveries outside scope become an Observation, not a silent edit.'
+              : 'Not within the declared scope [' +
+                options.allow.join(', ') +
+                ']. Material discoveries outside scope become an Observation, not a silent edit.',
         });
       }
       if (

@@ -43,6 +43,7 @@ import {
 } from '../src/engineering/capability.js';
 import { EngineeringFactory, routeVerdict } from '../src/engineering/factory.js';
 import { SECRET_RULES, redactSecrets, scanText } from '../src/engineering/secrets.js';
+import { FORBIDDEN_GIT_VERBS, gitVerb } from '../src/engineering/git.js';
 import { buildSandboxProfile } from '../src/engineering/sandboxProfile.js';
 import { FAKE_CAPABILITIES } from '../src/engine/fake.js';
 import {
@@ -1291,5 +1292,66 @@ describe('a private key is removed whole, not labelled', () => {
       expect(r.text, label + ' survived redaction').not.toContain(value);
       expect(r.count, label + ' was not counted').toBeGreaterThan(0);
     }
+  });
+});
+
+describe('the choke point examines the verb, whatever precedes it', () => {
+  /*
+   * SPEC: findings ENGINEERING-GIT-AND-COMMIT-INTEGRITY/F1 then F2 (MEDIUM), 1.0.1 review.
+   *
+   * The guard originally read `args.find((a) => !a.startsWith('-'))`, which returns
+   * `user.name=Serva Code` for this module's own commit argv. I fixed that by skipping `-c`
+   * and `-C` — the two globals this file uses — and the next review found the same desync one
+   * option across: `['--git-dir','/x','push']` returns `/x`, so `push` is never examined.
+   *
+   * Fixing what the report named rather than what it meant, twice on one function. The set is
+   * now enumerated from git's documented globals, and this asserts the property over all of
+   * them instead of the two that happened to be reported.
+   *
+   * Tested through `gitVerb` because `GitService.git()` — the choke point that calls it — is
+   * private, so the exported helper is the reachable surface. What the guard does WITH the
+   * verb is covered by the forbidden-verb tests elsewhere in this file.
+   */
+  const FORBIDDEN = 'push';
+
+  it('finds the verb behind every value-taking global option', () => {
+    const globals = [
+      ['-c', 'user.name=x'],
+      ['-C', '/some/path'],
+      ['--git-dir', '/some/.git'],
+      ['--work-tree', '/some/tree'],
+      ['--namespace', 'ns'],
+      ['--exec-path', '/usr/lib/git-core'],
+      ['--super-prefix', 'sub/'],
+      ['--config-env', 'name=ENVVAR'],
+      ['--attr-source', 'HEAD'],
+    ];
+    for (const pair of globals) {
+      expect(gitVerb([...pair, FORBIDDEN, '--force']), pair[0] + ' hid the verb').toBe(FORBIDDEN);
+    }
+  });
+
+  it('finds it behind several of them at once', () => {
+    expect(
+      gitVerb(['-c', 'a=b', '--git-dir', '/x', '-C', '/y', '--namespace', 'n', FORBIDDEN]),
+    ).toBe(FORBIDDEN);
+  });
+
+  it('the =value forms need no special case, and still do not hide it', () => {
+    /* A single token beginning with '-', so the ordinary flag rule already covers it. */
+    expect(gitVerb(['--git-dir=/x', '--work-tree=/y', FORBIDDEN])).toBe(FORBIDDEN);
+  });
+
+  it('every forbidden verb is still found behind a global that takes a value', () => {
+    for (const verb of FORBIDDEN_GIT_VERBS) {
+      expect(gitVerb(['--git-dir', '/x', verb]), verb).toBe(verb);
+    }
+  });
+
+  it('still reads the plain verb, and the argv this module actually builds', () => {
+    expect(gitVerb(['status', '--porcelain'])).toBe('status');
+    expect(
+      gitVerb(['-c', 'user.name=Serva Code', '-c', 'user.email=serva@localhost', 'commit', '-m']),
+    ).toBe('commit');
   });
 });
