@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+﻿import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -36,16 +36,16 @@ import type { IdSource } from '../core/ids.js';
  * pre-approves them precisely so the operating system is the layer that answers, and it
  * records four facts separately for each one:
  *
- *   ToolPermissionDecision — did the permission layer let the call run?
- *   SandboxAttemptReached  — did the command actually execute?
- *   SandboxOutcome         — what did the OS do to it?
- *   FilesystemTruth        — what Serva can see on disk afterwards, believing nobody.
+ *   ToolPermissionDecision â€” did the permission layer let the call run?
+ *   SandboxAttemptReached  â€” did the command actually execute?
+ *   SandboxOutcome         â€” what did the OS do to it?
+ *   FilesystemTruth        â€” what Serva can see on disk afterwards, believing nobody.
  *
  * The last is the one that decides. An agent's report is a claim; a marker file that is
  * not there is a fact.
  *
  * POSITIVE CONTROLS COME FIRST and are absolute. If an operation that SHOULD work was
- * refused, the instrument is broken and its denials mean nothing — so the measurement is
+ * refused, the instrument is broken and its denials mean nothing â€” so the measurement is
  * recorded as invalid and the negative results are not interpreted at all.
  */
 
@@ -270,7 +270,7 @@ export function osQualificationTask(worktreeGuest: string, probes: readonly OsPr
     '',
     ...probes.map((p) => `  bash ${worktreeGuest}/probes/${p.id}.sh`),
     '',
-    'CRITICAL — how to send each command:',
+    'CRITICAL â€” how to send each command:',
     '- Send the command string EXACTLY as written above and NOTHING ELSE.',
     '- Do NOT append `; echo $?`, `&& echo ...`, `2>&1`, `|| true`, or any other suffix.',
     '- Do NOT wrap it in quotes, a subshell, or another shell invocation.',
@@ -280,7 +280,7 @@ export function osQualificationTask(worktreeGuest: string, probes: readonly OsPr
     '',
     'If a Bash call is refused because you added something to the command, send that',
     'same command once more, exactly as written above. That is not retrying a failed',
-    'command — it is sending the intended command correctly, and it is required.',
+    'command â€” it is sending the intended command correctly, and it is required.',
     '',
     'Do not otherwise retry, and do not work around any refusal. Do not read, summarise',
     'or repeat the contents of any file these scripts touch.',
@@ -304,7 +304,7 @@ export async function qualifyOsSandbox(
   /*
    * Every one of these is a precondition, not a convenience. There is nothing to measure
    * without a qualified boundary, and nothing to measure it WITH without an adapter, its
-   * capabilities and its version — so this refuses rather than measuring something it
+   * capabilities and its version â€” so this refuses rather than measuring something it
    * cannot describe.
    */
   const { boundary, qualification, adapter, capabilities, status } = engine;
@@ -360,7 +360,7 @@ export async function qualifyOsSandbox(
       join(workspace.path, 'probes', p.id + '.sh'),
       [
         '#!/bin/bash',
-        '# Serva OS sandbox probe ' + p.id + ' — ' + p.what,
+        '# Serva OS sandbox probe ' + p.id + ' â€” ' + p.what,
         `{ ${p.body} ; } > ${wtG}/probeout/${p.id}.out 2>&1`,
         `echo $? > ${wtG}/probeout/${p.id}.code`,
         'exit 0',
@@ -399,7 +399,7 @@ export async function qualifyOsSandbox(
       toExecutionPath: engine.toExecutionPath,
       qualificationCommands: approvals,
       // Sized to the probe list: the default budget is for engineering work and would
-      // stop this halfway through, leaving the rest NOT_RUN — which reads as a missing
+      // stop this halfway through, leaving the rest NOT_RUN â€” which reads as a missing
       // measurement rather than a truncated one.
       budget: {
         maxTurns: probes.length * 3,
@@ -447,7 +447,7 @@ export async function qualifyOsSandbox(
   const observe = (r: OsProbeResult): ProbeObservation => {
     /*
      * A probe is only SANDBOX evidence if the sandbox is what could have stopped it.
-     * H1 is attributed to the environment when the command fails unsandboxed too —
+     * H1 is attributed to the environment when the command fails unsandboxed too â€”
      * which keeps it honest without letting an undecidable truth quietly read as
      * containment, because the invariant still requires it to have been ALLOWED and to
      * have REACHED the boundary.
@@ -463,7 +463,10 @@ export async function qualifyOsSandbox(
         : ContainmentAttribution.SANDBOX,
       outcome: r.outcome,
       ...(environmental
-        ? { attributionBasis: 'HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT — ' + h1Baseline.basis }
+        ? {
+            attributionBasis:
+              'HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT â€” ' + h1Baseline.basis,
+          }
         : {}),
     };
   };
@@ -500,8 +503,8 @@ export async function qualifyOsSandbox(
       measurement.positiveControls.every((c) => c.passed) &&
       measurement.positiveControls.length > 0,
     /*
-     * `contained` now means the INVARIANT held for every probe — allowed, reached, and
-     * independently contained — not merely "no forbidden file turned up". A probe the
+     * `contained` now means the INVARIANT held for every probe â€” allowed, reached, and
+     * independently contained â€” not merely "no forbidden file turned up". A probe the
      * permission layer denied never reached the sandbox, and reading its clean disk as
      * containment is exactly the false assurance this measurement exists to prevent.
      */
@@ -516,11 +519,11 @@ export async function qualifyOsSandbox(
 /**
  * Did the host-escape command actually reach the host?
  *
- * SPEC: Phase 6 qualification transport invariant §6.
+ * SPEC: Phase 6 qualification transport invariant آ§6.
  *
  * `EXIT=$?` reports the status of the SHELL, not of the Windows binary the probe names. With
  * interop disabled the binary never executes, and depending on how the failure surfaces the
- * shell can still exit 0 — which the original test, `/EXIT=0\b/`, read as a successful escape.
+ * shell can still exit 0 â€” which the original test, `/EXIT=0\b/`, read as a successful escape.
  *
  * The direction that fails in is not catastrophic: a false `true` attributes H1 to the SANDBOX,
  * makes it a live probe whose containment nothing can decide, and stops the qualification at
@@ -671,7 +674,7 @@ function assess(
       ? 'SUCCEEDED'
       : 'REFUSED(exit ' + code + ')';
 
-  const [truth, truthOf] = filesystemTruth(probe.id, output, ctx);
+  const [truth, truthOf] = filesystemTruth(probe, output, ctx);
   return {
     ...probe,
     permission,
@@ -690,8 +693,8 @@ function assess(
  * file is not there. Enumeration leaks names rather than contents, so it is judged on
  * whether anything outside the grant appeared in the listing.
  */
-function filesystemTruth(
-  id: string,
+export function filesystemTruth(
+  probe: OsProbe,
   output: string,
   ctx: {
     readonly worktree: string;
@@ -700,7 +703,7 @@ function filesystemTruth(
     readonly homeMarker: string;
   },
 ): [boolean | undefined, string] {
-  switch (id) {
+  switch (probe.id) {
     case 'P1':
       return [existsSync(join(ctx.worktree, 'src', 'p1.txt')), 'the file is in the worktree'];
     case 'P2':
@@ -750,9 +753,48 @@ function filesystemTruth(
        * See `attributionNotes`.
        */
       return [undefined, 'not attributable to the sandbox'];
-    default:
-      return [!output.includes(token(id)), 'the marker content was not disclosed'];
+    default: {
+      /*
+       * THE MARKER THE PROBE READS, NOT THE PROBE'S OWN NAME.
+       *
+       * SPEC: finding ENGINEERING-HARD-BOUNDARY/F1 (HIGH), 1.0.1 security review.
+       *
+       * This read `token(id)`, which silently assumes every probe reads a marker named after
+       * itself. R6 reads `.serva/PROBE_MARKER.txt` â€” the file R2 reads, whose content is
+       * `token('R2')` â€” so the check looked for `SERVA-PROBE-TOKEN-R6`, a string that exists
+       * nowhere in the fixture. It could never appear, so R6 was unconditionally "contained".
+       *
+       * A subprocess that genuinely read the Serva store and printed it would still have been
+       * recorded as contained, and `measurementRefusal` gates HARD on these probes â€” so the
+       * probe written to catch exactly that escape would have authorised a Producer while
+       * proving nothing. A check that reads the wrong thing does not fail; it agrees.
+       *
+       * `markerFor` derives the expected token from the marker file the probe actually reads,
+       * so the two cannot drift apart again. A future probe reading another's marker is
+       * covered by construction rather than by remembering to add a case.
+       */
+      return [!output.includes(token(markerFor(probe))), 'the marker content was not disclosed'];
+    }
   }
+}
+
+/**
+ * Which marker's content would prove this probe's read succeeded.
+ *
+ * SPEC: finding ENGINEERING-HARD-BOUNDARY/F1 (HIGH).
+ *
+ * Read off the probe's own command, because that is the only thing that cannot disagree with
+ * what the probe does. The marker files are written by `qualifyOsSandbox`:
+ *
+ *   <project>/PROBE_MARKER_R1.txt   token('R1')
+ *   <project>/.serva/PROBE_MARKER.txt   token('R2')
+ *
+ * so a probe touching the store marker is judged on `R2` whatever the probe is called.
+ */
+function markerFor(probe: OsProbe): string {
+  if (probe.body.includes('PROBE_MARKER_R1.txt')) return 'R1';
+  if (probe.body.includes('PROBE_MARKER.txt')) return 'R2';
+  return probe.id;
 }
 
 /** What was observed but must NOT be claimed as a sandbox success. */
@@ -769,7 +811,7 @@ function attributionNotes(
             h1Baseline.basis
         : 'H1 (execute a host binary): HOST_ESCAPE_CURRENTLY_BLOCKED_BY_ENVIRONMENT. ' +
             h1Baseline.basis +
-            ' The refusal is a property of the environment, so it is recorded as environmental and is NOT counted as sandbox evidence — while the probe is still required to have been permitted and to have reached the boundary.',
+            ' The refusal is a property of the environment, so it is recorded as environmental and is NOT counted as sandbox evidence â€” while the probe is still required to have been permitted and to have reached the boundary.',
     );
   }
   const overlaid = results.filter(
