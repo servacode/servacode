@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+﻿import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EnforcementClass, EvidenceClass, GateVerdict, ValidityState } from '../src/vocab/index.js';
 import { ContractRegistry } from '../src/agents/registry.js';
@@ -66,7 +66,7 @@ import { FixedClock } from '../src/core/clock.js';
  * These tests run REAL child processes against a REAL disposable Git repository, never
  * against the Serva source tree. The fixture recipes invoke `node` directly rather than
  * `npm`, because `npm` is a shell script on Windows and the substrate spawns without a
- * shell on purpose — a test that needed a shell would be testing a boundary Serva
+ * shell on purpose â€” a test that needed a shell would be testing a boundary Serva
  * deliberately does not grant.
  */
 
@@ -149,7 +149,7 @@ interface Fixture {
  * A simulated PRODUCER boundary matching the scripted engine's own location.
  *
  * Orchestration has to be testable without a qualified machine. The boundary is marked
- * simulated — the fixture does not get to describe itself as measured — so every use of
+ * simulated â€” the fixture does not get to describe itself as measured â€” so every use of
  * it must also pass the explicit `allowSimulatedBoundary` opt-in, which nothing in
  * `src/` does.
  */
@@ -560,7 +560,7 @@ describe('evidence is bound to a ChangeSet, so editing the code makes it stale',
     const first = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
     expect(first.evidence.length).toBeGreaterThan(0);
 
-    // The earlier measurement is still TRUE — about the earlier ChangeSet.
+    // The earlier measurement is still TRUE â€” about the earlier ChangeSet.
     writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 3;\n', 'utf8');
     const second = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
 
@@ -722,7 +722,7 @@ describe('the secrets scanner reports without disclosing', () => {
      *
      * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-2 (MEDIUM), 1.0.1 review.
      *
-     * This used `"sk-ant-abcdefghijklmnop123"; // placeholder` and expected MEDIUM — which
+     * This used `"sk-ant-abcdefghijklmnop123"; // placeholder` and expected MEDIUM â€” which
      * passed only because the comment downgraded it. Its own note said "the scanner does not
      * get to decide that a comment is telling the truth", and the code was doing precisely
      * that: `looksLikePlaceholder` read the whole LINE.
@@ -732,7 +732,7 @@ describe('the secrets scanner reports without disclosing', () => {
      */
     const f = scanText('x', 'const k = "sk-ant-aaaaaaaaaaaaaaaaaaaa";');
     expect(f).toHaveLength(1);
-    /* Downgraded because the VALUE is a masked run, and never dropped — a "placeholder" that
+    /* Downgraded because the VALUE is a masked run, and never dropped â€” a "placeholder" that
        turns out to be real must still be reported. */
     expect(f[0]?.severity).toBe('MEDIUM');
 
@@ -790,7 +790,7 @@ describe('the secrets scanner reports without disclosing', () => {
       projectRoot: f.repo,
     });
     expect(out.evidence.outcome).toBe('PASS');
-    // Not "the change is secure" — "nothing matched these rules".
+    // Not "the change is secure" â€” "nothing matched these rules".
     expect(out.evidence.detail).toMatch(/it is not a security review/);
   }, 60_000);
 });
@@ -1031,7 +1031,7 @@ describe('rework is bounded and acceptance is deterministic', () => {
       ],
     });
 
-    // The gate composes as before — that is what the seam is for.
+    // The gate composes as before â€” that is what the seam is for.
     expect(v.gateResult.verdict).toBe(GateVerdict.PASS_WITH_QUALIFICATION);
     // ...and the result is flagged, and refuses to become a commit.
     expect(v.usedUnvalidatedJudgement).toBe(true);
@@ -1101,7 +1101,7 @@ describe('the words around a secret do not decide how serious it is', () => {
   /*
    * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-2 (MEDIUM), 1.0.1 review.
    *
-   * `looksLikePlaceholder` tested `line + ' ' + matched` — the WHOLE line. Since
+   * `looksLikePlaceholder` tested `line + ' ' + matched` â€” the WHOLE line. Since
    * `blocking` is `findings.some(f => f.severity === 'HIGH')`, writing `// example` beside a
    * live credential downgraded it to MEDIUM and acceptance stopped being blocked.
    *
@@ -1148,7 +1148,7 @@ describe('the words around a secret do not decide how serious it is', () => {
   });
 
   it('never suppresses the finding, whichever way it is graded', () => {
-    /* Downgrade, never disappear — a placeholder that turns out to be real must still show. */
+    /* Downgrade, never disappear â€” a placeholder that turns out to be real must still show. */
     const masked = scanText('README.md', 'AKIA' + 'XXXXXXXXXXXXXXXX');
     expect(masked.length).toBe(1);
   });
@@ -1161,7 +1161,7 @@ describe('a credential printed by a build does not become permanent record', () 
    * `runRecipe` wrote 2000 bytes of raw stdout and stderr into T-CANON, which is immutable and
    * travels in every backup and export. The module's own header says that output "routinely
    * carries paths, tokens and environment fragments", and the secrets scanner only ever ran
-   * over ChangeSet FILES — so a credential printed by a build was persisted verbatim, forever,
+   * over ChangeSet FILES â€” so a credential printed by a build was persisted verbatim, forever,
    * having gone around the boundary that exists to catch it.
    *
    * Canon cannot be repaired afterwards, which is the whole reason this has to happen before
@@ -1189,7 +1189,7 @@ describe('a credential printed by a build does not become permanent record', () 
   it('removes a credential that straddles the excerpt boundary', () => {
     /*
      * The ordering that matters. Truncating first would cut the key in half at 2000 bytes, and
-     * the surviving half is both a disclosure and a shape the rules no longer match — so it
+     * the surviving half is both a disclosure and a shape the rules no longer match â€” so it
      * would pass through in silence.
      */
     /* A separator, because the rules require a word boundary: a key embedded inside a longer
@@ -1203,7 +1203,7 @@ describe('a credential printed by a build does not become permanent record', () 
   it('every rule the scanner enforces is one the redactor also removes', () => {
     /*
      * One detector, not two. If these ever diverge, the day they disagree is the day one of
-     * them is wrong about a secret — so this asserts they are driven by the same rule set
+     * them is wrong about a secret â€” so this asserts they are driven by the same rule set
      * rather than by two lists somebody has to remember to update together.
      */
     for (const rule of SECRET_RULES) {
@@ -1230,7 +1230,7 @@ describe('a private key is removed whole, not labelled', () => {
    * The SEC-1 fix reused SECRET_RULES to redact. Those rules exist to DETECT, and a detector
    * only needs an anchor: the PRIVATE_KEY pattern matches the BEGIN line and stops. Redacting
    * with it replaced the header, wrote the base64 body and END marker into canon verbatim, and
-   * left '[REDACTED:PRIVATE_KEY]' sitting directly above the key — worse than not redacting,
+   * left '[REDACTED:PRIVATE_KEY]' sitting directly above the key â€” worse than not redacting,
    * because it tells a reader where to look.
    *
    * Detection and redaction are different questions about the same rules, and one pattern
@@ -1277,7 +1277,7 @@ describe('a private key is removed whole, not labelled', () => {
 
   it('every rule that can appear in output leaves nothing of the value behind', () => {
     /*
-     * The general form. A sample per rule, asserted absent rather than merely "changed" —
+     * The general form. A sample per rule, asserted absent rather than merely "changed" â€”
      * the SEC-1 fix passed a weaker version of this test while leaving the key body in place.
      */
     const samples: readonly [string, string][] = [
@@ -1301,14 +1301,14 @@ describe('the choke point examines the verb, whatever precedes it', () => {
    *
    * The guard originally read `args.find((a) => !a.startsWith('-'))`, which returns
    * `user.name=Serva Code` for this module's own commit argv. I fixed that by skipping `-c`
-   * and `-C` — the two globals this file uses — and the next review found the same desync one
+   * and `-C` â€” the two globals this file uses â€” and the next review found the same desync one
    * option across: `['--git-dir','/x','push']` returns `/x`, so `push` is never examined.
    *
    * Fixing what the report named rather than what it meant, twice on one function. The set is
    * now enumerated from git's documented globals, and this asserts the property over all of
    * them instead of the two that happened to be reported.
    *
-   * Tested through `gitVerb` because `GitService.git()` — the choke point that calls it — is
+   * Tested through `gitVerb` because `GitService.git()` â€” the choke point that calls it â€” is
    * private, so the exported helper is the reachable surface. What the guard does WITH the
    * verb is covered by the forbidden-verb tests elsewhere in this file.
    */
@@ -1353,5 +1353,97 @@ describe('the choke point examines the verb, whatever precedes it', () => {
     expect(
       gitVerb(['-c', 'user.name=Serva Code', '-c', 'user.email=serva@localhost', 'commit', '-m']),
     ).toBe('commit');
+  });
+});
+
+describe('a coincidence in a real credential does not disarm the scan', () => {
+  /*
+   * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-PLACEHOLDER-1 (MEDIUM),
+   * 1.0.1 security review.
+   *
+   * `looksLikePlaceholder` downgrades HIGH to MEDIUM and `blocking` requires a HIGH, so the
+   * downgrade is what decides enforcement. The rule was `/(.)\1{3,}/` â€” four identical
+   * characters ANYWHERE â€” and a genuine forty-character token contains such a run often
+   * enough to matter. Every one of those was silently dropped out of the blocking set.
+   *
+   * The distinguishing property was never "contains a repeat" but "is degenerate": a masked
+   * value's longest run covers most of it and its alphabet is tiny; a real credential's does
+   * neither, whatever unlucky substring it happens to carry.
+   */
+  it('a real token containing a four-character run stays HIGH', () => {
+    const withRun = 'ghp_' + 'R7kQaaaa2mZ9pL4xW1nT8vB6cD5hJ3';
+    const f = scanText('src/config.ts', 'const t = "' + withRun + '";');
+    expect(f.length).toBeGreaterThan(0);
+    expect(f[0]?.severity, 'a coincidental repeat must not disarm the gate').toBe('HIGH');
+  });
+
+  it('and so does one containing a longer run, while the value stays varied', () => {
+    const withRun = 'ghp_' + 'R7kQaaaaa2mZ9pL4xW1nT8vB6cD5hJ';
+    const f = scanText('src/config.ts', 'const t = "' + withRun + '";');
+    expect(f[0]?.severity).toBe('HIGH');
+  });
+
+  it('a masked value, whose repeat dominates it, is still downgraded', () => {
+    const masked = 'AKIA' + 'XXXXXXXXXXXXXXXX';
+    const f = scanText('README.md', masked);
+    expect(f.length).toBe(1);
+    expect(f[0]?.severity, 'a mask is documentation, not a credential').toBe('MEDIUM');
+  });
+
+  it('a low-entropy value that is not dominated by one character stays HIGH', () => {
+    /*
+     * ASSERTED IN THE DIRECTION IT ACTUALLY ERRS, which is the safe one.
+     *
+     * sk-ant-abababab… alternates, but counting the vendor prefix it carries six distinct
+     * characters and no dominant run, so the degeneracy rules do not fire and it stays
+     * blocking. An earlier version of this test expected MEDIUM and was simply wrong about
+     * what the rule does.
+     *
+     * Leaving it HIGH costs somebody an explanation for an obvious fake; downgrading it would
+     * risk waving through a real credential that happened to look repetitive. The finding
+     * being fixed here is the second kind, and the rules are deliberately biased that way.
+     */
+    const f = scanText('README.md', 'sk-ant-' + 'ababababababababab');
+    expect(f[0]?.severity).toBe('HIGH');
+  });
+
+  it('and a documented example key, which names itself', () => {
+    /* AWS publishes AKIAIOSFODNN7EXAMPLE; nobody is issued a key containing EXAMPLE. */
+    const f = scanText('docs/setup.md', 'AKIAIOSFODNN7EXAMPLE');
+    expect(f[0]?.severity).toBe('MEDIUM');
+  });
+});
+
+describe('a credential on the command line is not written to canon', () => {
+  /*
+   * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-ARGS-1 (MEDIUM), 1.0.1.
+   *
+   * stdout and stderr are redacted before they reach T-CANON and the environment is stored as
+   * a digest of its keys with values excluded â€” while argv went in verbatim. One side of a
+   * boundary left open is how the boundary is defeated later.
+   */
+  it('redacts a credential in an argument, keeping the flag readable', () => {
+    const r = redactSecrets('--token=sk-ant-' + 'api03R7kQ2mZ9pL4xW1nT8vB6cD5hJ3');
+    expect(r.text).not.toContain('api03R7kQ2mZ9pL4xW1nT8vB6cD5hJ3');
+    expect(r.text, 'the shape of the invocation is what an auditor reads').toContain('--token=');
+    expect(r.count).toBe(1);
+  });
+
+  it('leaves ordinary arguments untouched', () => {
+    for (const arg of ['--noEmit', 'test.js', '-p', 'tsconfig.build.json']) {
+      expect(redactSecrets(arg).text).toBe(arg);
+    }
+  });
+
+  it('the record construction routes args through redaction', () => {
+    /*
+     * Structural, because reaching runRecipe needs a live substrate. What matters is that the
+     * persisted field is not the raw recipe array â€” the exact thing the finding named.
+     */
+    const src = readFileSync('src/engineering/execution.ts', 'utf8');
+    expect(src, 'argv must be sanitised before it is persisted').toContain(
+      'args: redactArgs(req.recipe.args)',
+    );
+    expect(src).not.toContain('args: [...req.recipe.args]');
   });
 });

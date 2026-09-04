@@ -52,6 +52,58 @@ import type { IdSource } from '../core/ids.js';
 /** Marker content, unique per probe. Disposable; never a real secret. */
 const token = (id: string): string => 'SERVA-PROBE-TOKEN-' + id;
 
+/**
+ * WHAT THE FIXTURE PUTS WHERE, WRITTEN DOWN ONCE.
+ *
+ * SPEC: findings ENGINEERING-HARD-BOUNDARY/F1 (R6) and EHB-1 (R8), 1.0.1 security review.
+ *
+ * A containment probe is judged by looking for evidence that should NOT have come back. That
+ * only works while the thing being looked for is the thing the fixture actually created, and
+ * twice it was not:
+ *
+ *   R6 searched for token('R6') while reading a file containing token('R2');
+ *   R8 searched for 'total.js', a filename this module never writes at all.
+ *
+ * Both were therefore unconditionally "contained" — a probe cannot catch an escape when the
+ * proof of that escape is a string nothing can produce. Two instances, one cause: the check
+ * and the fixture named the same artefact separately, in different places, and nothing made
+ * them agree.
+ *
+ * So they are named ONCE here and both sides read from this. A future probe cannot drift from
+ * its fixture without changing the constant they share, and `enumerationEvidence` below binds
+ * each enumeration probe to the specific name whose appearance would prove the listing leaked.
+ */
+export const FIXTURE_NAMES = {
+  /** Written into the primary checkout. Seeing it in a listing proves enumeration. */
+  checkoutMarker: 'PROBE_MARKER_R1.txt',
+  /** Written into the Serva store. */
+  storeMarker: 'PROBE_MARKER.txt',
+  /** Suffix of the sibling attempt's worktree directory. */
+  siblingSuffix: '-a99',
+  /** Written into the guest home directory. */
+  homeMarker: 'serva-probe-home-marker.txt',
+} as const;
+
+/**
+ * For an enumeration probe, the name whose appearance would prove the listing leaked.
+ *
+ * Enumeration leaks names rather than contents, so these are judged on a filename rather than
+ * on a token. Returning `undefined` means "not an enumeration probe", which keeps the mapping
+ * total: a probe added later gets no accidental default that happens to pass.
+ */
+export function enumerationEvidence(probeId: string): string | undefined {
+  switch (probeId) {
+    case 'R7':
+      return FIXTURE_NAMES.siblingSuffix;
+    case 'R8':
+      return FIXTURE_NAMES.checkoutMarker;
+    case 'R9':
+      return FIXTURE_NAMES.homeMarker;
+    default:
+      return undefined;
+  }
+}
+
 export interface OsProbe {
   readonly id: string;
   readonly what: string;
@@ -329,16 +381,19 @@ export async function qualifyOsSandbox(
   // Disposable fixtures, created here so the probes have something real to reach for.
   const servaDir = join(deps.projectRoot, '.serva');
   mkdirSync(servaDir, { recursive: true });
-  writeFileSync(join(servaDir, 'PROBE_MARKER.txt'), token('R2') + '\n', 'utf8');
-  writeFileSync(join(deps.projectRoot, 'PROBE_MARKER_R1.txt'), token('R1') + '\n', 'utf8');
+  writeFileSync(join(servaDir, FIXTURE_NAMES.storeMarker), token('R2') + '\n', 'utf8');
+  writeFileSync(join(deps.projectRoot, FIXTURE_NAMES.checkoutMarker), token('R1') + '\n', 'utf8');
   writeFileSync(join(workspace.path, 'probeout', 'P2-marker.txt'), token('P2') + '\n', 'utf8');
   const outside = mkdtempSync(join(tmpdir(), 'serva-osq-outside-'));
   writeFileSync(join(outside, 'marker.txt'), token('R5') + '\n', 'utf8');
-  const sibling = join(deps.workspaces.workspacesRoot(), item.workItemId + '-a99');
+  const sibling = join(
+    deps.workspaces.workspacesRoot(),
+    item.workItemId + FIXTURE_NAMES.siblingSuffix,
+  );
   mkdirSync(sibling, { recursive: true });
   writeFileSync(join(sibling, 'sibling.txt'), token('R3') + '\n', 'utf8');
 
-  const homeMarker = 'serva-probe-home-marker.txt';
+  const homeMarker = FIXTURE_NAMES.homeMarker;
   const guestHome = guestHomeFor(engine, homeMarker);
 
   const probes = osProbesFor({
@@ -496,7 +551,7 @@ export async function qualifyOsSandbox(
   rmSync(outside, { recursive: true, force: true });
   // The R1 marker sits in the primary checkout; leaving it would dirty the tree the
   // acceptance run is about to reconcile against.
-  rmSync(join(deps.projectRoot, 'PROBE_MARKER_R1.txt'), { force: true });
+  rmSync(join(deps.projectRoot, FIXTURE_NAMES.checkoutMarker), { force: true });
 
   return {
     valid:
@@ -739,13 +794,30 @@ export function filesystemTruth(
       ];
     case 'N1':
       return [!existsSync(join(ctx.worktree, 'probeout', 'N1.body')), 'nothing was fetched'];
+    /*
+     * The enumeration probes, judged through one binding rather than three literals.
+     *
+     * SPEC: finding ENGINEERING-HARD-BOUNDARY/EHB-1 (MEDIUM), 1.0.1 security review.
+     *
+     * R7 and R9 happened to name things the fixture really creates; R8 named 'total.js', which
+     * it never creates, so that probe reported contained whatever the sandbox did. Three
+     * separate literals, each one an independent chance to be wrong, and one of them was.
+     *
+     * `enumerationEvidence` reads from FIXTURE_NAMES — the same constants the fixture writes
+     * from — so a probe and its evidence cannot disagree, and `everyEnumerationProbeIsBound`
+     * in the tests fails if a new enumeration probe is added without one.
+     */
     case 'R7':
-      // The attempt's own worktree is legitimately visible; another attempt is not.
-      return [!output.includes('-a99'), 'no other attempt is enumerable'];
     case 'R8':
-      return [!output.includes('total.js'), 'the checkout is not enumerable'];
-    case 'R9':
-      return [!output.includes(ctx.homeMarker), 'the home directory is not enumerable'];
+    case 'R9': {
+      const evidence = enumerationEvidence(probe.id);
+      if (evidence === undefined) {
+        /* Unreachable while the cases above and `enumerationEvidence` agree, and a refusal
+           rather than a pass if they ever stop agreeing. */
+        return [undefined, 'no enumeration evidence is defined for ' + probe.id];
+      }
+      return [!output.includes(evidence), 'nothing outside the grant was enumerable'];
+    }
     case 'H1':
       /*
        * Deliberately not decidable here. Executing a Windows binary fails in this guest
@@ -792,8 +864,8 @@ export function filesystemTruth(
  * so a probe touching the store marker is judged on `R2` whatever the probe is called.
  */
 function markerFor(probe: OsProbe): string {
-  if (probe.body.includes('PROBE_MARKER_R1.txt')) return 'R1';
-  if (probe.body.includes('PROBE_MARKER.txt')) return 'R2';
+  if (probe.body.includes(FIXTURE_NAMES.checkoutMarker)) return 'R1';
+  if (probe.body.includes(FIXTURE_NAMES.storeMarker)) return 'R2';
   return probe.id;
 }
 

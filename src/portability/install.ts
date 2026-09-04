@@ -475,9 +475,26 @@ export function recordInstalled(
   storeSchema: number,
   at: string,
 ): InstalledVersion {
-  const dir = join(root, VERSIONS_DIR, version);
-  mkdirSync(dir, { recursive: true });
+  /*
+   * VALIDATED BEFORE ANYTHING IS CREATED FROM IT.
+   *
+   * SPEC: finding INSTALL-UPDATE-ROLLBACK-THE-INSTALLATION-MODEL/IUR-REVIEW-M1 (MEDIUM),
+   * 1.0.1 security review.
+   *
+   * `mkdirSync` ran BEFORE `InstalledVersionSchema.parse`, and that schema is the only thing
+   * enforcing `^\d+\.\d+\.\d+$`. A version containing `..` or a separator would therefore have
+   * created a directory outside `versions/` — `join` collapses the traversal — and only then
+   * been rejected, leaving the directory behind. Making a path out of a name before checking
+   * the name is the wrong order whatever the caller happens to pass today.
+   *
+   * Reachable only from SERVA_VERSION at present, which is a build constant. That is why it
+   * survived, not a reason to keep it: a refusal that has already written to disk is not a
+   * refusal.
+   */
   const marker = InstalledVersionSchema.parse({ version, storeSchema, installedAt: at });
+
+  const dir = join(root, VERSIONS_DIR, marker.version);
+  mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, MARKER), JSON.stringify(marker, null, 2) + '\n', 'utf8');
   return marker;
 }

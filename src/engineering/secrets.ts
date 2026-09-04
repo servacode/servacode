@@ -370,10 +370,43 @@ function looksLikePlaceholder(matched: string): boolean {
     return true;
   }
 
-  /* A masked value: `AKIAXXXXXXXXXXXXXXXX`, `sk-ant-0000000000000000`. */
-  if (/(.)\1{3,}/.test(alnum)) return true;
+  /*
+   * A REPEAT MUST DOMINATE THE VALUE, NOT MERELY OCCUR IN IT.
+   *
+   * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-PLACEHOLDER-1 (MEDIUM),
+   * 1.0.1 security review.
+   *
+   * This was `/(.)\1{3,}/` — four identical characters ANYWHERE. A masked value is mostly one
+   * character repeated; a genuine forty-character token contains a four-character run by
+   * coincidence often enough to matter, and every such token was silently downgraded out of
+   * the blocking set. The downgrade is what decides enforcement, since `blocking` requires a
+   * HIGH, so a coincidence disarmed the scan on a real credential.
+   *
+   * The distinguishing property was never "contains a repeat" but "is degenerate". A masked
+   * value's longest run covers most of it and its alphabet is tiny; a real credential's does
+   * neither, whatever unlucky substring it happens to contain.
+   */
+  const run = longestRun(alnum);
+  if (alnum.length > 0 && run >= Math.max(4, Math.ceil(alnum.length / 2))) return true;
+
+  /* `XXXXXXXXXXXX`, `000000000000`, `abababababab` — a handful of characters, endlessly. */
+  const distinct = new Set(alnum.toLowerCase()).size;
+  if (alnum.length >= 8 && distinct <= 3) return true;
 
   return /^[x0*]+$/i.test(alnum);
+}
+
+/** The longest run of one repeated character. */
+function longestRun(s: string): number {
+  let best = 0;
+  let run = 0;
+  let prev = '';
+  for (const ch of s) {
+    run = ch === prev ? run + 1 : 1;
+    prev = ch;
+    if (run > best) best = run;
+  }
+  return best;
 }
 
 /** A report safe to show a model or write to a trace: no values, ever. */

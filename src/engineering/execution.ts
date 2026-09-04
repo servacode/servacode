@@ -107,6 +107,20 @@ const EXCERPT_LIMIT = 2_000;
  * 2000-byte boundary, and the surviving half is still a disclosure — as well as being a shape
  * the rules no longer match, so it would pass through silently.
  */
+/**
+ * The command line as it may be written down.
+ *
+ * SPEC: finding SEC-ARGS-1 (MEDIUM), 1.0.1 security review.
+ *
+ * Each argument is redacted independently through the same SECRET_RULES the output uses, so
+ * `--token=sk-ant-…` becomes `--token=[REDACTED:ANTHROPIC_KEY]` and the flag it belongs to
+ * stays readable. A record that dropped the whole argument would lose the shape of the
+ * invocation, which is the part an auditor is reading it for.
+ */
+function redactArgs(args: readonly string[]): string[] {
+  return args.map((a) => redactSecrets(a).text);
+}
+
 function excerpts(
   stdout: string,
   stderr: string,
@@ -215,7 +229,22 @@ export async function runRecipe(
     baseCommit: req.baseCommit,
     headCommit: req.headCommit,
     executable: req.recipe.executable,
-    args: [...req.recipe.args],
+    /*
+     * ARGV IS PERSISTED EVIDENCE TOO, AND WAS THE ONE THING NOT SANITISED.
+     *
+     * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-ARGS-1 (MEDIUM), 1.0.1.
+     *
+     * stdout and stderr are redacted before they reach canon and the environment is stored as
+     * a digest of its KEYS with values deliberately excluded — while the command line went in
+     * verbatim. A recipe invoked with `--token=sk-ant-…` would have written that credential
+     * permanently into T-CANON, where it travels in every backup and export, having gone
+     * around the boundary built for exactly this on the other two channels.
+     *
+     * Not reachable today: recipe args are code constants, not owner or agent input. That is
+     * why it survived, and it is not a reason to leave one side of a boundary open — the next
+     * recipe is not obliged to be a constant.
+     */
+    args: redactArgs(req.recipe.args),
     cwd,
     environmentDigest: digestOf(canonicalJson(Object.keys(env).sort())),
     environmentPolicy: req.recipe.environmentPolicy,

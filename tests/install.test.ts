@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -905,5 +913,66 @@ describe('a switch is judged against the build being left', () => {
     const plan = planSwitch(installation(root), '1.0.0', UNKNOWN_PROJECTS);
     expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
     expect(plan.reason).toContain('cannot prove');
+  });
+});
+
+describe('a version is validated before anything is created from it', () => {
+  /*
+   * SPEC: finding INSTALL-UPDATE-ROLLBACK-THE-INSTALLATION-MODEL/IUR-REVIEW-M1 (MEDIUM),
+   * 1.0.1 security review.
+   *
+   * `recordInstalled` called `mkdirSync` BEFORE `InstalledVersionSchema.parse`, and that
+   * schema is the only thing enforcing the version shape. A name containing `..` or a
+   * separator therefore created a directory — `join` collapses the traversal — and was only
+   * then rejected, leaving it behind. A refusal that has already written to disk is not a
+   * refusal.
+   */
+  it('refuses a malformed version and leaves nothing behind', () => {
+    const root = mkdtempSync(join(tmpdir(), 'serva-recordinstalled-'));
+    try {
+      const before = existsSync(join(root, 'versions')) ? readdirSync(join(root, 'versions')) : [];
+
+      for (const bad of ['../escape', '1.0', 'latest', '1.0.0/../..', 'a.b.c']) {
+        expect(() => recordInstalled(root, bad, SCHEMA_VERSION, 'T'), bad).toThrow();
+      }
+
+      const after = existsSync(join(root, 'versions')) ? readdirSync(join(root, 'versions')) : [];
+      expect(after, 'a rejected version must not leave a directory').toEqual(before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('creates nothing outside the versions directory', () => {
+    /*
+     * The escape target is inside a PRIVATE parent, not the shared temp root.
+     *
+     * A first version asserted that `join(root, '..', 'escaped')` was absent — where `..` is
+     * the system temp directory. The fail-first run then genuinely created it there, and every
+     * later run found the leftover and failed. The test was polluting the ground it measured,
+     * and its failure afterwards said nothing about the code.
+     */
+    const parent = mkdtempSync(join(tmpdir(), 'serva-escape-'));
+    const root = join(parent, 'install-root');
+    mkdirSync(root, { recursive: true });
+    try {
+      expect(() => recordInstalled(root, '../../escaped', SCHEMA_VERSION, 'T')).toThrow();
+      expect(readdirSync(parent), 'nothing was created beside the install root').toEqual([
+        'install-root',
+      ]);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it('still records a well-formed version', () => {
+    const root = mkdtempSync(join(tmpdir(), 'serva-recordinstalled-'));
+    try {
+      const marker = recordInstalled(root, '1.2.3', SCHEMA_VERSION, 'T');
+      expect(marker.version).toBe('1.2.3');
+      expect(existsSync(join(root, 'versions', '1.2.3', 'serva-version.json'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
