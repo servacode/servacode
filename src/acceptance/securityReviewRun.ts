@@ -489,6 +489,14 @@ export const AREA_CONTEXT: Record<string, readonly string[]> = Object.freeze({
    * an agent id may never answer an owner decision — is enforced there, one module away.
    */
   'application action authority': ['src/intelligence/app.ts'],
+  /*
+   * This unit judges whether a persisted scope-review record can be trusted as evidence, and
+   * the answer turns on a property of the STORE: canon versions are immutable, every record
+   * carries a digest, and a body edited out of band is detected. Without that module the unit
+   * can only say the mitigation 'is not visible in these files' — and abstain, which is what
+   * it did at b4cf7392.
+   */
+  'Serva self-acceptance authority': ['src/store/store.ts'],
 });
 
 export function reviewUnitsFor(area: string): readonly ReviewUnit[] {

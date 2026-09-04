@@ -55,6 +55,17 @@ export type VerificationRecord = z.output<typeof VerificationRecordSchema>;
 
 export const RECORD_PATH = 'evidence/acceptance-run/offline-verification.json';
 
+/**
+ * The commands a verification record must contain, green, for OFFLINE-VERIFICATION.
+ *
+ * Named once. Minting (`scripts/prove.mjs`) and re-derivation (`resolveProof`) must ask for
+ * the same commands, or a proof can be minted against a bar the resolver does not hold it to.
+ */
+export const REQUIRED_VERIFICATION_COMMANDS: readonly string[] = Object.freeze([
+  'npm run verify',
+  'npm run test:vscode',
+]);
+
 export interface VerificationResolution {
   readonly resolved: boolean;
   readonly record?: VerificationRecord;

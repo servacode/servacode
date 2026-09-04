@@ -273,12 +273,13 @@ for (const line of refused) console.log('  refused: ' + line);
  * has its own resolver and its own minting path rather than a `provenBy` binding that would
  * quietly mean something else.
  */
-const { resolveVerificationRecord, RECORD_PATH } =
+const { resolveVerificationRecord, RECORD_PATH, REQUIRED_VERIFICATION_COMMANDS } =
   await import('../dist/acceptance/verificationRecord.js');
+/* The same list `resolveProof` holds the minted proof to. Two lists is one list too many. */
 const verification = resolveVerificationRecord({
   root,
   repository,
-  required: ['npm run verify', 'npm run test:vscode'],
+  required: REQUIRED_VERIFICATION_COMMANDS,
 });
 
 const offlinePath = join(proofDir, 'OFFLINE-VERIFICATION.json');

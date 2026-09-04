@@ -230,6 +230,60 @@ describe('a proof resolves against the world or it does not resolve', () => {
   });
 });
 
+describe('OFFLINE-VERIFICATION is re-derived by the same rule that minted it', () => {
+  /*
+   * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SSA-REV-OFFLINE-ZEROTESTS (LOW), 1.0.1.
+   *
+   * `resolveProof` re-implemented a SUBSET of `resolveVerificationRecord`: missing command,
+   * non-zero exit, failing tests — and not the guard on zero PASSING tests. The strong copy
+   * ran at minting and the weak one at re-derivation, which is the wrong way round. A proof is
+   * worth exactly what the resolver checks when someone later asks whether it still holds.
+   */
+  const RECORD = 'evidence/acceptance-run/offline-verification.json';
+
+  function withRecord(commands: readonly Record<string, unknown>[]): string {
+    const root = pkg({
+      [RECORD]: JSON.stringify({
+        producedBy: 'scripts/verify.mjs',
+        producedAt: '2026-08-24T00:00:00.000Z',
+        implementationCommit: COMMIT,
+        treeDigest: TREE,
+        commands,
+      }),
+    });
+    const full = join(root, ...RECORD.split('/'));
+    writeProof(root, {
+      requirementId: 'OFFLINE-VERIFICATION',
+      evidence: [{ kind: 'FILE', id: RECORD, digest: String(fileDigest(full)) }],
+    });
+    return root;
+  }
+
+  const green = (command: string, testsPassed: number) => ({
+    command,
+    exitCode: 0,
+    startedAt: '2026-08-24T00:00:00.000Z',
+    endedAt: '2026-08-24T00:01:00.000Z',
+    durationMs: 60_000,
+    testsPassed,
+    testsFailed: 0,
+  });
+
+  it('a run that passed no tests verified nothing, however cleanly it exited', () => {
+    const root = withRecord([green('npm run verify', 0), green('npm run test:vscode', 35)]);
+    const resolved = resolve(root, 'OFFLINE-VERIFICATION');
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('no passing tests');
+  });
+
+  it('a record missing one of the required commands does not prove the whole suite', () => {
+    const root = withRecord([green('npm run verify', 1750)]);
+    const resolved = resolve(root, 'OFFLINE-VERIFICATION');
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('test:vscode');
+  });
+});
+
 /* ================================================= judged proofs need a real reviewer */
 
 describe('a JUDGED proof needs a governed reviewer run that actually exists', () => {
@@ -1284,20 +1338,36 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
     });
   }
 
+  /*
+   * Every field the record SCHEMA requires, because `resolveProof` now resolves this record
+   * through `resolveVerificationRecord` rather than reading a few fields off raw JSON. The
+   * inline reader it replaced never parsed the schema, so these fixtures were half-records
+   * that the resolver was never strict enough to notice.
+   */
+  const ran = (command: string, over: Record<string, unknown> = {}) => ({
+    command,
+    exitCode: 0,
+    startedAt: '2026-08-24T00:00:00.000Z',
+    endedAt: '2026-08-24T00:01:00.000Z',
+    durationMs: 60_000,
+    testsPassed: 1600,
+    testsFailed: 0,
+    ...over,
+  });
+
   const green = {
+    producedBy: 'scripts/verify.mjs',
+    producedAt: '2026-08-24T00:00:00.000Z',
     implementationCommit: COMMIT,
     treeDigest: TREE,
-    commands: [
-      { command: 'npm run verify', exitCode: 0, testsPassed: 1600, testsFailed: 0 },
-      { command: 'npm run test:vscode', exitCode: 0, testsPassed: 35, testsFailed: 0 },
-    ],
+    commands: [ran('npm run verify'), ran('npm run test:vscode', { testsPassed: 35 })],
   };
 
   it('refuses a record whose command exited non-zero', () => {
     const root = pkg();
     offlineProof(root, {
       ...green,
-      commands: [{ command: 'npm run verify', exitCode: 1, testsPassed: 1200, testsFailed: 0 }],
+      commands: [ran('npm run verify', { exitCode: 1, testsPassed: 1200 })],
     });
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
@@ -1308,7 +1378,7 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
     const root = pkg();
     offlineProof(root, {
       ...green,
-      commands: [{ command: 'npm run verify', exitCode: 0, testsPassed: 1200, testsFailed: 17 }],
+      commands: [ran('npm run verify', { testsPassed: 1200, testsFailed: 17 })],
     });
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);

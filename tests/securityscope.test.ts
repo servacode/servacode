@@ -449,6 +449,29 @@ describe('a unit that sees a call site also sees the guard on it', () => {
     }
   });
 
+  it('every unit judging persisted evidence is shown what makes the store tamper-evident', () => {
+    /*
+     * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SSA-REV-CONTENT-BIND (MEDIUM), 1.0.1.
+     *
+     * Third instance of the same pair. This unit decides whether a persisted scope-review
+     * record counts as evidence, and that turns on whether the store can be written out of
+     * band without detection. The answer is in store.ts — immutable canon versions, a digest
+     * per record, 'tamper-evidence, not tamper-proofing' — and the unit could not see it, so it
+     * returned NOT_VERIFIED. A reviewer refusing to decide a question it was not given the
+     * material to answer is the honest outcome, and a scope defect rather than a code one.
+     */
+    const seeAggregate = unitsWith('src/acceptance/securityAggregate.ts');
+    expect(seeAggregate.length, 'the aggregate must be reviewed somewhere').toBeGreaterThan(0);
+
+    for (const unit of seeAggregate) {
+      const visible = [...unit.prefixes, ...(unit.context ?? [])];
+      expect(
+        visible.some((p) => 'src/store/store.ts'.startsWith(p)),
+        unit.unit + ' judges persisted records but cannot see what protects them',
+      ).toBe(true);
+    }
+  });
+
   it('declared area context is read, never counted as coverage', () => {
     /*
      * The safety property of AREA_CONTEXT: it must be impossible to quiet a reviewer by

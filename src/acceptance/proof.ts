@@ -3,6 +3,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { IsoSchema } from '../domain/schemas.js';
+import {
+  RECORD_PATH,
+  REQUIRED_VERIFICATION_COMMANDS,
+  resolveVerificationRecord,
+} from './verificationRecord.js';
 
 /**
  * ACCEPTANCE PROOFS — A REPORT DESCRIBING AN EVENT IS NOT THE EVENT.
@@ -342,6 +347,21 @@ function verificationRecordRefusals(
   proof: AcceptanceProof,
   repository: RepositoryIdentity | undefined,
 ): readonly string[] {
+  /*
+   * ONE DEFINITION OF WHAT A VERIFICATION RECORD MUST SAY.
+   *
+   * SPEC: finding SERVA-SELF-ACCEPTANCE-AUTHORITY/SSA-REV-OFFLINE-ZEROTESTS (LOW), 1.0.1.
+   *
+   * This used to re-implement a SUBSET of `resolveVerificationRecord`: it refused a missing
+   * command, a non-zero exit and failing tests, and omitted the guard on `testsPassed === 0` —
+   * so a command that ran nothing, exited 0 and reported no failures satisfied
+   * OFFLINE-VERIFICATION here. The strong copy ran at MINTING and the weak copy at
+   * RE-DERIVATION, which is backwards: re-derivation is the authority, and a proof is only
+   * worth what the resolver checks.
+   *
+   * It also required no particular command, so the named commands now come from the same
+   * exported list the minting script uses.
+   */
   const cited = proof.evidence.find(
     (e) => e.kind === EvidenceKind.FILE && e.id.endsWith('offline-verification.json'),
   );
@@ -349,45 +369,21 @@ function verificationRecordRefusals(
     return ['the proof cites no verification run record, so nothing says the suite passed'];
   }
 
-  let record: {
-    implementationCommit?: string;
-    treeDigest?: string;
-    commands?: { command?: string; exitCode?: number; testsFailed?: number }[];
-  };
-  try {
-    record = JSON.parse(readFileSync(join(root, ...cited.id.split('/')), 'utf8')) as never;
-  } catch {
-    return ['the verification run record could not be read'];
+  /*
+   * And it must be THE record, at the path the resolver reads. A proof citing some other
+   * offline-verification.json would otherwise be judged against a file nothing else checks.
+   */
+  if (cited.id !== RECORD_PATH) {
+    return [
+      'the proof cites ' + cited.id + ' rather than the verification record at ' + RECORD_PATH,
+    ];
   }
 
-  const refusals: string[] = [];
-  if (repository !== undefined) {
-    if (record.implementationCommit !== repository.commit) {
-      refusals.push(
-        'the verification ran against commit ' +
-          String(record.implementationCommit).slice(0, 12) +
-          ' and this package is ' +
-          repository.commit.slice(0, 12),
-      );
-    }
-    if (record.treeDigest !== repository.tree) {
-      refusals.push('the verification ran against a different tree than this package is');
-    }
-  }
-
-  const commands = Array.isArray(record.commands) ? record.commands : [];
-  if (commands.length === 0) {
-    refusals.push('the verification record names no command, so it verified nothing');
-  }
-  for (const c of commands) {
-    if (c.exitCode !== 0) {
-      refusals.push(String(c.command) + ' exited ' + String(c.exitCode));
-    }
-    if (typeof c.testsFailed === 'number' && c.testsFailed > 0) {
-      refusals.push(String(c.command) + ' reported ' + String(c.testsFailed) + ' failing test(s)');
-    }
-  }
-  return refusals;
+  return resolveVerificationRecord({
+    root,
+    ...(repository === undefined ? {} : { repository }),
+    required: REQUIRED_VERIFICATION_COMMANDS,
+  }).refusals;
 }
 
 /**
