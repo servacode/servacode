@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -357,6 +358,53 @@ describe('a corrupt or tampered backup is refused, not repaired', () => {
     const result = verifyBackup(bundle);
     expect(result.ok).toBe(false);
     expect(result.problems.join(' ')).toContain('missing from the bundle');
+  });
+
+  it('a credential hidden in an innocently-named file is refused on the way IN', () => {
+    /*
+     * SPEC: finding RELEASE-HANDOVER/RELH-1 (MEDIUM), 1.0.1 security review.
+     *
+     * Writing a backup scans file CONTENT. Verifying one checked the NAME against a deny-list
+     * and nothing else, so 'no credential ever comes back' held only for bundles this machine
+     * wrote. A bundle from elsewhere could carry a live key inside notes.txt, pass every
+     * check, and be copied verbatim onto the owner's tree by performRestore.
+     *
+     * The bundle here is made CONSISTENT — content digest and manifest integrity digest both
+     * recomputed — so nothing else can refuse it. Without a content scan this bundle verifies.
+     */
+    const bundle = goodBundle();
+    const manifestPath = join(bundle, MANIFEST_NAME);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      inventory: { path: string; bytes: number; digest: string }[];
+      totalBytes: number;
+      integrityDigest?: string;
+    };
+    const victim = manifest.inventory.find((e) => e.path.endsWith('src/index.ts'));
+    expect(victim, 'the fixture must contain the file this test rewrites').toBeDefined();
+
+    const smuggled = 'notes\naws_access_key_id=AKIA' + 'Q7X4ZL2MN8VBCD3R' + '\n';
+    const target = join(bundle, CONTENT_DIR, ...String(victim?.path).split('/'));
+    writeFileSync(target, smuggled, 'utf8');
+
+    const bytes = Buffer.byteLength(smuggled, 'utf8');
+    const digest = createHash('sha256').update(readFileSync(target)).digest('hex');
+    for (const entry of manifest.inventory) {
+      if (entry.path === victim?.path) {
+        entry.bytes = bytes;
+        entry.digest = digest;
+      }
+    }
+    manifest.totalBytes = manifest.inventory.reduce((n, e) => n + e.bytes, 0);
+    delete manifest.integrityDigest;
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({ ...manifest, integrityDigest: manifestDigest(manifest as never) }),
+      'utf8',
+    );
+
+    const result = verifyBackup(bundle);
+    expect(result.ok, 'a consistent bundle carrying a live key must still be refused').toBe(false);
+    expect(result.problems.join(' ')).toMatch(/no credential comes back/);
   });
 
   it('a directory with no manifest is not a Serva backup', () => {

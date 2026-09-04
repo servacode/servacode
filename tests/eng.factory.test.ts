@@ -43,6 +43,7 @@ import {
 } from '../src/engineering/capability.js';
 import { EngineeringFactory, routeVerdict } from '../src/engineering/factory.js';
 import { SECRET_RULES, redactSecrets, scanText } from '../src/engineering/secrets.js';
+import { REVIEW_CANON_TYPE } from '../src/engineering/review.js';
 import { FORBIDDEN_GIT_VERBS, gitVerb } from '../src/engineering/git.js';
 import { buildSandboxProfile } from '../src/engineering/sandboxProfile.js';
 import { FAKE_CAPABILITIES } from '../src/engine/fake.js';
@@ -1061,6 +1062,91 @@ describe('rework is bounded and acceptance is deterministic', () => {
     );
   }, 90_000);
 
+  it('acceptance refuses a persisted FAIL review, not merely a missing one', async () => {
+    /*
+     * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-R1 (MEDIUM), 1.0.1 security review.
+     *
+     * The block being tested claims it 'cannot be satisfied by anything except a persisted,
+     * validated review'. It read existence and authorship and never the OUTCOME, so a
+     * dissenting reviewer's FAIL sat in the store and satisfied the check that exists to
+     * consult it. The gate honours dissent; this boundary did not, and this boundary is the
+     * one that writes a commit.
+     *
+     * The gate here is bypassed on purpose (`NO_REVIEW` leaves the attempt ACCEPTED) so that
+     * the integration check is the only thing standing between a FAIL review and a commit.
+     */
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    expect(v.attemptOutcome).toBe('ACCEPTED');
+
+    /* An independent reviewer — not the producer — that rejected the change. */
+    const tx = f.store.begin();
+    tx.putCanon(REVIEW_CANON_TYPE, 'SC-REVIEW-DISSENT', {
+      id: 'SC-REVIEW-DISSENT',
+      workItemId: item.workItemId,
+      changeSetId: v.changeSet.changeSetId,
+      criterionId: 'EC-REVIEW',
+      reviewerAgentId: 'SC-AGENT-200',
+      producerAgentId: 'SC-AGENT-150',
+      runRef: 'SC-RUN-000900',
+      outcome: 'FAIL',
+      detail: 'this drops the guard the work item was for',
+      verdict: {},
+      capabilityDigest: 'e'.repeat(64),
+      recordedAt: '2026-08-25T00:00:00.000Z',
+    });
+    tx.commit();
+
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(/is FAIL/);
+    expect(await f.git.headCommit(w.path), 'nothing was committed').toBe(f.base);
+  }, 90_000);
+
+  it('a dissent is not overruled by being recorded second', async () => {
+    /*
+     * The precedence half. Two reviewers, PASS first and FAIL second: array order must not
+     * decide. `decisiveReview` is the gate's own rule, shared so the two boundaries cannot
+     * come to different conclusions about the same set of records.
+     */
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(join(w.path, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
+
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    const base = {
+      workItemId: item.workItemId,
+      changeSetId: v.changeSet.changeSetId,
+      criterionId: 'EC-REVIEW',
+      producerAgentId: 'SC-AGENT-150',
+      runRef: 'SC-RUN-000901',
+      verdict: {},
+      capabilityDigest: 'e'.repeat(64),
+      recordedAt: '2026-08-25T00:00:00.000Z',
+    };
+    const tx = f.store.begin();
+    tx.putCanon(REVIEW_CANON_TYPE, 'SC-REVIEW-A-PASS', {
+      ...base,
+      id: 'SC-REVIEW-A-PASS',
+      reviewerAgentId: 'SC-AGENT-200',
+      outcome: 'PASS',
+      detail: 'looks fine',
+    });
+    tx.putCanon(REVIEW_CANON_TYPE, 'SC-REVIEW-B-FAIL', {
+      ...base,
+      id: 'SC-REVIEW-B-FAIL',
+      reviewerAgentId: 'SC-AGENT-201',
+      outcome: 'FAIL',
+      detail: 'it is not fine',
+    });
+    tx.commit();
+
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(/is FAIL/);
+  }, 90_000);
+
   it('routing follows the canonical verdict taxonomy', () => {
     expect(routeVerdict(GateVerdict.PASS)).toBe('ACCEPTED');
     expect(routeVerdict(GateVerdict.PASS_WITH_QUALIFICATION)).toBe('ACCEPTED');
@@ -1176,6 +1262,33 @@ describe('a credential printed by a build does not become permanent record', () 
     expect(r.count).toBe(1);
     /* The shape is safe to name; it describes what matched, never the value. */
     expect(r.categories.length).toBeGreaterThan(0);
+  });
+
+  it('redacts an unquoted assignment, which is the shape process output has', () => {
+    /*
+     * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-REV-1 (MEDIUM), 1.0.1.
+     *
+     * GENERIC_ASSIGNMENT required QUOTES, which is what a source file looks like. A build log
+     * says `api_key=…` with none, and that log is what `excerpts()` writes into immutable
+     * canon — the one channel where an unredacted value cannot afterwards be withdrawn.
+     */
+    const value = 'zK7RmQ2wX9tLpV4nB6cY';
+    const r = redactSecrets('deploying\napi_key=' + value + '\nok');
+    expect(r.text, 'the value itself must not survive').not.toContain(value);
+    expect(r.text).toContain('[REDACTED:');
+    expect(r.count).toBe(1);
+  });
+
+  it('does not redact a short unquoted value that is plainly not a credential', () => {
+    /*
+     * The other half, and the reason the unquoted branch asks for twenty characters. A
+     * redactor that eats `secret: true` makes the evidence an owner reads useless, and useless
+     * evidence is how a real finding goes unnoticed.
+     */
+    const plain = 'config: secret: true\napi_key=none\npassword: 1234';
+    const r = redactSecrets(plain);
+    expect(r.text).toBe(plain);
+    expect(r.count).toBe(0);
   });
 
   it('leaves ordinary output exactly as it was', () => {

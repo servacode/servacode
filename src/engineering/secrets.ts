@@ -110,9 +110,21 @@ export const SECRET_RULES: readonly SecretRule[] = Object.freeze([
     description: 'A JSON Web Token.',
   },
   {
+    /*
+     * SPEC: finding ENGINEERING-SECRETS-AND-EXECUTION-EVIDENCE/SEC-REV-1 (MEDIUM), 1.0.1.
+     *
+     * The quoted form is what a source file looks like. The unquoted form is what PROCESS
+     * OUTPUT looks like — `TOKEN=abcdef…` in a build log — and that output is written into
+     * immutable canon as execution excerpts, the one place an unredacted value cannot later be
+     * withdrawn. A rule that matched only source shapes left the permanent channel unmatched.
+     *
+     * The unquoted branch demands twenty token characters rather than twelve: unquoted values
+     * are bare words, and a shorter threshold would redact `secret: true` and ordinary
+     * identifiers out of the evidence an owner reads.
+     */
     category: SecretCategory.GENERIC_ASSIGNMENT,
     pattern:
-      /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*["'][^"'\s]{12,}["']/i,
+      /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*(?:["'][^"'\s]{12,}["']|[A-Za-z0-9_\-./+=]{20,})/i,
     severity: 'MEDIUM',
     description: 'A credential-shaped assignment with a long literal value.',
   },

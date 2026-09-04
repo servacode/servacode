@@ -423,6 +423,55 @@ describe('a unit that sees a call site also sees the guard on it', () => {
     }
   });
 
+  it('every unit shown the owner-answer action is also shown the impersonation guard', () => {
+    /*
+     * SPEC: finding APPLICATION-ACTION-AUTHORITY/AAA-1 (MEDIUM), 1.0.1 security review.
+     *
+     * Same pair, second instance. The `owner.answer` handler in actions.ts passes `answeredBy`
+     * from an untrusted payload to `answerOwnerDecision`, and the rule that an agent id may
+     * never answer an owner decision is enforced inside that function, in intelligence/app.ts.
+     * A unit holding the call site and not the guard can only report the defence as
+     * unverifiable — which is indistinguishable, in a report, from absent.
+     *
+     * The first instance was fixed by declaring `context` on a SUB-SCOPE. This area is not
+     * partitioned and had no way to declare any, which is why the same question came back as a
+     * finding; `AREA_CONTEXT` closes that gap for both shapes.
+     */
+    const seeActions = unitsWith('src/app/actions.ts');
+    expect(seeActions.length, 'the action surface must be reviewed somewhere').toBeGreaterThan(0);
+
+    for (const unit of seeActions) {
+      const visible = [...unit.prefixes, ...(unit.context ?? [])];
+      expect(
+        visible.some((p) => 'src/intelligence/app.ts'.startsWith(p)),
+        unit.unit + ' can see owner.answer but not the guard on answeredBy',
+      ).toBe(true);
+    }
+  });
+
+  it('declared area context is read, never counted as coverage', () => {
+    /*
+     * The safety property of AREA_CONTEXT: it must be impossible to quiet a reviewer by
+     * handing a unit more to READ. Context is excluded from the partition, so the set of files
+     * each unit OWNS is unchanged by it — otherwise 'give it context' becomes a way to make a
+     * file look reviewed while nobody judges it.
+     */
+    for (const area of REQUIRED_SCOPE) {
+      for (const unit of reviewUnitsFor(area)) {
+        for (const c of unit.context ?? []) {
+          /* OWNED is prefixes MINUS except — the same selection the partition uses. */
+          const owned =
+            unit.prefixes.some((p) => c.startsWith(p)) &&
+            !(unit.except ?? []).some((p) => c.startsWith(p));
+          expect(
+            owned,
+            unit.unit + ' owns ' + c + ' through context, which context must never do',
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
   it('context does not smuggle a file out of being reviewed as a subject', () => {
     /*
      * Context is for reading, not for coverage: a file that appears ONLY as context is never

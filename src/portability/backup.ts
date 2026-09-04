@@ -787,6 +787,33 @@ export function verifyBackup(bundlePath: string): VerifyResult {
       problems.push(safe + ' does not match its recorded digest');
       continue;
     }
+
+    /*
+     * THE SAME RULE, READ IN THE OTHER DIRECTION.
+     *
+     * SPEC: finding RELEASE-HANDOVER/RELH-1 (MEDIUM), 1.0.1 security review.
+     *
+     * Writing a backup scans file CONTENT, because a deny-list of filenames catches `.env` and
+     * not a key somebody pasted into a note. Verifying one used to check the NAME alone — so
+     * the guarantee below, 'no credential ever comes back', held against a bundle this machine
+     * wrote and not against a bundle that arrived. A live key inside notes.txt passed, and
+     * `performRestore` copies content verbatim.
+     *
+     * A guarantee is only as real as the boundary that enforces it, and this boundary is the
+     * one that faces a bundle from somewhere else. Scanned here rather than in the restore
+     * loop so that verifying tells the owner BEFORE anything is written.
+     */
+    const credentials = scanFileForCredentials(target, st.size);
+    if (credentials.length > 0) {
+      problems.push(
+        safe +
+          ' contains what looks like ' +
+          credentials.join(' and ') +
+          ': no credential comes back',
+      );
+      continue;
+    }
+
     checked += 1;
   }
 

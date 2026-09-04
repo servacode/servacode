@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { AgentRuntime } from '../src/agents/runtime.js';
@@ -290,6 +291,56 @@ describe('an owner answer is idempotent and attributable', () => {
     expect(decision?.state).toBe('ANSWERED');
     expect(decision?.chosenOption).toBe('Yes');
     expect(decision?.answeredBy).toBe('owner@bakery');
+  });
+
+  it('an agent cannot answer an owner decision, and the guard is where the write is', () => {
+    /*
+     * SPEC: finding APPLICATION-ACTION-AUTHORITY/AAA-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The reviewer of the action surface could see `answeredBy` handed straight from the
+     * webview payload to `answerOwnerDecision`, and could not see any check on it, because the
+     * check lives one module away. It reported the defence as unverifiable — which reads
+     * exactly like a missing one.
+     *
+     * The defence is real, and this is it. Asserted behaviourally rather than by reading the
+     * source, so a refactor that moves the guard keeps the test honest and a refactor that
+     * DROPS it cannot pass.
+     */
+    const f = setup();
+    const id = raise(f);
+    const deps = { store: f.store, clock: f.deps.clock, ids: f.deps.ids } as never;
+
+    for (const impostor of ['SC-AGENT-140', 'SC-RUN-000042']) {
+      expect(
+        () =>
+          answerOwnerDecision(deps, { decisionId: id, chosenOption: 'Yes', answeredBy: impostor }),
+        impostor + ' answered an owner decision',
+      ).toThrowError(/cannot be answered by/);
+    }
+
+    const repo = repository(
+      f.store,
+      ARTIFACT_TYPES.OWNER_DECISION_REQUEST,
+      OwnerDecisionRequestSchema,
+    );
+    expect(repo.get(id)?.state, 'the decision is still waiting for a person').toBe('OPEN');
+  });
+
+  it('no layer claims to hold a trusted answerer identity that nothing supplies', () => {
+    /*
+     * The other half of AAA-1. `ActionContext` carried an `actor` field documented as the
+     * trusted person — 'never an agent id' — that no caller ever set and no handler ever read.
+     * A field naming itself a trust anchor and filled by nobody is worse than no field: the
+     * next handler reads `undefined` and believes an identity was checked.
+     *
+     * If a real one is ever added, it must be supplied and consumed, and this test should be
+     * replaced by one asserting that — not deleted.
+     */
+    const actions = readFileSync('src/app/actions.ts', 'utf8');
+    expect(actions).not.toMatch(/readonly actor\?:/);
+    expect(actions, 'nothing may read an actor this layer does not have').not.toContain(
+      'ctx.actor',
+    );
   });
 
   it('the answer is versioned, so the store can say what was answered and when', () => {

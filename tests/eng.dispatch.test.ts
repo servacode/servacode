@@ -915,7 +915,21 @@ describe('a governed change goes all the way to an accepted commit', () => {
     // Every deterministic check passed. The reviewer is why this does not ship.
     expect(final.gateResult.verdict).toBe(GateVerdict.FAIL);
     expect(final.attemptOutcome).toBe('REWORK');
-    await expect(f.factory.acceptChange(item, w, final)).rejects.toThrowError(/is not accepted/);
+
+    /*
+     * Refused twice over, and the message now names the REVIEW rather than the verdict.
+     *
+     * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-R1 (MEDIUM), 1.0.1 security review.
+     *
+     * `acceptChange` reads the persisted review's outcome before it reads the caller-supplied
+     * `attemptOutcome`, for the same reason the review-existence check comes first: it does not
+     * depend on the verdict at all, so it still holds when the verdict is the thing that is
+     * wrong. Both refusals are correct here; asserting the earlier one keeps this test bound to
+     * the check that does not rely on its caller.
+     */
+    await expect(f.factory.acceptChange(item, w, final)).rejects.toThrowError(
+      /independent review of ChangeSet .* is FAIL/,
+    );
   }, 120_000);
 });
 

@@ -18,7 +18,7 @@ import {
 } from './executors.js';
 import { evidenceForChangeSet, type EngineeringEvidence, type ExecutorDeps } from './execution.js';
 import { evaluateEngineeringGate, type JudgedInput } from './gate.js';
-import { judgedForChangeSet, listReviews } from './review.js';
+import { decisiveReview, judgedForChangeSet, listReviews } from './review.js';
 import { producerRefusal } from './capability.js';
 import {
   WorkspaceState,
@@ -456,6 +456,41 @@ export class EngineeringFactory {
         remedy: 'An agent never certifies its own work (SC-POL-006).',
         details: { changeSetId: verification.changeSet.changeSetId },
         specRef: 'SC-POL-006',
+      });
+    }
+
+    /*
+     * AND WHAT THE REVIEW ACTUALLY SAID.
+     *
+     * SPEC: finding ENGINEERING-ACCEPTANCE-AUTHORITY/EAA-R1 (MEDIUM), 1.0.1 security review.
+     *
+     * The block above claims this check 'cannot be satisfied by anything except a persisted,
+     * validated review', and until now a persisted FAIL satisfied it: existence and authorship
+     * were read, the outcome never was. So an independent reviewer's rejection could be
+     * present in the store, correctly refused by the gate, and then ignored by the boundary
+     * that integrates — which leaves acceptance resting on the caller-supplied
+     * `attemptOutcome` alone.
+     *
+     * `decisiveReview` is the gate's own precedence rule, applied here so the two boundaries
+     * cannot disagree about what a set of reviews means.
+     */
+    const decisive = decisiveReview(reviews);
+    if (decisive !== undefined && decisive.outcome !== 'PASS') {
+      return fail({
+        code: 'E_VALIDATION',
+        message:
+          'The independent review of ChangeSet ' +
+          verification.changeSet.changeSetId +
+          ' is ' +
+          decisive.outcome,
+        remedy:
+          'A dissenting review is not overruled by being second. Address it, or accept that this change is not accepted.',
+        details: {
+          changeSetId: verification.changeSet.changeSetId,
+          outcome: decisive.outcome,
+          reviewerAgentId: decisive.reviewerAgentId,
+        },
+        specRef: 'Phase 4 §19, SC-POL-006',
       });
     }
 

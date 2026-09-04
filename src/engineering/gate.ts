@@ -7,6 +7,7 @@ import {
   Severity,
 } from '../vocab/index.js';
 import { evaluateGate } from '../gates/engine.js';
+import { decisiveReview } from './review.js';
 import type {
   Criterion,
   CriterionEvaluation,
@@ -224,11 +225,7 @@ export function buildCriterionEvaluations(
        * The failing judgement wins when there is one. Two reviewers disagreeing is not a tie
        * to be broken by array order — it is a reason not to accept the change.
        */
-      const judgements = input.judged.filter((x) => x.criterionId === spec.id);
-      const j =
-        judgements.find((x) => x.outcome === 'FAIL') ??
-        judgements.find((x) => x.outcome === 'NOT_VERIFIED') ??
-        judgements[0];
+      const j = decisiveReview(input.judged.filter((x) => x.criterionId === spec.id));
       if (j === undefined) {
         out.push({
           id,

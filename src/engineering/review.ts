@@ -91,6 +91,29 @@ export const PersistedReviewSchema = z
 
 export type PersistedReview = z.output<typeof PersistedReviewSchema>;
 
+/**
+ * WHICH REVIEW DECIDES, WHEN REVIEWERS DISAGREE.
+ *
+ * A DISSENT IS NOT OVERRULED BY BEING SECOND. Two reviewers disagreeing is not a tie to be
+ * broken by array order — it is a reason not to accept the change, so a FAIL outranks a PASS
+ * however the records happen to be ordered, and NOT_VERIFIED outranks a PASS because unproven
+ * is not proven.
+ *
+ * ONE rule, applied wherever reviews are consulted. It was written twice before: the gate
+ * honoured dissent (finding EAA-2) while `acceptChange` checked only that SOME review existed
+ * and never read its outcome (finding EAA-R1) — a gap the gate's own comment described and did
+ * not close. A rule stated at one boundary and not the next is how the weak boundary survives.
+ */
+export function decisiveReview<T extends { readonly outcome: string }>(
+  reviews: readonly T[],
+): T | undefined {
+  return (
+    reviews.find((r) => r.outcome === 'FAIL') ??
+    reviews.find((r) => r.outcome === 'NOT_VERIFIED') ??
+    reviews[0]
+  );
+}
+
 export interface ReviewValidationInput {
   readonly store: Store;
   readonly runRef: string;

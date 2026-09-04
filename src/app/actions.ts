@@ -67,13 +67,23 @@ export interface ActionContext {
    * so the optionality never reaches a handler as an undefined surprise.
    */
   readonly rt?: ServaRuntime;
-  /**
-   * The person, for actions that record who decided.
+  /*
+   * THERE IS NO `actor` FIELD HERE, DELIBERATELY.
    *
-   * Never an agent id. `answerOwnerDecision` refuses one, and this is the layer where a
-   * UI could most easily supply the wrong thing.
+   * SPEC: finding APPLICATION-ACTION-AUTHORITY/AAA-1 (MEDIUM), 1.0.1 security review.
+   *
+   * One used to exist, documented as the trusted person — 'never an agent id... the layer
+   * where a UI could most easily supply the wrong thing'. No caller ever set it and no handler
+   * ever read it. A field that names itself a trust anchor and is filled by nobody is worse
+   * than no field: it invites the next handler to trust `undefined`, and it invites a reader
+   * to believe an identity was checked here when nothing was.
+   *
+   * The rule it claimed to carry is real and is enforced where the write happens:
+   * `answerOwnerDecision` refuses any answerer whose id begins SC-AGENT- or SC-RUN-, and
+   * `ownerDecisionRefusal` refuses a stored agent answer on every read. This layer has no
+   * independent source of person-identity to add — Serva runs as the owner — so asserting one
+   * here would be a check that agrees with whatever it is handed.
    */
-  readonly actor?: string;
 }
 
 export interface ActionResult {

@@ -469,17 +469,42 @@ export interface ReviewUnit {
   readonly context: readonly string[];
 }
 
+/**
+ * FILES AN AREA MUST READ TO JUDGE ITS OWN, WHETHER OR NOT IT IS PARTITIONED.
+ *
+ * SPEC: finding APPLICATION-ACTION-AUTHORITY/AAA-1 (MEDIUM), 1.0.1 security review.
+ *
+ * A unit shown a CALL SITE must also be shown the GUARD on it, or it can only report that the
+ * defence is unverifiable — and an unverifiable defence reads exactly like a missing one. That
+ * rule already existed for sub-scopes, which could declare `context`; an unpartitioned area had
+ * no way to declare any, so the same reviewer question came back as a finding rather than an
+ * answer. Declaring it per AREA covers both shapes.
+ *
+ * Context is READ, never OWNED: it is excluded from the partition, so nothing here can make a
+ * file count as covered. The only thing it changes is what the reviewer is allowed to look at.
+ */
+export const AREA_CONTEXT: Record<string, readonly string[]> = Object.freeze({
+  /*
+   * `owner.answer` hands `answeredBy` to `answerOwnerDecision`, and the impersonation rule —
+   * an agent id may never answer an owner decision — is enforced there, one module away.
+   */
+  'application action authority': ['src/intelligence/app.ts'],
+});
+
 export function reviewUnitsFor(area: string): readonly ReviewUnit[] {
+  const declared = AREA_CONTEXT[area] ?? [];
   const split = AREA_SUBSCOPES[area];
   if (split === undefined) {
-    return [{ area, unit: area, prefixes: AREA_SOURCES[area] ?? [], except: [], context: [] }];
+    return [
+      { area, unit: area, prefixes: AREA_SOURCES[area] ?? [], except: [], context: declared },
+    ];
   }
   return Object.entries(split).map(([unit, sub]) => ({
     area,
     unit,
     prefixes: sub.prefixes,
     except: sub.except ?? [],
-    context: sub.context ?? [],
+    context: [...declared, ...(sub.context ?? [])],
   }));
 }
 
