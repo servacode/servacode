@@ -121,6 +121,23 @@ export function scopeIdOf(scopeName: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+/**
+ * The prefix every finding raised by one review unit carries in its id.
+ *
+ * ONE DEFINITION, because two are how a finding stops being traceable to the unit that raised
+ * it. The reviewer namespaces its findings by unit so that two units independently numbering
+ * theirs `F-1` do not collide; anything later asking "which unit raised this?" must rebuild
+ * that prefix by the SAME rule, or it will ask the question and quietly get no answer.
+ *
+ * That is not hypothetical: `resolutionIsCorroborated` used to match a finding to its
+ * re-review by comparing the finding's AREA against the record's scopeName, which for a
+ * partitioned area holds the UNIT name instead. The two were never equal, so corroboration
+ * could not happen for any split area — a mechanism that never fired and never said so.
+ */
+export function findingIdPrefix(unit: string): string {
+  return unit.replace(/[^A-Za-z0-9]+/g, '-').toUpperCase();
+}
+
 export type ScopeReviewInput = Omit<ScopeReview, 'id'> & { readonly id?: string };
 
 /**

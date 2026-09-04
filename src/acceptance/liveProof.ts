@@ -903,6 +903,36 @@ export function resolveLiveEngineering(
   };
 }
 
+/**
+ * DID THE OWNER'S REQUEST ACTUALLY CAUSE GOVERNED WORK?
+ *
+ * ONE definition, called by both resolvers that need it, because there were two and they
+ * drifted. `resolveServaChain` was hardened to require QUEUED after a regression showed that
+ * refusing only REFUSED let a HALTED request — Serva stopping honestly at classification or
+ * planning — resolve as a proven whole-product chain whenever engineering artifacts happened
+ * to exist for the same work item. That hardening never reached `resolveLiveServa`, which is
+ * the function the LIVE-SERVA requirement is wired to, so the weaker rule survived exactly
+ * where it mattered most.
+ *
+ * The distinguishing property of LIVE-SERVA over LIVE-ENGINEERING is the request → work
+ * causation link. A turn that did not queue work did not cause it, whatever else is true, and
+ * only QUEUED says work followed. Anything not QUEUED — including an outcome this build does
+ * not recognise, or none at all — is refused, so a new turn outcome fails closed.
+ */
+export function requestQueuedWork(turn: Record<string, unknown>): LiveRefusal | undefined {
+  const outcome = String(turn['outcome'] ?? '');
+  if (outcome === 'QUEUED') return undefined;
+  const haltReason = turn['haltReason'];
+  return {
+    check: 'OWNER_REQUEST',
+    detail:
+      'the request ended ' +
+      (outcome === '' ? '(no outcome recorded)' : outcome) +
+      ', so no governed work followed it' +
+      (haltReason === undefined ? '' : ': ' + String(haltReason)),
+  };
+}
+
 export interface LiveServaChain extends LiveEngineeringChain {
   readonly requestId: string;
   readonly turnId: string;
@@ -991,12 +1021,8 @@ export function resolveLiveServa(input: LiveServaInput): LiveResolution<LiveServ
     });
   }
 
-  if (String(turn['outcome']) === 'REFUSED') {
-    refusals.push({
-      check: 'OWNER_REQUEST',
-      detail: 'the request was refused, so no work followed it',
-    });
-  }
+  const notQueued = requestQueuedWork(turn);
+  if (notQueued !== undefined) refusals.push(notQueued);
 
   if (refusals.length > 0 || engineering.chain === undefined) {
     return { resolved: false, refusals };

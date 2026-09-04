@@ -1,4 +1,4 @@
-import { ScopeCoverage, listScopeReviews, scopeIdOf } from './scopeReview.js';
+import { ScopeCoverage, findingIdPrefix, listScopeReviews, scopeIdOf } from './scopeReview.js';
 import { REQUIRED_SCOPE, ReviewVerdict, Severity } from './securityReview.js';
 import { reviewUnitsFor } from './securityReviewRun.js';
 import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
@@ -228,11 +228,41 @@ function isResolvedHere(f: ScopeFinding, repository: RepositoryIdentity): boolea
  * Neither half is forgeable alone. The claim cannot conjure a run's silence, and silence with no
  * claim still means only that nobody looked.
  */
+/**
+ * Which review UNIT raised this finding?
+ *
+ * A finding records the AREA it belongs to, and an area may be partitioned into several units
+ * that each look at a different slice of the source. Silence from a unit that never saw the
+ * file proves nothing, so corroboration must be matched to the originating unit and not to its
+ * area. The unit is recoverable because the reviewer namespaced the finding's id with it —
+ * rebuilt here by the one shared rule, `findingIdPrefix`.
+ *
+ * Returns undefined when no unit of the area claims the id, and the caller then treats the
+ * finding as uncorroborated. Failing to identify the reviewer is not evidence of agreement.
+ */
+function unitThatRaised(f: ScopeFinding): string | undefined {
+  for (const { unit } of reviewUnitsFor(f.area)) {
+    if (f.id.startsWith(findingIdPrefix(unit) + '/')) return unit;
+  }
+  return undefined;
+}
+
 function resolutionIsCorroborated(f: ScopeFinding, attempts: readonly ResolvedAttempt[]): boolean {
-  const reReviews = attempts.filter(
-    (a) =>
-      a.refusals.length === 0 && (a.record.scopeName === f.area || a.record.scopeId === f.area),
-  );
+  /*
+   * When the unit is recoverable, ONLY that unit corroborates. When it is not — an id written
+   * by something other than the review runner — this falls back to the older area match, which
+   * is exact for an unpartitioned area (its single unit IS the area) and matches nothing for a
+   * partitioned one. So the fallback is never wider than the rule above it: it restores the
+   * previous behaviour where that behaviour was sound, and stays fail-safe where it was not.
+   */
+  const unit = unitThatRaised(f);
+  const identifies =
+    unit === undefined
+      ? (a: ResolvedAttempt): boolean =>
+          a.record.scopeName === f.area || a.record.scopeId === f.area
+      : (a: ResolvedAttempt): boolean => a.record.scopeId === scopeIdOf(unit);
+
+  const reReviews = attempts.filter((a) => a.refusals.length === 0 && identifies(a));
   return reReviews.some((a) => !a.record.findings.some((g) => g.id === f.id));
 }
 

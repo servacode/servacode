@@ -1,5 +1,5 @@
 import { EvidenceOrigin } from './evidenceClass.js';
-import { resolveLiveEngineering } from './liveProof.js';
+import { requestQueuedWork, resolveLiveEngineering } from './liveProof.js';
 import { readAudit } from '../events/audit.js';
 import type { LiveEngineeringInput, LiveRefusal } from './liveProof.js';
 import type { OriginatedRef } from './evidenceClass.js';
@@ -196,24 +196,12 @@ export function resolveServaChain(input: ServaChainInput): ServaChainResolution 
   /*
    * THE REQUEST MUST HAVE PRODUCED WORK.
    *
-   * Only QUEUED means governed work followed. An earlier version refused REFUSED alone, and a
-   * regression caught what that let through: a HALTED request — Serva stopping honestly at
-   * classification or planning — still resolved PROVEN whenever engineering artifacts happened
-   * to exist for the same work item.
-   *
-   * That is the whole failure this module exists to prevent, arriving through the front door:
-   * work that Serva declined to plan, joined to a change built some other way.
+   * The rule lives in `requestQueuedWork` and is shared with `resolveLiveServa`, because this
+   * module once held its own hardened copy while the acceptance path kept the weak one. Two
+   * statements of one rule is how the weak one survives.
    */
-  const turnOutcome = String(turn.body['outcome'] ?? '');
-  if (turnOutcome !== 'QUEUED') {
-    refuse(
-      'OWNER_REQUEST',
-      'the request ended ' +
-        (turnOutcome === '' ? '(no outcome recorded)' : turnOutcome) +
-        ', so no governed work followed it' +
-        (turn.body['haltReason'] === undefined ? '' : ': ' + String(turn.body['haltReason'])),
-    );
-  }
+  const notQueued = requestQueuedWork(turn.body);
+  if (notQueued !== undefined) refuse(notQueued.check, notQueued.detail);
 
   /* ------------------------------------------------------------------ the engineering half */
 

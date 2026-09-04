@@ -564,10 +564,70 @@ describe('the Serva chain needs an owner request that actually caused the work',
       seedTurn(rt.store, { outcome: 'REFUSED', queued: [] });
       const result = resolveServa(rt);
       expect(result.resolved).toBe(false);
-      expect(JSON.stringify(result.refusals)).toContain('no work followed it');
+      expect(JSON.stringify(result.refusals)).toContain('no governed work followed it');
     } finally {
       rt.close();
     }
+  });
+  it('refuses a HALTED request whose engineering half is entirely honest', () => {
+    /*
+     * SSA-REV-A1. This is the acceptance path for the LIVE-SERVA requirement, and it used to
+     * refuse only an outcome of exactly REFUSED. Everything else here is real: a governed run
+     * that COMPLETED, a ChangeSet for the same work item, an independent review, an accepted
+     * commit. What did not happen is the one thing LIVE-SERVA exists to prove — the request
+     * causing the work. Serva halted at classification, and the change was built some other
+     * way.
+     *
+     * The engineering half being flawless is the point. A weaker rule passes exactly here.
+     */
+    const rt = project();
+    try {
+      honestChain(rt);
+      seedRun(rt.store, 'SC-RUN-000001', 'SC-AGENT-010');
+      seedTurn(rt.store, {
+        outcome: 'HALTED',
+        stage: 'CLASSIFIED',
+        queued: [],
+        haltReason: 'the request names no department this company has',
+      });
+      const result = resolveServa(rt);
+      expect(result.resolved, JSON.stringify(result.refusals)).toBe(false);
+      expect(result.refusals.map((r) => r.check)).toContain('OWNER_REQUEST');
+      expect(JSON.stringify(result.refusals)).toContain('no department this company has');
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('refuses a turn whose outcome it does not recognise, rather than reading it as success', () => {
+    /*
+     * The rule is stated as "only QUEUED", not as a list of things to reject, so a turn
+     * outcome added later fails closed here until someone decides it should not.
+     */
+    const rt = project();
+    try {
+      honestChain(rt);
+      seedRun(rt.store, 'SC-RUN-000001', 'SC-AGENT-010');
+      seedTurn(rt.store, { outcome: 'SOMETHING_NEW' });
+      const result = resolveServa(rt);
+      expect(result.resolved).toBe(false);
+      expect(result.refusals.map((r) => r.check)).toContain('OWNER_REQUEST');
+    } finally {
+      rt.close();
+    }
+  });
+
+  it('states the rule once, so hardening one caller cannot leave the other behind', () => {
+    /*
+     * The defect was not that a check was missing. It was that `resolveServaChain` held a
+     * hardened copy of this rule while `resolveLiveServa` — the one wired to the requirement —
+     * held the original. Asserting the shared function is called is what keeps a future
+     * hardening from landing on one of them again.
+     */
+    const source = readFileSync('src/acceptance/servaChain.ts', 'utf8');
+    expect(source).toContain('requestQueuedWork(turn.body)');
+    const live = readFileSync('src/acceptance/liveProof.ts', 'utf8');
+    expect(live).toContain('requestQueuedWork(turn)');
   });
 });
 

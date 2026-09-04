@@ -8,6 +8,7 @@ import type { Store } from '../store/store.js';
 import {
   ScopeCoverage,
   recordScopeReview,
+  findingIdPrefix,
   scopeIdOf,
   type ScopeReviewInput,
 } from './scopeReview.js';
@@ -986,7 +987,7 @@ export async function runScopedSecurityReview(
      */
     const areaFindings = parsed.data.findings.map((f) => ({
       ...f,
-      id: unit.replace(/[^A-Za-z0-9]+/g, '-').toUpperCase() + '/' + f.id,
+      id: findingIdPrefix(unit) + '/' + f.id,
       area,
     }));
     findings.push(...areaFindings);

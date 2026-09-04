@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { aggregateSecurityReview } from '../src/acceptance/securityAggregate.js';
-import { ScopeCoverage, recordScopeReview } from '../src/acceptance/scopeReview.js';
+import {
+  ScopeCoverage,
+  findingIdPrefix,
+  recordScopeReview,
+} from '../src/acceptance/scopeReview.js';
 import { REQUIRED_SCOPE, ReviewVerdict, Severity } from '../src/acceptance/securityReview.js';
 import { reviewUnitsFor } from '../src/acceptance/securityReviewRun.js';
 import { AcceptanceProofSchema, ProofStatus, VerificationType } from '../src/acceptance/proof.js';
@@ -873,6 +877,85 @@ describe('a resolution is evidence, not a field that asserts itself', () => {
     const result = aggregate(rt);
     expect(result.refusals, result.refusals.join('; ')).toEqual([]);
     expect(result.review).toBeDefined();
+  });
+
+  it('corroborates a resolution in a PARTITIONED area, where the unit is not the area', () => {
+    /*
+     * SSA-REV-A3. Corroboration used to be matched by comparing the finding's `area` against
+     * the record's `scopeName`. For an area split into units those hold different things — the
+     * finding says 'bootstrap', the record says 'bootstrap — the command surface' — so no
+     * re-review of a split area could ever corroborate anything. The mechanism did not fail;
+     * it silently never fired, which is the harder failure to notice.
+     *
+     * Fail-safe, so nothing was wrongly suppressed. But a check that cannot succeed is not a
+     * check, and this asserts the legitimate shape actually works.
+     */
+    const AREA = 'bootstrap';
+    const UNIT = 'bootstrap — the command surface';
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === UNIT
+        ? {
+            findings: [
+              {
+                id: findingIdPrefix(UNIT) + '/CLOSED-1',
+                severity: Severity.HIGH,
+                area: AREA,
+                statement: 'was real, and was fixed',
+                evidence: ['src/cli/bootstrap.ts:1'],
+                resolved: true,
+                resolvedAtCommit: COMMIT,
+                resolvedAtTree: TREE,
+                resolvedNote: 'fixed at this tree',
+              },
+            ],
+          }
+        : {},
+    );
+    seedCompleteReview(rt.store, (unit) => (unit === UNIT ? { findings: [] } : {}), 'B');
+
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+    expect(result.review).toBeDefined();
+  });
+
+  it('will not accept a sibling unit of the same area as the corroborating re-review', () => {
+    /*
+     * The precision half, and the reason the fix is not "match on the area instead".
+     *
+     * The units of a split area read different files. Silence from a unit that never looked at
+     * the finding's code says nothing about it, so only the unit that RAISED a finding can
+     * corroborate its resolution — recovered from the id the reviewer namespaced with it.
+     *
+     * Here the raising unit was re-reviewed and STILL REPORTS the finding, while its sibling
+     * looked at the other slice and saw nothing. Matching by area would find the sibling's
+     * silence and close a finding the responsible reviewer just repeated.
+     */
+    const RAISED_BY = 'bootstrap — the command surface';
+    /* Its sibling, 'bootstrap — substrate prerequisites', is seeded silent by the default. */
+    const claimed = {
+      id: findingIdPrefix(RAISED_BY) + '/CLOSED-2',
+      severity: Severity.HIGH,
+      area: 'bootstrap',
+      statement: 'claimed fixed, contradicted by the unit that raised it',
+      evidence: ['src/cli/bootstrap.ts:1'],
+      resolved: true,
+      resolvedAtCommit: COMMIT,
+      resolvedAtTree: TREE,
+      resolvedNote: 'fixed at this tree',
+    };
+
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) => (unit === RAISED_BY ? { findings: [claimed] } : {}));
+    seedCompleteReview(
+      rt.store,
+      (unit) => (unit === RAISED_BY ? { findings: [claimed] } : {}),
+      'B',
+    );
+
+    const result = aggregate(rt);
+    expect(result.review, "a sibling unit must not close another unit's finding").toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('CLOSED-2');
   });
 
   it('silence alone still does not close anything', () => {
