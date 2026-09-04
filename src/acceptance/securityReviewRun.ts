@@ -497,6 +497,14 @@ export const AREA_CONTEXT: Record<string, readonly string[]> = Object.freeze({
    * it did at b4cf7392.
    */
   'Serva self-acceptance authority': ['src/store/store.ts'],
+  /*
+   * The HARD guarantee turns on one equality: the boundary a Producer actually runs behind is
+   * the boundary the sandbox measurement was taken against. `dispatch.ts` computes one
+   * fingerprint and `osQualification.ts` records another, and whether they can differ is
+   * decided by `executionBoundary`/`boundaryMismatch` — which the unit could not see, so it
+   * could only report the equality as load-bearing and unverified (EHB-2).
+   */
+  'Engineering HARD boundary': ['src/substrate/boundary.ts'],
 });
 
 export function reviewUnitsFor(area: string): readonly ReviewUnit[] {

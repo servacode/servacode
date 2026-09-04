@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { brokenSources } from '../src/intelligence/execution/obligations.js';
 import { SourceMarking, Severity, ValidityState } from '../src/vocab/index.js';
 import { resolveApplicability, upstreamGatesFor } from '../src/intelligence/applicability.js';
 import { provenanceRefusal } from '../src/intelligence/provenance.js';
@@ -603,6 +605,47 @@ describe('research is captured, verified, and expires', () => {
 
     const tampered = { ...(capture as object), excerpt: 'Competitor X is free.' } as never;
     expect(captureIsIntact(tampered)).toBe(false);
+  });
+
+  it('a finding resting on a tampered capture is not authoritative, however fresh it is', () => {
+    /*
+     * SPEC: finding OLER-INTEGRITY-1 (MEDIUM), 1.0.1 security review.
+     *
+     * `authoritative` is documented as "authoritative, independent and intact", and intactness
+     * reached the usable-capture list and the captures a VERIFICATION cites — never the
+     * sources the finding itself rests on. Freshness cannot stand in for it: `assessFreshness`
+     * reads `validUntil` alone, so a capture whose excerpt no longer matches its digest is
+     * VALID right up until it expires.
+     */
+    const good = {
+      id: 'SC-SRC-010',
+      excerpt: 'Competitor X charges $49/month.',
+      contentDigest: captureDigest('Competitor X charges $49/month.'),
+    } as never;
+    const tampered = {
+      id: 'SC-SRC-011',
+      excerpt: 'Competitor X is free.',
+      contentDigest: captureDigest('Competitor X charges $19/month.'),
+    } as never;
+
+    const resting = (ids: string[]) =>
+      ({ id: 'SC-RFND-1', sources: ids.map((captureId) => ({ captureId })) }) as never;
+
+    expect(brokenSources(resting(['SC-SRC-010']), [good])).toEqual([]);
+    expect(brokenSources(resting(['SC-SRC-010', 'SC-SRC-011']), [good, tampered])).toEqual([
+      'SC-SRC-011',
+    ]);
+    /* A source that cannot be produced at all is not a source. */
+    expect(brokenSources(resting(['SC-SRC-999']), [good])).toEqual(['SC-SRC-999']);
+  });
+
+  it('finding authority actually consults that rule', () => {
+    /*
+     * The rule existing is not the rule running. This defect was precisely a check that was
+     * written for two of the three places it belonged and not the third.
+     */
+    const source = readFileSync('src/intelligence/execution/obligations.ts', 'utf8');
+    expect(source).toContain('brokenSources(f, mine)');
   });
 
   it('retrieved content is fenced as data and injection attempts are flagged', () => {

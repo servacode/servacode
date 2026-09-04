@@ -180,6 +180,31 @@ export const CREDENTIAL_DENY_FILES: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * The repository's OWN git config, which the user-level deny list does not cover.
+ *
+ * SPEC: finding ENGINEERING-HARD-BOUNDARY/EHB-1 (MEDIUM), 1.0.1 security review.
+ *
+ * `.git` is re-opened for reading because a linked worktree is a pointer into it and git does
+ * not work without it — measured, not assumed. The rationale for that said "the history
+ * discloses nothing the worktree does not", and for objects and refs it is true. It is not
+ * true of `<project>/.git/config`, which is repository-level configuration rather than
+ * content: remote URLs, which can carry a token inline.
+ *
+ * `~/.gitconfig` and `~/.git-credentials` were already denied. The repo-level file is the same
+ * class of thing and was not, which is the only reason it is named separately here.
+ *
+ * WHAT IS NOT YET PROVEN, STATED RATHER THAN IMPLIED: this profile already depends on ALLOW
+ * beating DENY for a narrower path — the project is denied and `.git` re-opened inside it —
+ * so a DENY narrower than an ALLOW is the reverse precedence, and this build has not measured
+ * it. The deny is declared on both channels the sandbox offers; whether the sandbox honours it
+ * over the `.git` allow is a question for a probe, not for this comment. Until that
+ * measurement exists, treat the repo config as narrowed-by-intent and not as contained.
+ */
+export function projectGitConfig(projectPath: string): string {
+  return join(projectPath, '.git', 'config');
+}
+
+/**
  * The regions a Producer has no business reading, denied as ROOTS rather than as a list
  * of specific things worth protecting.
  *
@@ -285,6 +310,8 @@ export function buildSandboxProfile(input: SandboxProfileInput): GeneratedSandbo
           workspacesRoot,
           '~/',
           ...CREDENTIAL_DENY_FILES,
+          /* Named after `project` is denied and before `.git` is re-opened below. */
+          map(projectGitConfig(hostProject)),
         ],
         /*
          * The worktree, and the repository it is a worktree OF.
@@ -310,7 +337,10 @@ export function buildSandboxProfile(input: SandboxProfileInput): GeneratedSandbo
         strictAllowlist: input.networkAllowed !== true,
       },
       credentials: {
-        files: CREDENTIAL_DENY_FILES.map((path) => ({ path, mode: 'deny' })),
+        files: [...CREDENTIAL_DENY_FILES, map(projectGitConfig(hostProject))].map((path) => ({
+          path,
+          mode: 'deny',
+        })),
         envVars: CREDENTIAL_DENY_ENV.map((name) => ({ name, mode: 'deny' })),
       },
     },

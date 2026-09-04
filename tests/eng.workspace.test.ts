@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
+  ALLOWED_GIT_VERBS,
   FORBIDDEN_GIT_VERBS,
   GitService,
   assertNotOptionLike,
@@ -86,8 +87,65 @@ describe('Serva owns Git, and the verb set is closed', () => {
     for (const verb of ['push', 'merge', 'rebase', 'remote', 'config', 'reset']) {
       await expect(
         (git as unknown as { git: (a: string[]) => Promise<unknown> })['git']([verb]),
-      ).rejects.toThrowError(/not a Phase 4 capability/);
+      ).rejects.toThrowError(/not one of the operations this service performs/);
     }
+  });
+
+  it('refuses a verb nobody thought to forbid, because the set is CLOSED', async () => {
+    /*
+     * SPEC: finding GIT-INTEGRITY-01 (MEDIUM), 1.0.1 security review.
+     *
+     * The header promised a closed verb set "absent by construction rather than blocked by a
+     * check somebody could forget to write", and the choke point was a denylist — so every
+     * verb nobody had thought of went through. None of these is on the forbidden list, and
+     * `checkout`, `apply` and `update-ref` are quite enough to move a branch or rewrite a
+     * worktree under an accepted change.
+     */
+    const { repo } = makeRepo();
+    const git = new GitService({ repoRoot: repo });
+    for (const verb of [
+      'checkout',
+      'restore',
+      'stash',
+      'update-ref',
+      'symbolic-ref',
+      'apply',
+      'am',
+      'cherry-pick',
+      'revert',
+      'tag',
+      'mv',
+      'rm',
+      'gc',
+      'reflog',
+    ]) {
+      expect(FORBIDDEN_GIT_VERBS, verb + ' is the point: nobody forbade it').not.toContain(verb);
+      await expect(
+        (git as unknown as { git: (a: string[]) => Promise<unknown> })['git']([verb]),
+        verb + ' passed a closed verb set',
+      ).rejects.toThrowError(/not one of the operations this service performs/);
+    }
+  });
+
+  it('an invocation carrying no subcommand at all is refused', async () => {
+    /* All flags and no verb is not an operation; it used to fall through the guard entirely. */
+    const { repo } = makeRepo();
+    const git = new GitService({ repoRoot: repo });
+    await expect(
+      (git as unknown as { git: (a: string[]) => Promise<unknown> })['git'](['--no-pager']),
+    ).rejects.toThrowError(/no subcommand/);
+  });
+
+  it('nothing forbidden can appear in the allowed set, by construction', () => {
+    /*
+     * The two lists are tied together in the SOURCE — the allowed set is derived by removing
+     * the forbidden one — so this cannot be broken by editing a list, only by removing the
+     * derivation. Asserted anyway: the property is what matters, not how it is currently got.
+     */
+    for (const v of FORBIDDEN_GIT_VERBS) {
+      expect(ALLOWED_GIT_VERBS, v + ' is both allowed and forbidden').not.toContain(v);
+    }
+    expect(ALLOWED_GIT_VERBS.length, 'the verb set is small and deliberate').toBe(11);
   });
 
   it('the forbidden list names what Phase 4 must never do', () => {

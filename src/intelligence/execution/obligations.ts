@@ -249,6 +249,33 @@ interface ResearchEvidence {
   readonly verified: boolean;
 }
 
+/**
+ * Which of a finding's own sources no longer are what the finding cited.
+ *
+ * SPEC: finding OLER-INTEGRITY-1 (MEDIUM), 1.0.1 security review.
+ *
+ * Named and exported so the rule can be tested as a rule. `authoritative` is documented as
+ * "authoritative, independent and intact", and intactness was wired for the usable-capture
+ * list and for the captures a VERIFICATION cites — never for the sources the finding itself
+ * rests on. Freshness does not cover it: `assessFreshness` reads `validUntil` alone, so a
+ * capture whose excerpt no longer matches its digest stays VALID until it expires.
+ *
+ * A missing capture counts as broken. A source that cannot be produced is not a source, and
+ * treating absence as "nothing to check" is how a citation stops meaning anything.
+ */
+export function brokenSources(
+  finding: ResearchFinding,
+  captures: readonly SourceCapture[],
+): readonly string[] {
+  const byId = new Map(captures.map((c) => [c.id, c]));
+  return finding.sources
+    .map((ref) => ref.captureId)
+    .filter((id) => {
+      const capture = byId.get(id);
+      return capture === undefined || !captureIsIntact(capture);
+    });
+}
+
 function researchEvidence(deps: ObligationDeps, request: ResearchRequest): ResearchEvidence {
   const allCaptures = repository(
     deps.store,
@@ -314,6 +341,34 @@ function researchEvidence(deps: ObligationDeps, request: ResearchRequest): Resea
     if (verdicts.get(f.id)?.state === ValidityState.STALE) {
       refusals.push(
         'finding ' + f.id + ' is stale: ' + (verdicts.get(f.id)?.reason ?? 'it has expired'),
+      );
+      continue;
+    }
+
+    /*
+     * AND THE CAPTURES THE FINDING ITSELF RESTS ON MUST STILL BE WHAT THEY WERE.
+     *
+     * SPEC: finding OLER-INTEGRITY-1 (MEDIUM), 1.0.1 security review.
+     *
+     * `authoritative` is documented as "authoritative, independent and intact", and intactness
+     * was wired for two of the three: the usable-capture list above, and — inside
+     * `verificationRefusal` — the captures the VERIFICATION cites. The finding's own sources
+     * were never checked. Freshness does not cover it: `assessFreshness` reads `validUntil`
+     * alone, so a capture whose excerpt no longer matches its content digest is VALID until it
+     * expires, and a verification citing some other intact capture could discharge a claim
+     * resting on it.
+     *
+     * A digest that no longer matches means the passage relied on is not the passage that was
+     * fetched. Whatever else is true of the finding, it no longer rests on what it cites.
+     */
+    const broken = brokenSources(f, mine);
+    if (broken.length > 0) {
+      refusals.push(
+        'finding ' +
+          f.id +
+          ' rests on ' +
+          broken.join(', ') +
+          ', which no longer matches what was fetched',
       );
       continue;
     }

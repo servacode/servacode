@@ -69,7 +69,34 @@ export function defaultInstallRoot(): string {
  * which is why switching between versions switched nothing — there was nothing on the other
  * end of the pointer to run.
  */
+export const VERSION_NAME = /^\d+\.\d+\.\d+$/;
+
+/**
+ * THE NAME IS CHECKED WHERE THE PATH IS MADE, NOT WHERE SOMEBODY REMEMBERS TO.
+ *
+ * SPEC: findings IUR-REVIEW-M1 and IUR-CAPTURE-1 (MEDIUM), 1.0.1 security review.
+ *
+ * `recordInstalled` was corrected once for creating a directory before validating the name it
+ * came from. The correction went into that function, and `capture()` — which does the same
+ * derivation and then `rmSync`s the result — kept the old order. Fixing the caller that was
+ * reported leaves every other caller exactly as it was, so the check moved to the one place
+ * every version path is built: a path that cannot be derived cannot be deleted.
+ *
+ * `join` collapses `..`, so a name carrying traversal resolves outside `versions/` and reads
+ * as an ordinary path afterwards. There is nothing downstream that can tell the difference,
+ * which is why this refuses here rather than reporting later.
+ */
 export function versionPayload(root: string, version: string): string {
+  if (!VERSION_NAME.test(version)) {
+    return fail({
+      code: 'E_VALIDATION',
+      message: 'Not a version number: ' + JSON.stringify(version),
+      remedy:
+        'A version directory is named x.y.z. Nothing else is a version, and no path is built from it.',
+      details: { version },
+      specRef: '§34',
+    });
+  }
   return join(root, VERSIONS_DIR, version, 'package');
 }
 
@@ -79,6 +106,13 @@ export function versionEntrypoint(root: string, version: string): string {
 
 /** Whether a recorded version is one this machine could actually run. */
 export function isRunnable(root: string, version: string): boolean {
+  /*
+   * ANSWERS, RATHER THAN REFUSES. `planSwitch` asks this about a version a person typed, and
+   * the honest answer for a name that is not a version is "no, that cannot run" — which the
+   * caller then reports properly. Throwing here would turn a mistyped argument into a crash,
+   * so the refusal stays where a path is actually BUILT.
+   */
+  if (!VERSION_NAME.test(version)) return false;
   return existsSync(versionEntrypoint(root, version));
 }
 

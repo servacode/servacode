@@ -256,8 +256,21 @@ export async function runRecipe(
     durationMs: result.durationMs,
     exitCode: result.exitCode,
     outcome,
+    /*
+     * REDACTED LIKE EVERY OTHER FREE-TEXT CHANNEL INTO CANON.
+     *
+     * SPEC: finding SEC-REV-EXEC-1 (MEDIUM), 1.0.1 security review.
+     *
+     * stdout, stderr and argv all pass through `redactSecrets` before they are written; this
+     * one string did not, and a substrate refusal reason carries paths and command fragments.
+     * Canon is immutable, so an unredacted value here cannot be withdrawn later — which is
+     * exactly why the rule is "before persistence" and not "before display".
+     *
+     * Runtime-written today rather than agent input. That bounds the exposure; it does not
+     * make this the one channel that gets to skip the rule.
+     */
     terminationReason: result.refusedBySubstrate
-      ? (result.refusalReason ?? 'refused by substrate')
+      ? redactSecrets(result.refusalReason ?? 'refused by substrate').text
       : result.timedOut
         ? 'wall-clock timeout after ' + String(req.recipe.timeoutMs) + 'ms'
         : 'exited ' + String(result.exitCode),

@@ -22,6 +22,7 @@ import {
   removeVersion,
   renderInstallation,
   versionEntrypoint,
+  versionPayload,
   isRunnable,
 } from '../src/portability/install.js';
 import { SCHEMA_VERSION, SERVA_VERSION } from '../src/portability/version.js';
@@ -29,7 +30,7 @@ import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
 import { cmdInstall } from '../src/cli/commands/portability.js';
 import { parseArgs } from '../src/cli/main.js';
-import { resolveActive } from '../src/portability/activeVersion.js';
+import { capture, resolveActive } from '../src/portability/activeVersion.js';
 
 /**
  * AN UPDATE WITH NO WAY BACK IS A GAMBLE.
@@ -940,6 +941,52 @@ describe('a version is validated before anything is created from it', () => {
       expect(after, 'a rejected version must not leave a directory').toEqual(before);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('no version path can be built from a name that is not a version', () => {
+    /*
+     * SPEC: finding IUR-CAPTURE-1 (MEDIUM), 1.0.1 security review.
+     *
+     * `recordInstalled` was corrected for creating a directory before checking the name. The
+     * correction stayed in that function, and `capture()` kept the old order — deriving the
+     * same path and then rmSync-ing it. So the check moved to where paths are BUILT: a path
+     * that cannot be derived cannot be deleted, whatever a future caller passes.
+     */
+    for (const bad of ['../../escaped', 'a/b', '1.0', 'latest', '', '1.0.0/../..']) {
+      expect(() => versionPayload('/root', bad), JSON.stringify(bad)).toThrow(/Not a version/);
+      expect(() => versionEntrypoint('/root', bad), JSON.stringify(bad)).toThrow(/Not a version/);
+    }
+    expect(versionPayload('/root', '1.0.1')).toContain('1.0.1');
+  });
+
+  it('asking whether a bad name could run is answered, not refused', () => {
+    /*
+     * The other half. `planSwitch` asks this about a version a PERSON typed, and the honest
+     * answer for a name that is not a version is "no". Throwing would turn a typo into a crash
+     * and push the refusal to the wrong layer.
+     */
+    expect(isRunnable('/root', '../../escaped')).toBe(false);
+  });
+
+  it('capture refuses a bad version before it deletes anything', () => {
+    /*
+     * The reported instance, kept as its own test because the class fix has to be shown
+     * holding HERE — capture is the dangerous one: it rmSync's the path it derives.
+     */
+    const parent = mkdtempSync(join(tmpdir(), 'serva-capture-'));
+    const root = join(parent, 'install-root');
+    mkdirSync(root, { recursive: true });
+    try {
+      /* Synchronously, before a promise exists — the refusal precedes every effect. */
+      expect(() => capture({ root, version: '../../escaped', packageRoot: process.cwd() })).toThrow(
+        /Not a version/,
+      );
+      expect(readdirSync(parent), 'nothing was created or removed beside the root').toEqual([
+        'install-root',
+      ]);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 

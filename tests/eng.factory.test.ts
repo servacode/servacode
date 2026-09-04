@@ -1147,6 +1147,51 @@ describe('rework is bounded and acceptance is deterministic', () => {
     await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(/is FAIL/);
   }, 90_000);
 
+  it('a passing review by somebody other than the named reviewer does not authorise', async () => {
+    /*
+     * SPEC: finding EAA-REV-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The boundary accepted any persisted PASS for the ChangeSet that the producer had not
+     * written. Whether it came from the reviewer the work item NAMED was checked in a
+     * different function, against the work item rather than the review actually consumed — so
+     * the guarantee rested on caller code the boundary cannot see.
+     */
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(
+      join(w.path, 'src', 'app.js'),
+      'module.exports = 2;' + String.fromCharCode(92) + 'n',
+      'utf8',
+    );
+
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    expect(v.attemptOutcome).toBe('ACCEPTED');
+
+    /* A real, non-producer reviewer — simply not the one this work item was assigned. */
+    const tx = f.store.begin();
+    tx.putCanon(REVIEW_CANON_TYPE, 'SC-REVIEW-STRANGER', {
+      id: 'SC-REVIEW-STRANGER',
+      workItemId: item.workItemId,
+      changeSetId: v.changeSet.changeSetId,
+      criterionId: 'EC-REVIEW',
+      reviewerAgentId: 'SC-AGENT-201',
+      producerAgentId: 'SC-AGENT-150',
+      runRef: 'SC-RUN-000910',
+      outcome: 'PASS',
+      detail: 'looks fine to me',
+      verdict: {},
+      capabilityDigest: 'e'.repeat(64),
+      recordedAt: '2026-08-25T00:00:00.000Z',
+    });
+    tx.commit();
+
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(
+      /No passing review by the reviewer SC-AGENT-200/,
+    );
+    expect(await f.git.headCommit(w.path), 'nothing was committed').toBe(f.base);
+  }, 90_000);
+
   it('routing follows the canonical verdict taxonomy', () => {
     expect(routeVerdict(GateVerdict.PASS)).toBe('ACCEPTED');
     expect(routeVerdict(GateVerdict.PASS_WITH_QUALIFICATION)).toBe('ACCEPTED');
@@ -1289,6 +1334,28 @@ describe('a credential printed by a build does not become permanent record', () 
     const r = redactSecrets(plain);
     expect(r.text).toBe(plain);
     expect(r.count).toBe(0);
+  });
+
+  it('every free-text channel into canon is redacted, including the termination reason', () => {
+    /*
+     * SPEC: finding SEC-REV-EXEC-1 (MEDIUM), 1.0.1 security review.
+     *
+     * stdout, stderr and argv all passed through `redactSecrets` before being written;
+     * `terminationReason` did not, and a substrate refusal reason carries paths and command
+     * fragments. Canon is immutable, so an unredacted value there cannot be withdrawn — which
+     * is why the rule is "before persistence", not "before display".
+     *
+     * Asserted on the composition rather than on a live substrate refusal, because provoking a
+     * refusal that carries a credential means asking the substrate to leak one. What the rule
+     * does to such a string is checked directly; that this channel applies it is checked here.
+     */
+    const reason = 'refused: recipe used --token=' + 'sk-ant-api03-' + 'K7mQ2wX9tLpV4nB6cYzR8dHs';
+    expect(redactSecrets(reason).text, 'the rule itself removes it').not.toContain(
+      'K7mQ2wX9tLpV4nB6cYzR8dHs',
+    );
+
+    const source = readFileSync('src/engineering/execution.ts', 'utf8');
+    expect(source).toContain("redactSecrets(result.refusalReason ?? 'refused by substrate').text");
   });
 
   it('leaves ordinary output exactly as it was', () => {

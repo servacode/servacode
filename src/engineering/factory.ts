@@ -494,6 +494,58 @@ export class EngineeringFactory {
       });
     }
 
+    /*
+     * AND IT MUST BE THE REVIEWER THIS WORK ITEM NAMED, HOLDING AUTHORITY TO JUDGE.
+     *
+     * SPEC: finding EAA-REV-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The block above accepted any persisted review for the ChangeSet that the producer did
+     * not write. Whether that reviewer was the designated one, and whether it holds a verifier
+     * authority at all, was checked only in `refusal()` — a different function, against the
+     * work item rather than against the review actually consumed. So the SC-POL-006 guarantee
+     * at the integration boundary rested on whoever set `expectedReviewerAgentId` somewhere
+     * else, which is precisely what a boundary is supposed not to do.
+     *
+     * The authorising PASS must come from the named reviewer. A dissent from ANY non-producer
+     * review still blocks, and is checked FIRST so the refusal names the rejection rather than
+     * its absence: widening who can stop a change is safe, and widening who can authorise one
+     * is the whole problem.
+     */
+    const authorising = reviews.find(
+      (r) => r.reviewerAgentId === item.reviewerAgentId && r.outcome === 'PASS',
+    );
+    if (authorising === undefined) {
+      return fail({
+        code: 'E_VALIDATION',
+        message:
+          'No passing review by the reviewer ' +
+          item.reviewerAgentId +
+          ' that work item ' +
+          item.workItemId +
+          ' names',
+        remedy:
+          'A change is integrated on the judgement of the reviewer it was assigned, not of whoever wrote a review for it.',
+        details: {
+          changeSetId: verification.changeSet.changeSetId,
+          expected: item.reviewerAgentId,
+          found: reviews.map((r) => r.reviewerAgentId + ':' + r.outcome),
+        },
+        specRef: 'Phase 4 §19, SC-POL-006',
+      });
+    }
+
+    const authority = this.deps.registry.get(item.reviewerAgentId).authorityLevel;
+    if (!VERIFIER_AUTHORITIES.has(authority.toUpperCase())) {
+      return fail({
+        code: 'E_GATE_AUTHORITY',
+        message:
+          'Reviewer ' + item.reviewerAgentId + ' holds ' + authority + ', which cannot certify',
+        remedy: 'An agent that produces cannot certify (SC-POL-006).',
+        details: { changeSetId: verification.changeSet.changeSetId, authority },
+        specRef: 'SC-POL-006',
+      });
+    }
+
     if (verification.attemptOutcome !== AttemptOutcome.ACCEPTED) {
       return fail({
         code: 'E_INVALID_TRANSITION',

@@ -80,6 +80,13 @@ export function gitVerb(args: readonly string[]): string | undefined {
   return undefined;
 }
 
+/**
+ * WHAT THIS PHASE MUST NEVER DO.
+ *
+ * Not the gate any more, and not decoration either: the allowed set below is DERIVED by
+ * removing these, so a verb named here cannot be admitted by anyone adding to that list. A
+ * safeguard nothing consumes is a comment, and this repository refuses those.
+ */
 export const FORBIDDEN_GIT_VERBS: readonly string[] = Object.freeze([
   'push',
   'merge',
@@ -94,6 +101,42 @@ export const FORBIDDEN_GIT_VERBS: readonly string[] = Object.freeze([
   'clean',
   'filter-branch',
 ]);
+
+/**
+ * THE CLOSED VERB SET, ACTUALLY CLOSED.
+ *
+ * SPEC: finding GIT-INTEGRITY-01 (MEDIUM), 1.0.1 security review.
+ *
+ * The header of this module promises "a closed verb set — only the operations named here
+ * exist, absent by construction rather than blocked by a check somebody could forget to
+ * write". The choke point implemented a DENYLIST, so everything nobody had thought to forbid
+ * was permitted: `checkout`, `stash`, `update-ref`, `apply`, `cherry-pick`, `revert`, `tag`,
+ * `rm`, `gc` and the rest all passed it — measured, not supposed: `git checkout` ran.
+ *
+ * Nothing reached them, because every method here builds a literal verb. That is the argument
+ * for closing the set rather than against it: the guarantee rested on every future caller
+ * continuing to write a literal, which is exactly what the header says it does not rest on.
+ *
+ * These eleven are what this service issues, minus anything forbidden — so the two lists
+ * cannot disagree, and widening this one cannot re-admit a forbidden verb.
+ */
+const PERFORMED_GIT_VERBS: readonly string[] = Object.freeze([
+  'add',
+  'branch',
+  'cat-file',
+  'commit',
+  'diff',
+  'hash-object',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'status',
+  'worktree',
+]);
+
+export const ALLOWED_GIT_VERBS: readonly string[] = Object.freeze(
+  PERFORMED_GIT_VERBS.filter((verb) => !FORBIDDEN_GIT_VERBS.includes(verb)),
+);
 
 /** A ref name Serva is willing to create. Deliberately narrow. */
 const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/;
@@ -207,12 +250,15 @@ export class GitService {
   /** The single choke point. Every Git call in Serva passes through here. */
   private async git(args: readonly string[], cwd = this.repoRoot): Promise<GitResult> {
     const verb = gitVerb(args);
-    if (verb !== undefined && FORBIDDEN_GIT_VERBS.includes(verb)) {
+    if (verb === undefined || !ALLOWED_GIT_VERBS.includes(verb)) {
       return fail({
         code: 'E_CAPABILITY_NOT_ENABLED',
-        message: 'git ' + verb + ' is not a Phase 4 capability',
+        message:
+          verb === undefined
+            ? 'a git invocation with no subcommand is not an operation this service performs'
+            : 'git ' + verb + ' is not one of the operations this service performs',
         remedy:
-          'Phase 4 performs no remote Git write and does not rewrite shared history. Publishing an accepted change belongs to a later phase.',
+          'The verb set is closed. Phase 4 performs no remote Git write and does not rewrite shared history; anything else is added deliberately, to ALLOWED_GIT_VERBS, or not at all.',
         details: { verb, args: [...args] },
         specRef: 'Phase 4 §22, §31',
       });
