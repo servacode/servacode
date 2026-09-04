@@ -1082,6 +1082,16 @@ describe('SECURITY-INDEPENDENT is decided by the review, not by the proof that c
           coverage: ScopeCoverage.COMPLETE,
           filesReviewed: ['src/x.ts'],
           filesOmitted: [],
+          /*
+           * A unit that DECLARES context has not reviewed anything until that context reached
+           * it, so a fixture describing a complete review has to show it arriving. Taken from
+           * the scope map rather than written out, so declaring context somewhere new cannot
+           * leave this fixture quietly describing a review that could not have happened.
+           */
+          contextRead: reviewUnitsFor(area)
+            .find((u) => u.unit === unit)
+            ?.context.map((prefix) => (prefix.endsWith('.ts') ? prefix : prefix + 'seen.ts')),
+          contextOmitted: [],
           findings: [],
           verdict: ReviewVerdict.ACCEPTED,
           terminalOutcome: 'COMPLETED',

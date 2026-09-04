@@ -658,14 +658,22 @@ describe('the review is scoped by area, because one reviewer cannot read the who
    * exercise the "no source mapped" refusal instead of the path under test — which is itself
    * worth knowing, and is covered separately below.
    */
+  /*
+   * One seed file per prefix, AND every file the scope map declares as context.
+   *
+   * Without the second half this fixture describes a world in which no unit declares context —
+   * so the rules about context could not fail here however broken they were. A harness that
+   * cannot see the thing it is meant to check agrees with everything.
+   */
   const FILES = Object.freeze([
     ...new Set(
       REQUIRED_SCOPE.flatMap((area) =>
-        reviewUnitsFor(area).flatMap((unit) =>
-          unit.prefixes.map((prefix) =>
+        reviewUnitsFor(area).flatMap((unit) => [
+          ...unit.prefixes.map((prefix) =>
             prefix.endsWith('/') ? prefix + 'seed.ts' : prefix + '.ts',
           ),
-        ),
+          ...unit.context.map((prefix) => (prefix.endsWith('/') ? prefix + 'seed.ts' : prefix)),
+        ]),
       ),
     ),
   ]);
@@ -717,6 +725,88 @@ describe('the review is scoped by area, because one reviewer cannot read the who
       store: rt.store,
     });
   }
+
+  /*
+   * SPEC: the omission at 7595c20a, and the acceptance bar set after it.
+   *
+   * Two conditions that look alike in a summary and mean opposite things. They are asserted
+   * apart, in both directions, because folding them together is how one of them disappears.
+   */
+  const CONTEXT_UNIT = 'application action authority';
+  const DECLARED_CONTEXT = 'src/intelligence/app.ts';
+
+  function scopedWith(
+    rt: ServaRuntime,
+    runtime: Parameters<typeof runScopedSecurityReview>[0]['runtime'],
+    readFile: (f: string) => string,
+    onlyUnits: readonly string[],
+  ) {
+    return runScopedSecurityReview({
+      runtime,
+      workItemId: 'SC-WI-1',
+      repository: REPO,
+      storePath: rt.root,
+      implementationProducers: [PRODUCER],
+      reviewedAt: '2026-08-25T00:00:00.000Z',
+      allFiles: FILES,
+      readFile,
+      store: rt.store,
+      onlyUnits: [...onlyUnits],
+    });
+  }
+
+  const persisted = (rt: ServaRuntime, unit: string) =>
+    listScopeReviews(rt.store).find((r) => r.scopeName === unit);
+
+  it('required context that did not fit makes the judgement NOT_VERIFIED, not merely noted', async () => {
+    const rt = project();
+    const { runtime } = areaRuntime(clean);
+    /* The declared context is too large for its budget; every subject fits comfortably. */
+    const outcome = await scopedWith(
+      rt,
+      runtime,
+      (f) => (f === DECLARED_CONTEXT ? 'x'.repeat(200_000) : 'export const x = 1;'),
+      [CONTEXT_UNIT],
+    );
+
+    const record = persisted(rt, CONTEXT_UNIT);
+    expect(record?.contextOmitted).toEqual([DECLARED_CONTEXT]);
+    expect(record?.verdict, 'the reviewer said ACCEPTED; it was not equipped to').toBe(
+      ReviewVerdict.NOT_VERIFIED,
+    );
+    expect(String(record?.refusal)).toContain(DECLARED_CONTEXT);
+    expect(outcome.refusals.join(' ')).toContain(DECLARED_CONTEXT);
+
+    /* And coverage is untouched: every SUBJECT was reviewed, which is what coverage means. */
+    expect(record?.coverage).toBe(ScopeCoverage.COMPLETE);
+    expect(record?.filesOmitted).toEqual([]);
+  });
+
+  it('a subject that did not fit is PARTIAL coverage, and says nothing about context', async () => {
+    /*
+     * The opposite direction. A subject went unreviewed — that is what PARTIAL is for — while
+     * the declared context arrived exactly as it should, so nothing here is a context problem.
+     */
+    const rt = project();
+    const { runtime } = areaRuntime(clean);
+    /* Taken from the unit's OWN prefixes, not guessed by path shape: a file this unit owns. */
+    const owned = reviewUnitsFor('application action authority')[0]?.prefixes ?? [];
+    const subject = FILES.find((f) => owned.some((prefix) => f.startsWith(prefix)));
+    expect(subject, 'the fixture must contain a file this unit owns').toBeDefined();
+    const outcome = await scopedWith(
+      rt,
+      runtime,
+      (f) => (f === subject ? 'y'.repeat(300_000) : 'export const x = 1;'),
+      [CONTEXT_UNIT],
+    );
+
+    const record = persisted(rt, CONTEXT_UNIT);
+    expect(record?.filesOmitted).toEqual([String(subject)]);
+    expect(record?.coverage).toBe(ScopeCoverage.PARTIAL);
+    expect(record?.contextOmitted, 'the context arrived; only a subject did not').toEqual([]);
+    expect(record?.contextRead).toEqual([DECLARED_CONTEXT]);
+    expect(outcome.refusals.join(' ')).not.toContain('declared context did not reach');
+  });
 
   it('dispatches one run per required area, each told only its own area', async () => {
     const rt = project();
@@ -1238,6 +1328,90 @@ describe('an area too large for one sitting is split, and the split must lose no
       expect(source.files.length, unit.unit).toBeGreaterThan(0);
       expect(source.omitted, unit.unit + ' still omits files').toEqual([]);
     }
+  });
+
+  it('every declared unit fits its own budget, context included', () => {
+    /*
+     * SPEC: the omission at 7595c20a. `src/store/store.ts` was declared context for
+     * `Serva self-acceptance authority`, whose own files already came to 245k of a 260k
+     * budget — so the context did not fit, and the unit judged the store's guarantees
+     * without the store. The reviewer was not told anything false; it was told nothing.
+     *
+     * Every unit, not the one that failed: a budget checked only where it already broke is a
+     * budget nobody is holding.
+     */
+    for (const area of REQUIRED_SCOPE) {
+      for (const unit of reviewUnitsFor(area)) {
+        const source = reviewAreaFiles(
+          area,
+          REAL_FILES,
+          (f) => readFileSync(f, 'utf8'),
+          260_000,
+          unit.prefixes,
+          unit.except,
+          unit.context,
+        );
+        expect(source.omitted, unit.unit + ' omits files it owns').toEqual([]);
+        expect(
+          source.contextOmitted,
+          unit.unit + ' was given context it never saw, so it judged without it',
+        ).toEqual([]);
+        expect(source.context.length, unit.unit + ' declares context that did not reach it').toBe(
+          unit.context.length,
+        );
+      }
+    }
+  });
+
+  it('context cannot cost a unit its coverage', () => {
+    /*
+     * The rule, stated on a fixture rather than on today's file sizes, so it keeps holding
+     * when the files change. Owned files are gathered first and against their own budget:
+     * declaring more to READ can never turn a COMPLETE unit PARTIAL, and a large subject can
+     * never push out the guard the unit needs to judge it.
+     */
+    const files = ['src/own/a.ts', 'src/own/b.ts', 'src/elsewhere/guard.ts'];
+    const text: Record<string, string> = {
+      'src/own/a.ts': 'a'.repeat(900),
+      'src/own/b.ts': 'b'.repeat(900),
+      'src/elsewhere/guard.ts': 'g'.repeat(900),
+    };
+
+    const source = reviewAreaFiles(
+      'anything',
+      files,
+      (f) => String(text[f]),
+      2_000 /* fits both owned files and nothing more */,
+      ['src/own/'],
+      [],
+      ['src/elsewhere/'],
+      1_000 /* the context budget, separate by design */,
+    );
+
+    expect(source.files, 'both subjects were read').toEqual(['src/own/a.ts', 'src/own/b.ts']);
+    expect(source.omitted, 'coverage is untouched by context').toEqual([]);
+    expect(source.context, 'the guard was read too').toEqual(['src/elsewhere/guard.ts']);
+    expect(source.contextOmitted).toEqual([]);
+  });
+
+  it('context that does not fit is reported, never quietly dropped', () => {
+    const files = ['src/own/a.ts', 'src/elsewhere/huge.ts'];
+    const text: Record<string, string> = {
+      'src/own/a.ts': 'a'.repeat(100),
+      'src/elsewhere/huge.ts': 'h'.repeat(5_000),
+    };
+    const source = reviewAreaFiles(
+      'anything',
+      files,
+      (f) => String(text[f]),
+      2_000,
+      ['src/own/'],
+      [],
+      ['src/elsewhere/'],
+      1_000,
+    );
+    expect(source.omitted, 'the subject still fits, so coverage is COMPLETE').toEqual([]);
+    expect(source.contextOmitted).toEqual(['src/elsewhere/huge.ts']);
   });
 
   it('the whole area does NOT fit, which is why it is split', () => {

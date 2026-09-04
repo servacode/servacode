@@ -138,7 +138,54 @@ export function resolveSecurityReviewAttempt(
     refusals.push(record.reviewerAgentId + ' produced implementation in this store');
   }
 
+  /*
+   * DID THE UNIT ACTUALLY GET WHAT IT NEEDED TO DECIDE?
+   *
+   * SPEC: the omission at 7595c20a, and the acceptance bar set after it.
+   *
+   * Whether a unit REQUIRES context is derived here from the scope declaration in code — not
+   * read off the record, which is the thing being checked. A record for a unit that declares
+   * context, and that shows none of it arriving, is not a weaker judgement: it is a judgement
+   * of a question the reviewer was not equipped to answer, and it carries no authority
+   * whatever verdict it states.
+   *
+   * Enforced at the consumer as well as at the writer, because a record is evidence only when
+   * something that did not write it agrees. Subject coverage is checked elsewhere and stays
+   * separate: PARTIAL means a subject went unreviewed, and this means a guard never arrived.
+   */
+  const required = requiredContextFor(record.scopeName);
+  if (required.length > 0) {
+    const read = record.contextRead ?? [];
+    const missing = required.filter((prefix) => !read.some((f) => f.startsWith(prefix)));
+    if (missing.length > 0) {
+      refusals.push(
+        where +
+          ' requires context it was not given (' +
+          missing.join(', ') +
+          '), so it judged its files without what decides them',
+      );
+    }
+  }
+  if ((record.contextOmitted ?? []).length > 0) {
+    refusals.push(
+      where +
+        ' was reviewed without declared context (' +
+        (record.contextOmitted ?? []).join(', ') +
+        '), which does not make its verdict weaker — it makes it unfounded',
+    );
+  }
+
   return { record, refusals };
+}
+
+/** What this UNIT is declared to need, derived from the scope map rather than from a record. */
+function requiredContextFor(scopeName: string): readonly string[] {
+  for (const area of REQUIRED_SCOPE) {
+    for (const unit of reviewUnitsFor(area)) {
+      if (unit.unit === scopeName) return unit.context;
+    }
+  }
+  return [];
 }
 
 const VERIFIER_AUTHORITIES: readonly string[] = ['VERIFY', 'REVIEW', 'ASSESS'];

@@ -542,9 +542,14 @@ export function partitionGap(area: string, allFiles: readonly string[]): readonl
 export interface AreaSource {
   readonly area: string;
   readonly content: string;
+  /** The files this unit OWNS and was given. Coverage is decided against these. */
   readonly files: readonly string[];
-  /** Files the area matched but that did not fit its budget. Never silently dropped. */
+  /** Owned files that did not fit the budget. Never silently dropped. */
   readonly omitted: readonly string[];
+  /** Context the unit was given: read to judge its own files, never judged itself. */
+  readonly context: readonly string[];
+  /** Context that did not fit. Reported, because a guard nobody saw is a guard nobody saw. */
+  readonly contextOmitted: readonly string[];
 }
 
 /**
@@ -564,38 +569,69 @@ export function reviewAreaFiles(
   except: readonly string[] = [],
   /** Files owned elsewhere that this unit must read anyway. Bypasses `except`. */
   context: readonly string[] = [],
+  /** Context has its OWN budget: reading more must never cost a unit its coverage. */
+  contextBudgetChars = 60_000,
 ): AreaSource {
   const prefixes = prefixOverride ?? AREA_SOURCES[area] ?? [];
-  const matched = allFiles.filter(
-    (f) =>
-      context.some((prefix) => f.startsWith(prefix)) ||
-      (prefixes.some((prefix) => f.startsWith(prefix)) &&
-        !except.some((prefix) => f.startsWith(prefix))),
+  const owns = (f: string): boolean =>
+    prefixes.some((prefix) => f.startsWith(prefix)) &&
+    !except.some((prefix) => f.startsWith(prefix));
+
+  const ownedFiles = allFiles.filter(owns);
+  const contextFiles = allFiles.filter(
+    (f) => !owns(f) && context.some((prefix) => f.startsWith(prefix)),
   );
 
   const parts: string[] = [];
-  const included: string[] = [];
-  const omitted: string[] = [];
-  let left = budgetChars;
 
-  for (const f of matched) {
-    let text: string;
-    try {
-      text = readFile(f);
-    } catch {
-      omitted.push(f);
-      continue;
+  /*
+   * TWO BUDGETS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS.
+   *
+   * The owned budget answers "could this unit read its SUBJECTS?" — which is what coverage
+   * means and what a PARTIAL is about. Context is read so the unit can judge those subjects;
+   * it is nobody's coverage.
+   *
+   * One shared budget made them compete, in both directions and both wrong. A large subject
+   * could push out the guard a unit needed to judge it, and — as happened the moment
+   * `src/store/store.ts` was declared context here — adding a file to READ turned a COMPLETE
+   * unit PARTIAL, which asserts the unit failed to review something it does not own.
+   *
+   * Owned files are gathered first regardless, so context can never cost coverage.
+   */
+  const take = (files: readonly string[], budget: number) => {
+    const included: string[] = [];
+    const dropped: string[] = [];
+    let left = budget;
+    for (const f of files) {
+      let text: string;
+      try {
+        text = readFile(f);
+      } catch {
+        dropped.push(f);
+        continue;
+      }
+      if (text.length > left) {
+        dropped.push(f);
+        continue;
+      }
+      left -= text.length;
+      included.push(f);
+      parts.push('=== ' + f + ' ===\n' + text);
     }
-    if (text.length > left) {
-      omitted.push(f);
-      continue;
-    }
-    left -= text.length;
-    included.push(f);
-    parts.push('=== ' + f + ' ===\n' + text);
-  }
+    return { included, dropped };
+  };
 
-  return { area, content: parts.join('\n\n'), files: included, omitted };
+  const subjects = take(ownedFiles, budgetChars);
+  const read = take(contextFiles, contextBudgetChars);
+
+  return {
+    area,
+    content: parts.join('\n\n'),
+    files: subjects.included,
+    omitted: subjects.dropped,
+    context: read.included,
+    contextOmitted: read.dropped,
+  };
 }
 
 export interface SecurityReviewRunInput {
@@ -750,6 +786,9 @@ export interface AreaReviewOutcome {
   readonly verdict: string;
   readonly filesReviewed: readonly string[];
   readonly omitted: readonly string[];
+  /** Read to judge the above, and reported apart from it: context is nobody's coverage. */
+  readonly context: readonly string[];
+  readonly contextOmitted: readonly string[];
   readonly refusal?: string;
 }
 
@@ -881,6 +920,8 @@ export async function runScopedSecurityReview(
         coverage: ScopeCoverage.NOT_REVIEWED,
         filesReviewed: [],
         filesOmitted: [...source.omitted],
+        contextRead: [...source.context],
+        contextOmitted: [...source.contextOmitted],
         findings: [],
         verdict: ReviewVerdict.NOT_VERIFIED,
         terminalOutcome: 'NOT_RUN',
@@ -894,6 +935,8 @@ export async function runScopedSecurityReview(
         verdict: ReviewVerdict.NOT_VERIFIED,
         filesReviewed: [],
         omitted: source.omitted,
+        context: source.context,
+        contextOmitted: source.contextOmitted,
         refusal,
       });
       continue;
@@ -928,6 +971,25 @@ export async function runScopedSecurityReview(
           String(source.files.length) +
           '): ' +
           source.files.join(', ') +
+          /*
+           * Context is named APART from the subject, and says what it is for. Merged into one
+           * list it reads as more area to judge, and a reviewer raising a finding against a
+           * file another unit owns files it where nobody will act on it.
+           */
+          (source.context.length === 0
+            ? ''
+            : '\n\nGiven to you to READ, so you can judge the files above. They belong to' +
+              ' another area and are not yours to judge (' +
+              String(source.context.length) +
+              '): ' +
+              source.context.join(', ')) +
+          (source.contextOmitted.length === 0
+            ? ''
+            : '\n\nContext that did NOT fit, and you have not seen (' +
+              String(source.contextOmitted.length) +
+              '): ' +
+              source.contextOmitted.join(', ') +
+              '\nSay so if a judgement depends on one of these.') +
           (source.omitted.length === 0
             ? ''
             : '\n\nNOT included, and therefore NOT reviewed by you (' +
@@ -994,6 +1056,8 @@ export async function runScopedSecurityReview(
         coverage: ScopeCoverage.NOT_REVIEWED,
         filesReviewed: [...source.files],
         filesOmitted: [...source.omitted],
+        contextRead: [...source.context],
+        contextOmitted: [...source.contextOmitted],
         findings: [],
         verdict: ReviewVerdict.NOT_VERIFIED,
         terminalOutcome: String(run.outcome),
@@ -1007,6 +1071,8 @@ export async function runScopedSecurityReview(
         verdict: ReviewVerdict.NOT_VERIFIED,
         filesReviewed: source.files,
         omitted: source.omitted,
+        context: source.context,
+        contextOmitted: source.contextOmitted,
         refusal,
       };
       areas.push(outcome);
@@ -1030,26 +1096,61 @@ export async function runScopedSecurityReview(
     completedByArea.set(area, done);
     if (done === unitsByArea.get(area)) covered.push(area);
 
+    /*
+     * REQUIRED CONTEXT THAT DID NOT ARRIVE MAKES THE JUDGEMENT UNUSABLE, NOT MERELY NOTED.
+     *
+     * SPEC: the omission at 7595c20a, and the acceptance bar set after it.
+     *
+     * Context is declared because the unit CANNOT decide its own files without it — that is
+     * the only reason a file is ever declared. A reviewer that never received it judged a
+     * question it was not equipped to answer, and its ACCEPTED means it did not notice the
+     * absence rather than that nothing was wrong. Exactly what happened here: the store's
+     * tamper-evidence guarantee did not fit, and the unit accepted without it.
+     *
+     * Recorded as NOT_VERIFIED with a refusal, and NOT as PARTIAL coverage. The two say
+     * different things and must never be folded together: PARTIAL means a SUBJECT went
+     * unreviewed; this means every subject was reviewed without a guard the unit was promised.
+     */
+    const contextRefusal =
+      source.contextOmitted.length === 0
+        ? undefined
+        : 'declared context did not reach the reviewer (' +
+          source.contextOmitted.join(', ') +
+          '), so this judgement was made without it';
+
+    const verdict = contextRefusal === undefined ? parsed.data.verdict : ReviewVerdict.NOT_VERIFIED;
+
     persist(input, unit, {
       reviewerRunId: run.runId,
       reviewerAgentId: agentId,
-      /* Omitted files mean PARTIAL, whatever verdict the reviewer reached on what it saw. */
+      /*
+       * SUBJECT omissions decide coverage, and only they. Coverage answers "did this unit
+       * review the files it owns?", which a context file was never part of.
+       */
       coverage: source.omitted.length === 0 ? ScopeCoverage.COMPLETE : ScopeCoverage.PARTIAL,
       filesReviewed: [...source.files],
       filesOmitted: [...source.omitted],
+      contextRead: [...source.context],
+      contextOmitted: [...source.contextOmitted],
       findings: areaFindings.map((f) => ({ ...f, resolved: false })),
-      verdict: parsed.data.verdict,
+      verdict,
       terminalOutcome: String(run.outcome),
+      ...(contextRefusal === undefined ? {} : { refusal: contextRefusal }),
     });
+
+    if (contextRefusal !== undefined) refusals.push(unit + ': ' + contextRefusal);
 
     const outcome: AreaReviewOutcome = {
       area: unit,
       runId: run.runId,
       outcome: String(run.outcome),
       findings: areaFindings,
-      verdict: parsed.data.verdict,
+      verdict,
       filesReviewed: source.files,
       omitted: source.omitted,
+      context: source.context,
+      contextOmitted: source.contextOmitted,
+      ...(contextRefusal === undefined ? {} : { refusal: contextRefusal }),
     };
     areas.push(outcome);
     input.onArea?.(outcome);

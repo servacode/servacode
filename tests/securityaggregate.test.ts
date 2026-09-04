@@ -88,6 +88,16 @@ function seedCompleteReview(
         coverage: ScopeCoverage.COMPLETE,
         filesReviewed: ['src/x.ts'],
         filesOmitted: [],
+        /*
+         * A unit that DECLARES context has not been reviewed until that context reached it, so
+         * a fixture claiming a complete review has to show it arriving. Derived from the scope
+         * map rather than hard-coded, so declaring context somewhere new cannot silently leave
+         * this fixture describing a review that could not have happened.
+         */
+        contextRead: reviewUnitsFor(area)
+          .find((u) => u.unit === unit)
+          ?.context.map((prefix) => (prefix.endsWith('.ts') ? prefix : prefix + 'seen.ts')),
+        contextOmitted: [],
         findings: [],
         verdict: ReviewVerdict.ACCEPTED,
         terminalOutcome: 'COMPLETED',
@@ -791,6 +801,69 @@ describe('a historical resolution cannot mute a current finding', () => {
     seedAt(rt.store, 'Owner authority', { findings: [finding('HIGH')] });
     seedAt(rt.store, 'Owner authority', { findings: [] }, 901);
     expect(aggregate(rt).review).toBeUndefined();
+  });
+});
+
+describe('a unit that never received its required context has not decided anything', () => {
+  /*
+   * SPEC: the omission at 7595c20a, and the acceptance bar set after it.
+   *
+   * Context is declared for exactly one reason: the unit cannot decide its own files without
+   * it. `Serva self-acceptance authority` judges whether a persisted record counts as
+   * evidence, and that turns on the store's tamper-evidence guarantee, so store.ts is declared
+   * context for it. At 7595c20a the guarantee did not fit the budget and the unit accepted
+   * anyway — an ACCEPTED that means "did not notice the absence", not "nothing was wrong".
+   *
+   * So this is checked at the CONSUMER too, and the requirement is derived from the scope map
+   * rather than read off the record being judged. Two records, one per direction, and the two
+   * conditions are never folded into each other.
+   */
+  const UNIT = 'Serva self-acceptance authority';
+
+  it('an ACCEPTED record whose declared context never arrived carries no authority', () => {
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === UNIT ? { contextRead: [], contextOmitted: ['src/store/store.ts'] } : {},
+    );
+
+    const result = aggregate(rt);
+    expect(result.review, 'a judgement made without what decides it must not mint').toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('src/store/store.ts');
+  });
+
+  it('the refusal is about the missing context, not about coverage', () => {
+    /*
+     * The distinction that must not blur. Every SUBJECT was reviewed — coverage is COMPLETE
+     * and truthfully so. What is missing is a guard the unit was promised, and calling that
+     * PARTIAL would assert the unit failed to review a file it does not even own.
+     */
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === UNIT
+        ? {
+            coverage: ScopeCoverage.COMPLETE,
+            contextRead: [],
+            contextOmitted: ['src/store/store.ts'],
+          }
+        : {},
+    );
+
+    const result = aggregate(rt);
+    const said = result.refusals.join(' ');
+    expect(said).toContain('without declared context');
+    /* The real PARTIAL wording, so this assertion can actually fail if the two ever blur. */
+    expect(said, 'coverage was complete and must not be reported otherwise').not.toContain(
+      'a partial view of an area is not coverage of it',
+    );
+  });
+
+  it('a unit that declares no context is unaffected by any of this', () => {
+    /* The rule applies where context is REQUIRED, and nowhere else. */
+    const rt = project();
+    seedCompleteReview(rt.store);
+    const result = aggregate(rt);
+    expect(result.refusals, result.refusals.join('; ')).toEqual([]);
+    expect(result.review).toBeDefined();
   });
 });
 

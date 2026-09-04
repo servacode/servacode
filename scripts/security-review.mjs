@@ -114,7 +114,15 @@ const outcome = await runScopedSecurityReview({
         String(a.findings.length) +
         ' finding(s)  ' +
         a.area +
-        (a.omitted.length === 0 ? '' : '  [' + String(a.omitted.length) + ' omitted]'),
+        (a.omitted.length === 0 ? '' : '  [' + String(a.omitted.length) + ' omitted]') +
+        /*
+         * Reported apart from an omission of the unit's OWN files, and never folded into it.
+         * One says a subject went unreviewed; the other says the reviewer judged its subjects
+         * without a guard it was meant to be shown. Both matter, and they are not the same.
+         */
+        (a.contextOmitted.length === 0
+          ? ''
+          : '  [context unseen: ' + a.contextOmitted.join(', ') + ']'),
     );
   },
 });

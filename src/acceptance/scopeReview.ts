@@ -97,6 +97,18 @@ export const ScopeReviewSchema = z
     filesReviewed: z.array(z.string().min(1)),
     /** Named, because a file nobody read must never read as covered. */
     filesOmitted: z.array(z.string().min(1)),
+    /*
+     * CONTEXT IS NOT COVERAGE, AND IS NOT SILENT EITHER.
+     *
+     * Files this unit was given to READ so it could judge its own — the guard on a call site
+     * it holds. They are nobody's coverage, so they are recorded apart from `filesReviewed`;
+     * and a context file that did not reach the reviewer is recorded too, because the whole
+     * point of declaring it was that the unit could not answer its question without it.
+     *
+     * Optional so records written before this existed still parse as what they are.
+     */
+    contextRead: z.array(z.string().min(1)).optional(),
+    contextOmitted: z.array(z.string().min(1)).optional(),
     findings: z.array(ScopeFindingSchema),
     verdict: z.enum([ReviewVerdict.ACCEPTED, ReviewVerdict.BLOCKED, ReviewVerdict.NOT_VERIFIED]),
     /** How the governed run ended, verbatim. `EVIDENCE_VIOLATION` is a result, not a gap. */
