@@ -755,6 +755,16 @@ export const E2E_SCRIPT: readonly (readonly [string, Record<string, unknown>])[]
           action: 're-open a cancelled order',
           captures: ['who', 'which order', 'when', 'the previous state'],
         },
+        /*
+         * OWNER DECISION, 1.0.1 acceptance: an irreversible control with no audit trail blocks
+         * DESIGN, destructive or not. Cancelling an order cannot be undone, so a company that
+         * offers the control and records nothing about who used it is one the gate refuses —
+         * correctly. The fixture describes a governed company, which now means saying this.
+         */
+        {
+          action: 'cancel an order',
+          captures: ['who', 'which order', 'when', 'the stock that was freed'],
+        },
       ],
       /* No controls and no adminSections: those are SC-AGENT-141's, and it runs next. */
     }),
@@ -802,6 +812,7 @@ export const E2E_SCRIPT: readonly (readonly [string, Record<string, unknown>])[]
           destructive: true,
           reversible: false,
           guardrail: 'the operator types the customer name to confirm',
+          auditedAction: 'cancel an order',
         },
       ],
     }),

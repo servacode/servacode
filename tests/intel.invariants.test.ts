@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { evaluationsFor } from '../src/intelligence/gates/evaluator.js';
+import { blockingFindings } from '../src/intelligence/checks/traceability.js';
+import { OperationalControlSchema } from '../src/intelligence/artifacts/admin.js';
+import { freshStore } from './helpers.js';
+import { ARTIFACT_TYPES, repository } from '../src/intelligence/repository.js';
 import { brokenSources } from '../src/intelligence/execution/obligations.js';
 import { SourceMarking, Severity, ValidityState } from '../src/vocab/index.js';
 import { resolveApplicability, upstreamGatesFor } from '../src/intelligence/applicability.js';
@@ -420,6 +425,184 @@ describe('every feature is reviewed for operability', () => {
       controls: [],
     });
     expect(findings.map((f) => f.code)).toContain('NO_OPERABILITY_REVIEW');
+  });
+
+  describe('the DESIGN gate consumes every blocking configuration finding', () => {
+    /*
+     * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-GATES-CHECKS-AND-VIEWS/OL-1, 1.0.1 review.
+     *
+     * The evaluator computed `checkConfiguration(...)` in full and read exactly one code out of
+     * it — PROTECTED_RULE_EXPOSED, for AO-2 — and discarded the rest. A feature with an
+     * unaudited destructive control passed DESIGN while the check that exists to stop it had
+     * already found it. The findings existed; nothing read them.
+     *
+     * Proved through the GATE rather than through the checker, because "the checker finds it"
+     * was already true when the defect existed. What was missing was a consumer.
+     */
+    const AT = '2026-09-06T00:00:00.000Z';
+    const artifactMeta = () => ({
+      provenance: { marking: 'SYSTEM', component: 'test' },
+      attribution: { at: AT, agentId: 'SC-AGENT-140' },
+      workItemId: 'SC-WI-000700',
+    });
+
+    function withControl(control: Record<string, unknown>) {
+      const { store, deps } = freshStore();
+      const tx = store.begin();
+      repository(store, ARTIFACT_TYPES.OPERATIONAL_CONTROL, OperationalControlSchema).put(tx, {
+        id: 'SC-OCTL-000001',
+        createdAt: AT,
+        name: 'Purge all orders',
+        effect: 'removes every order record',
+        meta: artifactMeta(),
+        ...control,
+      } as never);
+      tx.commit();
+      return { store, deps };
+    }
+
+    const ao3 = (f: ReturnType<typeof withControl>) =>
+      evaluationsFor(
+        { store: f.store, clock: f.deps.clock, ids: f.deps.ids } as never,
+        'SC-GATE-DESIGN',
+      ).find((e) => e.criterionRef === 'AO-3');
+
+    it('a destructive control with no guardrail does not pass DESIGN', () => {
+      const f = withControl({ destructive: true, reversible: true });
+      expect(ao3(f)?.value, 'DESTRUCTIVE_WITHOUT_GUARDRAIL must block').not.toBe('MET');
+    });
+
+    /*
+     * IRREVERSIBLE AND UNAUDITED BLOCKS, WHATEVER ELSE IS TRUE OF THE CONTROL.
+     *
+     * OWNER DECISION, 1.0.1 acceptance. The checker emitted this as MAJOR, so it was reported
+     * and the gate passed. The owner raised it to BLOCKING: a control that cannot be undone
+     * and leaves no record of who used it breaches a basic security and operability condition
+     * on its own, and being destructive as well is not what makes it serious.
+     *
+     * Asserted through the GATE, four cases, because the rule is about what DESIGN refuses —
+     * and two of them must NOT be refused, or the criterion is just always failing.
+     */
+    it('a NON-destructive irreversible control with no audit does not pass DESIGN', () => {
+      const f = withControl({ destructive: false, reversible: false, guardrail: 'confirm twice' });
+      expect(ao3(f)?.value, 'irreversible and unaudited must block on its own').not.toBe('MET');
+    });
+
+    it('a destructive irreversible control with no audit does not pass DESIGN either', () => {
+      const f = withControl({ destructive: true, reversible: false, guardrail: 'confirm twice' });
+      expect(ao3(f)?.value).not.toBe('MET');
+    });
+
+    it('an irreversible control WITH an audit requirement is not blocked for this reason', () => {
+      /* The rule is irreversible AND unaudited. Naming the audit answers the question. */
+      const f = withControl({
+        destructive: false,
+        reversible: false,
+        guardrail: 'confirm twice',
+        auditRequirementRef: { id: 'SC-AAR-000001' },
+      });
+      expect(ao3(f)?.value, 'an audited irreversible control is accounted for').toBe('MET');
+    });
+
+    it('a reversible, non-destructive control is not blocked for this reason', () => {
+      /* The negative control: the criterion is not simply refusing everything. */
+      const f = withControl({ destructive: false, reversible: true });
+      expect(ao3(f)?.value).toBe('MET');
+    });
+
+    it('a control with a guardrail and a reversal passes', () => {
+      /* The negative control: the criterion is not simply always failing. */
+      const f = withControl({ destructive: true, reversible: true, guardrail: 'confirm twice' });
+      expect(ao3(f)?.value, 'a well-formed control must not be blocked').toBe('MET');
+    });
+
+    it('an irreversible control is asked about its audit even when it is not destructive', () => {
+      /*
+       * SPEC: sibling of OL-1, found by auditing every EMISSION as well as every consumer.
+       *
+       * The irreversibility check sat inside `if (!c.destructive) continue`, so it ran only for
+       * DESTRUCTIVE controls — while its own finding says nothing about destruction. A control
+       * that merely cannot be undone was never asked the question.
+       *
+       * OL-1 was a finding produced and never read; this is a finding that could not be
+       * produced for the case it names. Same class, opposite end.
+       */
+      const findings = checkConfiguration({
+        features: [],
+        reviews: [],
+        protectedRules: [],
+        auditRequirements: [],
+        controls: [
+          {
+            id: 'SC-OCTL-000002',
+            name: 'Send every customer an invoice',
+            effect: 'emails all customers',
+            destructive: false,
+            reversible: false,
+          },
+        ] as never,
+      });
+      expect(
+        findings.map((f) => f.code),
+        'a non-destructive irreversible control must still be asked about its audit trail',
+      ).toContain('IRREVERSIBLE_WITHOUT_AUDIT');
+    });
+
+    it('a finding that is not BLOCKING does not block on its own', () => {
+      /*
+       * Severity is what decides. An ADVISORY finding is reported and does not stop the gate,
+       * or the distinction between the two severities would mean nothing.
+       */
+      const advisory = checkConfiguration({
+        features: [],
+        reviews: [],
+        protectedRules: [],
+        auditRequirements: [],
+        controls: [],
+      }).filter((x) => x.severity !== Severity.BLOCKING);
+      expect(blockingFindings(advisory)).toEqual([]);
+    });
+
+    it('a blocking code nobody has written yet is caught by severity alone', () => {
+      /*
+       * The property that makes this a class fix rather than a patch: the contract is the
+       * SEVERITY, so a code invented after this test was written blocks the day it is emitted.
+       * No list to update, and nothing to forget.
+       */
+      const invented = [
+        {
+          code: 'A_CODE_THAT_DID_NOT_EXIST_WHEN_THIS_WAS_WRITTEN',
+          severity: Severity.BLOCKING,
+          subject: 'SC-OCTL-000009',
+          statement: 'something a future check will find',
+        },
+      ] as never;
+      expect(blockingFindings(invented)).toHaveLength(1);
+    });
+
+    it('every consumer of checkConfiguration uses the same blocking contract', () => {
+      /*
+       * The audit, kept as a test. Two consumers exist — the gate evaluator and readiness — and
+       * both decide on `blockingFindings`. AO-2 is the one deliberate narrowing: a NAMED
+       * criterion about one rule, which reports WHICH rule failed rather than that something
+       * did. Its code is BLOCKING, so AO-3 covers it too; AO-2 is the more specific report and
+       * never the only one.
+       */
+      const evaluator = readFileSync('src/intelligence/gates/evaluator.ts', 'utf8');
+      const readiness = readFileSync('src/intelligence/readiness.ts', 'utf8');
+
+      expect(evaluator).toContain('blockingFindings(configFindings)');
+      expect(evaluator).toContain('blockingFindings(designFindings)');
+      expect(evaluator).toContain('blockingFindings(trace)');
+      expect(readiness).toContain('blockingFindings(allFindings)');
+
+      /* The single narrowing is named, and its justification is written where it lives. */
+      const byCode = evaluator.match(/f\.code === '[A-Z_]+'/g) ?? [];
+      expect(byCode, 'only AO-2 may select a single code').toEqual([
+        "f.code === 'PROTECTED_RULE_EXPOSED'",
+      ]);
+      expect(evaluator).toContain('AO-2 above is deliberately narrower');
+    });
   });
 
   it('a protected rule exposed as an ordinary setting is a contradiction', () => {

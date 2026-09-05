@@ -1116,6 +1116,19 @@ export const AdminExperienceOutputSchema = z
             destructive: z.boolean(),
             reversible: z.boolean(),
             guardrail: z.string().min(1).optional(),
+            /**
+             * The audited action this control performs, naming an AdminAuditRequirement.
+             *
+             * OWNER DECISION, 1.0.1 acceptance: an irreversible control with no audit trail
+             * blocks DESIGN. `OperationalControl.auditRequirementRef` already existed and
+             * nothing ever set it, so the rule could not be satisfied by any control this
+             * company produces — a rule nothing can pass is worse than the gap it closes.
+             *
+             * Named by the agent rather than matched by Serva: which requirement covers a
+             * control is a governance statement, and inferring it from similar wording would
+             * be Serva inventing the link that the rule exists to demand.
+             */
+            auditedAction: z.string().min(1).optional(),
           })
           .strict(),
       )
@@ -1224,6 +1237,13 @@ export const adminExperienceDepartment: DepartmentConfig<typeof AdminExperienceO
     const ids: string[] = [];
     const at = ctx.clock.now();
 
+    /* Written by the operability department, which runs before this one. */
+    const auditRequirements = repository(
+      ctx.store,
+      ARTIFACT_TYPES.ADMIN_AUDIT_REQUIREMENT,
+      AdminAuditRequirementSchema,
+    ).list();
+
     const iaId = ctx.ids.next('SC-AIA');
     repository(ctx.store, ARTIFACT_TYPES.ADMIN_IA, AdminIaSchema).put(tx, {
       id: iaId,
@@ -1240,6 +1260,21 @@ export const adminExperienceDepartment: DepartmentConfig<typeof AdminExperienceO
 
     for (const c of output.controls) {
       const id = ctx.ids.next('SC-OC');
+      /*
+       * The link, resolved against what is actually persisted rather than asserted.
+       *
+       * A named action that matches no recorded AdminAuditRequirement produces NO reference —
+       * the control is then irreversible and unaudited, and AO-3 refuses it. That is the
+       * correct outcome: a control claiming an audit trail that does not exist is exactly what
+       * the rule is for.
+       */
+      const audited =
+        c.auditedAction === undefined
+          ? undefined
+          : auditRequirements.find(
+              (a) => a.action.trim().toLowerCase() === String(c.auditedAction).trim().toLowerCase(),
+            );
+
       repository(ctx.store, ARTIFACT_TYPES.OPERATIONAL_CONTROL, OperationalControlSchema).put(tx, {
         id,
         createdAt: at,
@@ -1248,6 +1283,7 @@ export const adminExperienceDepartment: DepartmentConfig<typeof AdminExperienceO
         destructive: c.destructive,
         reversible: c.reversible,
         ...(c.guardrail === undefined ? {} : { guardrail: c.guardrail }),
+        ...(audited === undefined ? {} : { auditRequirementRef: { id: audited.id } }),
         meta: derived(ctx, ADMIN_EXPERIENCE, ['operability reviews'], 'operational control'),
       });
       ids.push(id);

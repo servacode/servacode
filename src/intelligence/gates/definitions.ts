@@ -279,6 +279,19 @@ export const DESIGN_GATE: QualityGate = {
     criterion('DS-2', 'The deterministic design checks find nothing blocking'),
     criterion('AO-1', 'EVERY feature has an AdminOperabilityReview'),
     criterion('AO-2', 'No protected rule is exposed as an ordinary operator setting'),
+    /*
+     * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-GATES-CHECKS-AND-VIEWS/OL-1, 1.0.1 review.
+     *
+     * `checkConfiguration` emits nine codes and this gate consumed exactly one of them. The
+     * other BLOCKING ones — a destructive control with no guardrail, an irreversible action
+     * with no audit requirement, a history-significant setting that is not effective-dated, an
+     * unclassified setting — were computed on every DESIGN evaluation and thrown away.
+     *
+     * The findings existed. Nothing read them. `DS-2` is the same idea for the design checks
+     * and had no configuration analogue, which is the whole defect: a checker whose output
+     * nobody consumes is a comment that costs CPU.
+     */
+    criterion('AO-3', 'The deterministic configuration checks find nothing blocking'),
   ],
 };
 

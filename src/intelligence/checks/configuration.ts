@@ -172,11 +172,25 @@ export function checkConfiguration(input: ConfigCheckInput): readonly TraceFindi
     }
   }
 
-  /* --- 7. destructive controls without a guardrail --- */
+  /* --- 7. controls: destructive without a guardrail, and irreversible without an audit --- */
   for (const c of input.controls) {
-    if (!c.destructive) continue;
+    /*
+     * TWO DIFFERENT PROPERTIES, TWO DIFFERENT QUESTIONS.
+     *
+     * SPEC: sibling of HIGH finding ORGANIZATIONAL-LEARNING-GATES-CHECKS-AND-VIEWS/OL-1,
+     * found by auditing every consumer and every emission of this checker.
+     *
+     * The irreversibility check sat inside `if (!c.destructive) continue`, so it only ever
+     * ran for DESTRUCTIVE controls — while its own finding says nothing about destruction:
+     * "irreversible and unaudited, so an incident would have no record of who did it". A
+     * control that merely cannot be undone, like sending every customer an invoice, was never
+     * asked the question at all.
+     *
+     * Same class as OL-1 in the other direction: there the finding was produced and nobody
+     * read it; here nobody could produce it for the case it names.
+     */
     const hasGuardrail = (c.guardrail ?? '').trim() !== '';
-    if (!hasGuardrail) {
+    if (c.destructive && !hasGuardrail) {
       out.push(
         finding(
           'DESTRUCTIVE_WITHOUT_GUARDRAIL',
@@ -188,11 +202,24 @@ export function checkConfiguration(input: ConfigCheckInput): readonly TraceFindi
         ),
       );
     }
+    /*
+     * IRREVERSIBLE AND UNAUDITED BLOCKS, WHETHER OR NOT IT DESTROYS ANYTHING.
+     *
+     * OWNER DECISION, 1.0.1 acceptance. This was MAJOR — reported, not blocking — and the
+     * owner raised it: a control that cannot be undone and leaves no record of who used it
+     * breaches a basic security and operability condition on its own. Being destructive as
+     * well makes it worse; it is not what makes it serious.
+     *
+     * Recorded as a decision rather than a preference because it changes what the DESIGN gate
+     * refuses, and the next person to read this is entitled to know it was chosen and why.
+     * The condition is deliberately not conjoined with `destructive`: irreversible with no
+     * audit requirement is the whole rule.
+     */
     if (!c.reversible && c.auditRequirementRef === undefined) {
       out.push(
         finding(
           'IRREVERSIBLE_WITHOUT_AUDIT',
-          Severity.MAJOR,
+          Severity.BLOCKING,
           c.id,
           'OperationalControl "' +
             c.name +

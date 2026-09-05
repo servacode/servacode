@@ -61,7 +61,7 @@ import {
 import { TestCaseSchema, TestStrategySchema } from '../artifacts/testing.js';
 import { checkDesign } from '../checks/design.js';
 import { checkConfiguration } from '../checks/configuration.js';
-import { checkTraceability } from '../checks/traceability.js';
+import { blockingFindings, checkTraceability } from '../checks/traceability.js';
 import { questionKindRefusal } from '../departments/intake.js';
 import { gateById } from './definitions.js';
 import { downstreamGateById, downstreamStoreAnswer } from './downstream.js';
@@ -691,12 +691,7 @@ export function evaluationsFor(
         exceptions,
         clock: deps.clock,
       });
-      out.push(
-        measured(
-          'DS-2',
-          designFindings.every((f) => f.severity !== Severity.BLOCKING),
-        ),
-      );
+      out.push(measured('DS-2', blockingFindings(designFindings).length === 0));
 
       /* SC-RTC-008, over the ACTUAL persisted operability artifacts. */
       const configFindings = checkConfiguration({
@@ -716,6 +711,28 @@ export function evaluationsFor(
             ),
       );
       out.push(measured('AO-2', !configFindings.some((f) => f.code === 'PROTECTED_RULE_EXPOSED')));
+
+      /*
+       * AND EVERY OTHER BLOCKING FINDING THE SAME CHECK PRODUCED.
+       *
+       * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-GATES-CHECKS-AND-VIEWS/OL-1, 1.0.1 review.
+       *
+       * `configFindings` was computed in full and read for one code. Everything else it found
+       * — DESTRUCTIVE_WITHOUT_GUARDRAIL, IRREVERSIBLE_WITHOUT_AUDIT, AUDIT_REQUIREMENT_MISSING,
+       * HISTORY_NOT_EFFECTIVE_DATED, CONFIG_UNCLASSIFIED — was discarded, so a feature with an
+       * unaudited destructive control passed DESIGN while the check that exists to stop it had
+       * already said so.
+       *
+       * ONE CONTRACT, SHARED. `blockingFindings` is the same predicate `readiness.ts` uses and
+       * that DS-2 and PL-2 now use for their own checkers: a finding blocks because of its
+       * SEVERITY, never because its code appears on a list somewhere. A code added to any
+       * checker later is covered the day it is written.
+       *
+       * AO-2 above is deliberately narrower and stays that way: it is a NAMED criterion about
+       * one rule, so it reports which rule failed rather than that something did. Its code is
+       * BLOCKING, so AO-3 covers it too — AO-2 is the more specific report, never the only one.
+       */
+      out.push(measured('AO-3', blockingFindings(configFindings).length === 0));
       break;
     }
 
@@ -754,12 +771,7 @@ export function evaluationsFor(
         flows: repository(store, ARTIFACT_TYPES.FLOW, FlowSchema).list(),
         testCases: repository(store, ARTIFACT_TYPES.TEST_CASE, TestCaseSchema).list(),
       });
-      out.push(
-        measured(
-          'PL-2',
-          trace.every((f) => f.severity !== Severity.BLOCKING),
-        ),
-      );
+      out.push(measured('PL-2', blockingFindings(trace).length === 0));
       break;
     }
 
