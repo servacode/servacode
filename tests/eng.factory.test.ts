@@ -1187,8 +1187,48 @@ describe('rework is bounded and acceptance is deterministic', () => {
     tx.commit();
 
     await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(
-      /No passing review by the reviewer SC-AGENT-200/,
+      /No passing EC-REVIEW by the reviewer SC-AGENT-200/,
     );
+    expect(await f.git.headCommit(w.path), 'nothing was committed').toBe(f.base);
+  }, 90_000);
+
+  it('a QA pass by the named reviewer does not authorise a code change', async () => {
+    /*
+     * SPEC: finding EAA-F1 (MEDIUM), 1.0.1 security review — the second pass on EAA-REV-1.
+     *
+     * That fix constrained WHO reviewed and not WHICH review. A persisted review carries a
+     * criterion: EC-REVIEW is the independent code review, EC-QA is a different question asked
+     * of the same agent. A passing EC-QA record therefore authorised integration of a change
+     * whose code review was never the thing that passed.
+     */
+    const f = await setupFactory(true);
+    const item = f.factory.recordWorkItem({ ...WORK_ITEM, baseCommit: f.base });
+    const w = await f.factory.openWorkspace(item, 1, 'd'.repeat(64));
+    writeFileSync(
+      join(w.path, 'src', 'app.js'),
+      'module.exports = 2;' + String.fromCharCode(92) + 'n',
+      'utf8',
+    );
+
+    const v = await f.factory.verifyAttempt(item, w, { required: NO_REVIEW });
+    const tx = f.store.begin();
+    tx.putCanon(REVIEW_CANON_TYPE, 'SC-REVIEW-QA-ONLY', {
+      id: 'SC-REVIEW-QA-ONLY',
+      workItemId: item.workItemId,
+      changeSetId: v.changeSet.changeSetId,
+      criterionId: 'EC-QA',
+      reviewerAgentId: 'SC-AGENT-200',
+      producerAgentId: 'SC-AGENT-150',
+      runRef: 'SC-RUN-000920',
+      outcome: 'PASS',
+      detail: 'QA looks fine',
+      verdict: {},
+      capabilityDigest: 'e'.repeat(64),
+      recordedAt: '2026-08-25T00:00:00.000Z',
+    });
+    tx.commit();
+
+    await expect(f.factory.acceptChange(item, w, v)).rejects.toThrowError(/No passing EC-REVIEW/);
     expect(await f.git.headCommit(w.path), 'nothing was committed').toBe(f.base);
   }, 90_000);
 

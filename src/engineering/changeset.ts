@@ -446,7 +446,21 @@ function normalizePath(p: string): string {
 export function matchesPrefix(path: string, prefix: string): boolean {
   const a = normalizePath(path);
   const b = normalizePath(prefix).replace(/\/+$/, '');
-  if (b.length === 0) return true;
+  /*
+   * AN EMPTY PREFIX MATCHES NOTHING, RATHER THAN EVERYTHING.
+   *
+   * SPEC: finding GIT-INT-REVIEW-2 (MEDIUM), 1.0.1 security review.
+   *
+   * This returned true, and the scope check reads `!allow.some(a => matchesPrefix(path, a))`.
+   * So a single empty string anywhere in `allowedScope` put the WHOLE repository in scope —
+   * the fail-open this module had already been corrected for once, arriving through a data
+   * value instead of a branch.
+   *
+   * Both callers are safer this way: an empty allow entry now allows nothing, and an empty
+   * forbid entry forbids nothing. The schema refuses empty entries as well, because a value
+   * that can only be a mistake should not be storable.
+   */
+  if (b.length === 0) return false;
   return a === b || a.startsWith(b + '/');
 }
 

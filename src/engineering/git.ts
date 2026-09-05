@@ -553,6 +553,23 @@ export class GitService {
         'user.email=' + (author.match(/<(.+)>/)?.[1] ?? 'serva@localhost'),
         'commit',
         '--no-gpg-sign',
+        /*
+         * REPOSITORY HOOKS DO NOT RUN ON THE HOST BECAUSE AN AGENT'S WORK REACHED INTEGRATION.
+         *
+         * SPEC: finding GIT-INT-REVIEW-1 (MEDIUM), 1.0.1 security review.
+         *
+         * This runner spawns git on the HOST, outside the sandbox. Without this flag, a
+         * ChangeSet produced by a governed agent causes `.git/hooks/pre-commit` and
+         * `commit-msg` — arbitrary repository-supplied code — to execute unsandboxed, which is
+         * the one thing the HARD boundary exists to prevent. The hook comes from the
+         * repository, and the repository is the thing under change.
+         *
+         * THE TRADE-OFF, STATED: an owner's own pre-commit hooks do not run during Serva's
+         * integration. That is not a loss of verification — Serva runs its own recipes and
+         * gates, in the sandbox, and refuses the change if they fail. It is a refusal to
+         * execute repository code on the host as a side effect of accepting a change.
+         */
+        '--no-verify',
         '-m',
         message,
       ],

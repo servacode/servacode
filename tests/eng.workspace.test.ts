@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   ALLOWED_GIT_VERBS,
@@ -135,6 +143,36 @@ describe('Serva owns Git, and the verb set is closed', () => {
       (git as unknown as { git: (a: string[]) => Promise<unknown> })['git'](['--no-pager']),
     ).rejects.toThrowError(/no subcommand/);
   });
+
+  it('a repository hook does not execute on the host when Serva commits', async () => {
+    /*
+     * SPEC: finding GIT-INT-REVIEW-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The git runner spawns on the HOST, outside the sandbox. Without --no-verify, a ChangeSet
+     * produced by a governed agent makes `.git/hooks/pre-commit` — arbitrary code supplied by
+     * the repository being changed — run unsandboxed, which is the thing the HARD boundary
+     * exists to prevent.
+     *
+     * Proven by consequence rather than by reading the argv: the hook writes a file, and the
+     * absence of that file is the evidence it did not run.
+     */
+    const { repo } = makeRepo();
+    const git = new GitService({ repoRoot: repo });
+    const hookDir = join(repo, '.git', 'hooks');
+    mkdirSync(hookDir, { recursive: true });
+    const marker = join(repo, 'HOOK_RAN.txt');
+    const hook = join(hookDir, 'pre-commit');
+    const NL = String.fromCharCode(10);
+    const posixMarker = marker.split(String.fromCharCode(92)).join('/');
+    writeFileSync(hook, '#!/bin/sh' + NL + 'touch "' + posixMarker + '"' + NL, 'utf8');
+    chmodSync(hook, 0o755);
+
+    writeFileSync(join(repo, 'hooked.txt'), 'x' + String.fromCharCode(10), 'utf8');
+    await git.stagePaths(['hooked.txt'], repo);
+    await git.commit('a change that must not run repository code', repo);
+
+    expect(existsSync(marker), 'the repository hook ran on the host').toBe(false);
+  }, 30_000);
 
   it('nothing forbidden can appear in the allowed set, by construction', () => {
     /*
@@ -365,6 +403,28 @@ describe('Serva computes the change set and judges it against the declared scope
       writeFileSync(join(w, 'src', 'app.js'), 'module.exports = 2;\n', 'utf8');
     });
     expect(checkScopeConformance(workspace, changeSet, SCOPE).conformant).toBe(true);
+  });
+
+  it('an empty scope entry allows nothing, rather than everything', async () => {
+    /*
+     * SPEC: finding GIT-INT-REVIEW-2 (MEDIUM), 1.0.1 security review.
+     *
+     * `matchesPrefix` returned true for an empty prefix, and the conformance check reads
+     * `!allow.some((a) => matchesPrefix(path, a))`. So one empty string anywhere in
+     * `allowedScope` put the WHOLE repository in scope — the fail-open this module was already
+     * corrected for once, arriving through a data value instead of through a branch.
+     *
+     * The direction matters in both callers: an empty allow entry now allows nothing, and an
+     * empty forbid entry forbids nothing.
+     */
+    expect(matchesPrefix('README.md', ''), 'an empty prefix matches nothing').toBe(false);
+
+    const { changeSet, workspace } = await withChange((w) => {
+      writeFileSync(join(w, 'README.md'), '# changed' + String.fromCharCode(10), 'utf8');
+    });
+    const r = checkScopeConformance(workspace, changeSet, { allow: ['', 'src/'], forbid: [] });
+    expect(r.conformant, 'an empty entry must not put the repository in scope').toBe(false);
+    expect(r.findings.map((f) => f.kind)).toContain('OUTSIDE_ALLOWED_SCOPE');
   });
 
   it('a credential-shaped file is a finding whatever the scope allows', async () => {

@@ -66,8 +66,9 @@ export const EngineeringWorkItemSchema = z
     acceptanceCriteria: z.array(z.string()).min(1),
     decisions: z.array(z.string()).default([]),
     /** The paths this change may touch. Empty means nothing is in scope. */
-    allowedScope: z.array(z.string()).min(1),
-    forbiddenScope: z.array(z.string()).default([]),
+    /* Entries are non-empty: an empty prefix is only ever a mistake (GIT-INT-REVIEW-2). */
+    allowedScope: z.array(z.string().min(1)).min(1),
+    forbiddenScope: z.array(z.string().min(1)).default([]),
     producerAgentId: z.string().regex(/^SC-AGENT-\d{3}$/),
     reviewerAgentId: z.string().regex(/^SC-AGENT-\d{3}$/),
     /** Registered recipe ids. A model may recommend one; it never composes one. */
@@ -511,14 +512,28 @@ export class EngineeringFactory {
      * its absence: widening who can stop a change is safe, and widening who can authorise one
      * is the whole problem.
      */
+    /*
+     * AND IT MUST BE THE REVIEW THAT ANSWERS THE QUESTION.
+     *
+     * SPEC: finding EAA-F1 (MEDIUM), 1.0.1 security review — a second pass on the fix for
+     * EAA-REV-1, which constrained WHO reviewed and not WHICH review.
+     *
+     * A persisted review carries a criterion: `EC-REVIEW` is the independent code review, and
+     * `EC-QA` is a different question asked of the same agent. Without this, a passing EC-QA
+     * record authorised integration of a change whose code review was never the thing that
+     * passed — the reviewer identity was right and the judgement was about something else.
+     */
     const authorising = reviews.find(
-      (r) => r.reviewerAgentId === item.reviewerAgentId && r.outcome === 'PASS',
+      (r) =>
+        r.reviewerAgentId === item.reviewerAgentId &&
+        r.criterionId === 'EC-REVIEW' &&
+        r.outcome === 'PASS',
     );
     if (authorising === undefined) {
       return fail({
         code: 'E_VALIDATION',
         message:
-          'No passing review by the reviewer ' +
+          'No passing EC-REVIEW by the reviewer ' +
           item.reviewerAgentId +
           ' that work item ' +
           item.workItemId +
