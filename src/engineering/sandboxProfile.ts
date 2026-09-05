@@ -360,7 +360,21 @@ export const SandboxProfileStatus = {
   VALIDATED: 'VALIDATED',
   /** Written to disk and still byte-identical to what Serva generated. */
   LOADED: 'LOADED',
-  /** The engine reported an effective policy matching it, where it can report one. */
+  /**
+   * The invocation was given this settings file.
+   *
+   * SPEC: findings EHB-R1 and EHB-R2 (MEDIUM), 1.0.1 security review.
+   *
+   * This used to read "the engine reported an effective policy matching it", and it is reached
+   * from `passedToInvocation` — that a settings file was written and handed over. In a file
+   * whose whole theme is that DECLARED and MEASURED must not be conflated, that was the
+   * conflation, and an operator reading the status line could take it for engine confirmation.
+   *
+   * Serva does not obtain the engine's live effective policy at dispatch (EHB-R1), so no
+   * status here can honestly claim it. What is actually confirmed against the OS is MEASURED,
+   * below: a probe that reached the boundary and was refused by it. That is the gate for HARD;
+   * this step is a diagnostic on the way to it.
+   */
   EFFECTIVE: 'EFFECTIVE',
   /** A probe reached the OS boundary and the boundary refused what it should. */
   MEASURED: 'MEASURED',
@@ -626,6 +640,16 @@ export function sandboxProfileStatuses(o: {
 
   if (o.passedToInvocation) reached.push(SandboxProfileStatus.EFFECTIVE);
   else reasons.push('the invocation was not given this settings file');
+  /*
+   * Said out loud in the diagnostic, not only in the type. Reaching this step means the file
+   * was handed over; whether the engine applied it is answered by MEASURED and by nothing
+   * here. SPEC: EHB-R2.
+   */
+  if (o.passedToInvocation && o.measurement === undefined) {
+    reasons.push(
+      'the settings file was passed to the invocation; the engine reported no effective policy, so this is not engine-confirmed',
+    );
+  }
 
   const refusal = measurementRefusal(o.measurement, {
     policyDigest: o.profile.policyDigest,

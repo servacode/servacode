@@ -672,6 +672,36 @@ describe('research is captured, verified, and expires', () => {
     expect(refusals.join(' ')).toContain('not approved to leave');
   });
 
+  it('the guard is given the names it needs, at the door it guards', () => {
+    /*
+     * SPEC: finding OLER-REV-DISCLOSURE-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The test above proves `disclosureRefusal` catches a project name — when it is given one.
+     * At the only call site it was given `[]`, so the sole egress guard could not refuse
+     * anything: a check watching the one door it exists for, agreeing with everything.
+     *
+     * The names come from the governed store rather than a caller, matching the leakage wall:
+     * a name Serva holds is a fact, a name a caller passes is a claim. Asserted structurally
+     * because the alternative is a live network call, and a test that reached the network to
+     * prove care about the network would be its own counterexample.
+     */
+    const source = readFileSync('src/intelligence/departments/research.ts', 'utf8');
+    expect(source).toContain('projectSecrets: knownProjectNames(ctx.store)');
+
+    /* And an empty list really is inert, which is why supplying it matters. */
+    expect(
+      disclosureRefusal(
+        {
+          id: 'SC-RR-002',
+          question: 'what do competitors charge for Project Nightingale style dashboards',
+          scope: 'pricing',
+          dataAllowedToLeave: [],
+        } as never,
+        [],
+      ),
+    ).toEqual([]);
+  });
+
   it('a verifier may not verify its own claim', () => {
     const v = {
       id: 'SC-CV-001',

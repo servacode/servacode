@@ -22,6 +22,7 @@ import {
   capturedEvidenceElement,
 } from '../research/capture.js';
 import { RetrievalOutcome, retrieveForResearch } from '../research/gateway.js';
+import { knownProjectNames } from '../learning.js';
 import { DEFAULT_VALIDITY_DAYS, validUntilFrom } from '../research/freshness.js';
 import { jsonSchemaFor } from '../execution/jsonSchema.js';
 import { researchSeeds } from '../research/seeds.js';
@@ -232,12 +233,30 @@ export const marketResearchDepartment: DepartmentConfig<typeof ResearchOutputSch
         : await retriever.discover(question, researchSeeds().hosts);
     const urls = [...new Set([...researchSeeds().urls, ...discovered])];
 
+    /*
+     * THE DISCLOSURE GUARD, GIVEN SOMETHING TO GUARD AGAINST.
+     *
+     * SPEC: finding OLER-REV-DISCLOSURE-1 (MEDIUM), 1.0.1 security review.
+     *
+     * `disclosureRefusal` is the only thing standing between a research question and the
+     * network, and it matches the question against a list of project secrets the CALLER
+     * supplies. This call site supplied none, so the list was empty and the guard could never
+     * refuse anything — a check at the one door it exists to watch, agreeing with everything.
+     *
+     * The question itself is raw agent escalation text, which is exactly the material that
+     * could carry a client's name into a search query.
+     *
+     * The names come from the governed store rather than from a caller, for the same reason
+     * they do in the leakage wall: a name Serva actually holds is a fact, and a name a caller
+     * passes is a claim.
+     */
     const result = await retrieveForResearch(ctx.gateway, {
       contract: REGISTRY.get(RESEARCH_AGENT),
       request: stored,
       urls,
       runId: 'prepare:' + requestId,
       validityDays: DEFAULT_VALIDITY_DAYS['COMPETITOR_FEATURES'] ?? 90,
+      projectSecrets: knownProjectNames(ctx.store),
     });
 
     if (result.outcome !== RetrievalOutcome.CAPTURED) {

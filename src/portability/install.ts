@@ -168,11 +168,42 @@ export function installation(root: string): Installation {
   const problems: string[] = [];
   const versionsRoot = join(root, VERSIONS_DIR);
 
+  /*
+   * A DAMAGED INSTALLATION IS A PROBLEM TO REPORT, NOT AN EXCEPTION TO THROW.
+   *
+   * SPEC: finding IUR-REVIEW-FAILOPEN (MEDIUM), 1.0.1 security review.
+   *
+   * `resolveActive` promises "FAIL OPEN, DELIBERATELY... the alternative — refusing to start —
+   * would mean a corrupted pointer bricks the CLI an owner needs in order to fix the pointer".
+   * It then calls this function, whose filesystem reads were unguarded: a `versions/`
+   * directory that cannot be listed, an entry that vanishes between listing and `statSync`, or
+   * an unreadable `current` threw straight through the promise and took the CLI with it.
+   *
+   * Every read below is now a question that can be answered "I could not tell", and each such
+   * answer becomes a problem an owner can read on stderr rather than a stack trace.
+   */
   const installed: InstalledVersion[] = [];
-  if (existsSync(versionsRoot)) {
-    for (const entry of readdirSync(versionsRoot)) {
+  let entries: readonly string[] = [];
+  try {
+    if (existsSync(versionsRoot)) entries = readdirSync(versionsRoot);
+  } catch (e) {
+    problems.push(
+      'the versions directory could not be read (' +
+        String(e instanceof Error ? e.message : e) +
+        '), so Serva cannot tell what is installed',
+    );
+  }
+  {
+    for (const entry of entries) {
       const dir = join(versionsRoot, entry);
-      if (!statSync(dir).isDirectory()) continue;
+      let isDirectory = false;
+      try {
+        isDirectory = statSync(dir).isDirectory();
+      } catch {
+        problems.push(entry + ' could not be inspected, so Serva does not know what it is');
+        continue;
+      }
+      if (!isDirectory) continue;
       const marker = readMarker(dir);
       if (marker === undefined) {
         problems.push(entry + ' has no readable version marker, so Serva does not know what it is');
@@ -190,12 +221,20 @@ export function installation(root: string): Installation {
 
   const currentPath = join(root, CURRENT_LINK);
   let current: InstalledVersion | undefined;
-  if (existsSync(currentPath)) {
-    const named = readFileSync(currentPath, 'utf8').trim();
-    current = installed.find((v) => v.version === named);
-    if (current === undefined) {
-      problems.push('`current` names ' + named + ', which is not installed');
+  try {
+    if (existsSync(currentPath)) {
+      const named = readFileSync(currentPath, 'utf8').trim();
+      current = installed.find((v) => v.version === named);
+      if (current === undefined) {
+        problems.push('`current` names ' + named + ', which is not installed');
+      }
     }
+  } catch (e) {
+    problems.push(
+      '`current` could not be read (' +
+        String(e instanceof Error ? e.message : e) +
+        '), so Serva cannot tell which version it points at',
+    );
   }
 
   return {
@@ -560,6 +599,35 @@ export function performSwitch(
  */
 export function removeVersion(install: Installation, version: string): ChangePlan {
   const from = install.current?.version;
+
+  /*
+   * WHAT IS RUNNING, WHICH IS NOT ALWAYS WHAT IS CURRENT.
+   *
+   * SPEC: finding IUR-REVIEW-REMOVE-RUNNING (MEDIUM), 1.0.1 security review.
+   *
+   * The header above says this refuses "removing what is running". It checked `current`, and
+   * the two are deliberately allowed to differ: `install adopt` records a version while
+   * `mustRunLocally`/`resolveActive` keep the invoked build executing, so `current` names one
+   * version and the running process is another. In that state `remove <running>` passed every
+   * guard and rmSync'd the directory of the build executing the command.
+   *
+   * Checked before `current`, because a process deleting itself is the worse of the two and
+   * the message should say so.
+   */
+  if (version === install.running.version) {
+    return {
+      outcome: ChangeOutcome.REFUSED,
+      ...(from === undefined ? {} : { from }),
+      to: version,
+      steps: [],
+      reversible: false,
+      reason:
+        'Serva ' +
+        version +
+        ' is the version running this command. Run it from another version to remove this one.',
+    };
+  }
+
   if (version === from) {
     return {
       outcome: ChangeOutcome.REFUSED,

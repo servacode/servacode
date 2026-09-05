@@ -1324,6 +1324,39 @@ describe('a credential printed by a build does not become permanent record', () 
     expect(r.count).toBe(1);
   });
 
+  it('redacts the bare forms build output actually uses', () => {
+    /*
+     * SPEC: finding SEC-REV-EXEC-A2 (MEDIUM), 1.0.1 security review — the second pass.
+     *
+     * The first pass widened the SHAPE to unquoted values and left the keyword set alone, so
+     * `TOKEN=` and `APIKEY=` — the two forms a build log is most likely to contain — still
+     * went verbatim into immutable canon. Fixing the reported example and not the class is
+     * exactly the habit this review keeps catching.
+     */
+    for (const line of [
+      'TOKEN=zK7RmQ2wX9tLpV4nB6cY',
+      'export APIKEY=zK7RmQ2wX9tLpV4nB6cY',
+      'CLIENT_SECRET: zK7RmQ2wX9tLpV4nB6cY',
+      'passphrase=zK7RmQ2wX9tLpV4nB6cY',
+    ]) {
+      const r = redactSecrets(line);
+      expect(r.text, line).not.toContain('zK7RmQ2wX9tLpV4nB6cY');
+      expect(r.count, line).toBeGreaterThan(0);
+    }
+  });
+
+  it('a keyword as ordinary as `token` still does not eat ordinary output', () => {
+    /*
+     * The cost of widening the keyword set, bounded by the length threshold. `token` appears
+     * in every parser that ever printed a diagnostic; a redactor that ate those would make the
+     * evidence useless, which is its own way of hiding a finding.
+     */
+    const plain = 'token=42\nnext token: identifier\nbearer of record: none';
+    const r = redactSecrets(plain);
+    expect(r.text).toBe(plain);
+    expect(r.count).toBe(0);
+  });
+
   it('does not redact a short unquoted value that is plainly not a credential', () => {
     /*
      * The other half, and the reason the unquoted branch asks for twenty characters. A
@@ -1520,6 +1553,27 @@ describe('the choke point examines the verb, whatever precedes it', () => {
   it('the =value forms need no special case, and still do not hide it', () => {
     /* A single token beginning with '-', so the ordinary flag rule already covers it. */
     expect(gitVerb(['--git-dir=/x', '--work-tree=/y', FORBIDDEN])).toBe(FORBIDDEN);
+  });
+
+  it('an option this parser does not know stops it, rather than being assumed harmless', () => {
+    /*
+     * SPEC: finding GIT-INT-M1 (MEDIUM), 1.0.1 security review.
+     *
+     * The parser skipped every unrecognised `-…`, which assumes it takes no value. A
+     * value-taking global absent from the set therefore made the option's VALUE read as the
+     * verb — and when that value looks like an allowed verb, the choke point approves one
+     * subcommand while git runs another. The same desync the two earlier fixes closed, one
+     * option further out; guessing is what made all three possible.
+     *
+     * `undefined` means "no verb could be determined", and the choke point refuses that.
+     */
+    expect(gitVerb(['--some-future-global', 'status', 'push'])).toBeUndefined();
+    expect(gitVerb(['-Z', 'status'])).toBeUndefined();
+
+    /* And the forms it DOES know still resolve, so this is not a blanket refusal. */
+    expect(gitVerb(['--no-pager', 'status'])).toBe('status');
+    expect(gitVerb(['--git-dir=/x', 'status'])).toBe('status');
+    expect(gitVerb(['-c', 'user.name=x', 'commit'])).toBe('commit');
   });
 
   it('every forbidden verb is still found behind a global that takes a value', () => {

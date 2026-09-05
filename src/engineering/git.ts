@@ -66,6 +66,13 @@ const GIT_GLOBALS_TAKING_A_VALUE: ReadonlySet<string> = new Set([
   '--attr-source',
 ]);
 
+/**
+ * Global flags this service passes that take NO value. Anything else is unknown.
+ *
+ * SPEC: finding GIT-INT-M1 (MEDIUM), 1.0.1 security review.
+ */
+const GIT_GLOBAL_FLAGS: ReadonlySet<string> = new Set(['--no-pager', '--literal-pathspecs']);
+
 export function gitVerb(args: readonly string[]): string | undefined {
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i];
@@ -74,7 +81,28 @@ export function gitVerb(args: readonly string[]): string | undefined {
       i += 1;
       continue;
     }
-    if (a.startsWith('-')) continue;
+    if (GIT_GLOBAL_FLAGS.has(a)) continue;
+    /*
+     * `--option=value` is ONE token and cannot swallow the next one, so it is safe to skip
+     * whatever the option is. The desync below is only possible with the separate-value form.
+     */
+    if (a.startsWith('--') && a.includes('=')) continue;
+    /*
+     * AN OPTION THIS PARSER DOES NOT KNOW IS NOT ASSUMED TO BE HARMLESS.
+     *
+     * SPEC: finding GIT-INT-M1 (MEDIUM), 1.0.1 security review.
+     *
+     * Skipping every unrecognised `-…` assumes it takes no value. A value-taking global absent
+     * from the set above therefore made this return the option's VALUE as the verb — and if
+     * that value happened to read as an allowed verb, the choke point approved one subcommand
+     * while git ran another. That is the same desync the two earlier fixes here closed, one
+     * option further out, and guessing is what made all three possible.
+     *
+     * `undefined` means "no verb could be determined", which the choke point refuses. Fail
+     * closed on the unknown: an option nobody taught this parser is a reason to stop, not to
+     * carry on and hope.
+     */
+    if (a.startsWith('-')) return undefined;
     return a;
   }
   return undefined;

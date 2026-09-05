@@ -944,6 +944,66 @@ describe('a version is validated before anything is created from it', () => {
     }
   });
 
+  it('an unreadable installation is reported, and does not brick the CLI', () => {
+    /*
+     * SPEC: finding IUR-REVIEW-FAILOPEN (MEDIUM), 1.0.1 security review.
+     *
+     * `resolveActive` promises to FAIL OPEN so a corrupted pointer never stops the CLI an
+     * owner needs in order to fix the pointer — then called `installation()`, whose reads
+     * were unguarded. A `versions/` entry that cannot be inspected threw straight through the
+     * promise.
+     *
+     * A FILE where a version directory should be is the cheap, portable way to make a read
+     * fail on any platform: `readMarker` cannot find a marker inside it.
+     */
+    const root = mkdtempSync(join(tmpdir(), 'serva-failopen-'));
+    try {
+      mkdirSync(join(root, 'versions'), { recursive: true });
+      writeFileSync(join(root, 'versions', 'notadir'), 'this is a file\n', 'utf8');
+      writeFileSync(join(root, 'current'), '9.9.9\n', 'utf8');
+
+      const install = installation(root);
+      expect(install.problems.length, 'the damage is reported').toBeGreaterThan(0);
+      expect(install.running.version, 'and the running build still answers').toBe(SERVA_VERSION);
+
+      /* And the resolver above it still returns rather than throwing. */
+      const decision = resolveActive({
+        root,
+        runningVersion: SERVA_VERSION,
+        alreadyHandedOff: false,
+      });
+      expect(decision.handOffTo, 'a broken pointer hands off to nothing').toBeUndefined();
+      expect(String(decision.problem)).toContain('9.9.9');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('the version running this command cannot be removed, even when it is not current', () => {
+    /*
+     * SPEC: finding IUR-REVIEW-REMOVE-RUNNING (MEDIUM), 1.0.1 security review.
+     *
+     * `removeVersion`'s header says it refuses "removing what is running". It checked
+     * `current` — and the two are deliberately allowed to differ: `install adopt` records one
+     * version while the invoked build keeps executing. In that state the running build could
+     * delete its own directory and every guard agreed.
+     */
+    const install = {
+      root: '/root',
+      installed: [
+        { version: '1.0.0', storeSchema: 1, installedAt: 'T' },
+        { version: '1.0.1', storeSchema: 1, installedAt: 'T' },
+      ],
+      current: { version: '1.0.0', storeSchema: 1, installedAt: 'T' },
+      running: { version: '1.0.1', storeSchema: 1 },
+      problems: [],
+    } as never;
+
+    const plan = removeVersion(install, '1.0.1');
+    expect(plan.outcome).toBe(ChangeOutcome.REFUSED);
+    expect(plan.reason).toContain('running this command');
+  });
+
   it('no version path can be built from a name that is not a version', () => {
     /*
      * SPEC: finding IUR-CAPTURE-1 (MEDIUM), 1.0.1 security review.

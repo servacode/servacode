@@ -121,10 +121,16 @@ export const SECRET_RULES: readonly SecretRule[] = Object.freeze([
      * The unquoted branch demands twenty token characters rather than twelve: unquoted values
      * are bare words, and a shorter threshold would redact `secret: true` and ordinary
      * identifiers out of the evidence an owner reads.
+     *
+     * SPEC: finding SEC-REV-EXEC-A2 (MEDIUM), 1.0.1 security review — the second pass on this
+     * rule. Widening the SHAPE left the KEYWORD set as it was, so the commonest forms in build
+     * output, `TOKEN=` and `APIKEY=`, still went through. The length threshold is what makes a
+     * word as ordinary as `token` safe to list: a parser printing `token=42` is untouched, and
+     * twenty unbroken token characters after `token=` is not a lexer talking.
      */
     category: SecretCategory.GENERIC_ASSIGNMENT,
     pattern:
-      /\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b\s*[:=]\s*(?:["'][^"'\s]{12,}["']|[A-Za-z0-9_\-./+=]{20,})/i,
+      /\b(?:password|passwd|passphrase|secret|credential|bearer|token|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)\b\s*[:=]\s*(?:["'][^"'\s]{12,}["']|[A-Za-z0-9_\-./+=]{20,})/i,
     severity: 'MEDIUM',
     description: 'A credential-shaped assignment with a long literal value.',
   },
@@ -147,6 +153,19 @@ export interface SecretsScanResult {
   readonly findings: readonly SecretFinding[];
   readonly filesScanned: number;
   readonly filesSkipped: number;
+  /**
+   * Files in the change that were NOT looked at, and why.
+   *
+   * SPEC: finding SEC-REV-EXEC-A1 (MEDIUM), 1.0.1 security review.
+   *
+   * `filesSkipped` was a count, and a count cannot tell an owner whether the scan skipped a
+   * PNG or a three-megabyte source file. The two are not the same: one is a policy exclusion,
+   * the other is a place a credential could sit while the scan reports nothing.
+   *
+   * Only the second kind is listed here. A vendored or binary path is excluded by design and
+   * saying so for each would bury the cases that matter.
+   */
+  readonly notScanned: readonly { readonly path: string; readonly reason: string }[];
   readonly blocking: boolean;
 }
 
@@ -174,6 +193,8 @@ export function scanChangeSetForSecrets(
   const findings: SecretFinding[] = [];
   let scanned = 0;
   let skipped = 0;
+  /* Files a credential could be hiding in that this scan did not read. */
+  const notScanned: { path: string; reason: string }[] = [];
 
   for (const entry of changeSet.entries) {
     if (entry.status === 'D') continue;
@@ -195,11 +216,16 @@ export function scanChangeSetForSecrets(
       const buf = readFileSync(abs);
       if (buf.length > MAX_SCAN_BYTES) {
         skipped += 1;
+        notScanned.push({
+          path: entry.path,
+          reason: 'larger than ' + String(MAX_SCAN_BYTES) + ' bytes, so it was not read or scanned',
+        });
         continue;
       }
       text = buf.toString('utf8');
     } catch {
       skipped += 1;
+      notScanned.push({ path: entry.path, reason: 'could not be read' });
       continue;
     }
     scanned += 1;
@@ -210,6 +236,7 @@ export function scanChangeSetForSecrets(
     findings,
     filesScanned: scanned,
     filesSkipped: skipped,
+    notScanned,
     // A high-confidence finding blocks acceptance. A medium one is reported.
     blocking: findings.some((f) => f.severity === 'HIGH'),
   };
