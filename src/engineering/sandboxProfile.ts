@@ -179,30 +179,29 @@ export const CREDENTIAL_DENY_FILES: readonly string[] = Object.freeze([
   '~/.git-credentials',
 ]);
 
-/**
- * The repository's OWN git config, which the user-level deny list does not cover.
+/*
+ * THE REPOSITORY'S OWN GIT CONFIG: ATTEMPTED, MEASURED, AND NOT CLOSED THIS WAY.
  *
  * SPEC: finding ENGINEERING-HARD-BOUNDARY/EHB-1 (MEDIUM), 1.0.1 security review.
  *
- * `.git` is re-opened for reading because a linked worktree is a pointer into it and git does
- * not work without it — measured, not assumed. The rationale for that said "the history
- * discloses nothing the worktree does not", and for objects and refs it is true. It is not
- * true of `<project>/.git/config`, which is repository-level configuration rather than
- * content: remote URLs, which can carry a token inline.
+ * `<project>/.git/config` is readable by a Producer, because `.git` is re-opened below and the
+ * user-level `~/.gitconfig` deny does not cover the repo-level file. It can carry a token in a
+ * remote URL, so it was denied on both channels this sandbox offers — declared, and honestly
+ * marked unproven, because a DENY narrower than an ALLOW was the reverse of the precedence
+ * this profile already relies on and had never been measured here.
  *
- * `~/.gitconfig` and `~/.git-credentials` were already denied. The repo-level file is the same
- * class of thing and was not, which is the only reason it is named separately here.
+ * IT HAS NOW BEEN MEASURED, and the answer refuted the fix. With the deny in place the live
+ * qualification reported `controls: 6/7` and P4 — "git works inside the worktree", a POSITIVE
+ * control — REFUSED with exit 128, the documented signature of git being unable to read the
+ * repository's git directory. Removing it: `controls: 7/7`, P4 SUCCEEDED. The deny is honoured
+ * and it breaks git for the Producer, which is the whole reason `.git` is open at all.
  *
- * WHAT IS NOT YET PROVEN, STATED RATHER THAN IMPLIED: this profile already depends on ALLOW
- * beating DENY for a narrower path — the project is denied and `.git` re-opened inside it —
- * so a DENY narrower than an ALLOW is the reverse precedence, and this build has not measured
- * it. The deny is declared on both channels the sandbox offers; whether the sandbox honours it
- * over the `.git` allow is a question for a probe, not for this comment. Until that
- * measurement exists, treat the repo config as narrowed-by-intent and not as contained.
+ * So the exposure stands, stated rather than papered over: a Producer confined to one worktree
+ * can read this repository's git config. Closing it needs something this file cannot do alone
+ * — a sanitised git directory, or a launcher that can deny a single file without denying what
+ * git needs beside it. What must not happen is a declared deny that reads as containment and
+ * is neither.
  */
-export function projectGitConfig(projectPath: string): string {
-  return join(projectPath, '.git', 'config');
-}
 
 /**
  * The regions a Producer has no business reading, denied as ROOTS rather than as a list
@@ -310,8 +309,6 @@ export function buildSandboxProfile(input: SandboxProfileInput): GeneratedSandbo
           workspacesRoot,
           '~/',
           ...CREDENTIAL_DENY_FILES,
-          /* Named after `project` is denied and before `.git` is re-opened below. */
-          map(projectGitConfig(hostProject)),
         ],
         /*
          * The worktree, and the repository it is a worktree OF.
@@ -337,10 +334,7 @@ export function buildSandboxProfile(input: SandboxProfileInput): GeneratedSandbo
         strictAllowlist: input.networkAllowed !== true,
       },
       credentials: {
-        files: [...CREDENTIAL_DENY_FILES, map(projectGitConfig(hostProject))].map((path) => ({
-          path,
-          mode: 'deny',
-        })),
+        files: CREDENTIAL_DENY_FILES.map((path) => ({ path, mode: 'deny' })),
         envVars: CREDENTIAL_DENY_ENV.map((name) => ({ name, mode: 'deny' })),
       },
     },
