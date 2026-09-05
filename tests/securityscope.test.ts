@@ -13,7 +13,7 @@ import {
   reviewUnitsFor,
 } from '../src/acceptance/securityReviewRun.js';
 import { REQUIRED_SCOPE } from '../src/acceptance/securityReview.js';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -352,6 +352,49 @@ describe('a review unit stays small enough to actually be read', () => {
         unit.prefixes.some((prefix) => f.startsWith(prefix)) &&
         !(unit.except ?? []).some((prefix) => f.startsWith(prefix)),
     );
+
+  /*
+   * AND THE SAME QUESTION IN THE UNIT A FILE COUNT COULD NOT ANSWER.
+   *
+   * SPEC: the repeated ENGINE_ERROR on `Serva self-acceptance authority`, 1.0.1 acceptance.
+   *
+   * That unit was 13 files — comfortable against the ceiling above — and about 274,000
+   * characters, 49,000 more than the next largest. It is the ONLY unit that ever failed to
+   * produce a judgement: twice in six rounds, both `ENGINE_ERROR`, while no other unit failed
+   * once. The file count was measuring the wrong thing for the one unit it needed to catch.
+   *
+   * Measured, like the ceiling above: 273,884 is the size that was observed to fail, and every
+   * unit that has never failed is at or below 224,654. The number sits between them.
+   */
+  const SIZE_OBSERVED_TO_FAIL = 273_884;
+  const SIZE_CEILING = 240_000;
+
+  it('no unit is given more to read than a reviewer has been shown to get through', () => {
+    expect(SIZE_CEILING, 'the ceiling must sit below what was observed to fail').toBeLessThan(
+      SIZE_OBSERVED_TO_FAIL,
+    );
+
+    const oversized: string[] = [];
+    for (const area of REQUIRED_SCOPE) {
+      for (const unit of reviewUnitsFor(area)) {
+        const owned = selectFor(unit);
+        const context = sourceFiles().filter(
+          (f) => !owned.includes(f) && (unit.context ?? []).some((p) => f.startsWith(p)),
+        );
+        const chars = [...owned, ...context].reduce(
+          (n, f) => n + (existsSync(f) ? readFileSync(f, 'utf8').length : 0),
+          0,
+        );
+        if (chars > SIZE_CEILING) oversized.push(unit.unit + ' — ' + String(chars) + ' characters');
+      }
+    }
+    expect(
+      oversized,
+      'these units are larger than a reviewer has been shown to get through:' +
+        String.fromCharCode(10) +
+        oversized.join(String.fromCharCode(10)),
+    ).toEqual([]);
+  });
 
   it('no unit is given more files than a reviewer has been shown to read', () => {
     const oversized: string[] = [];

@@ -335,6 +335,55 @@ export interface SubScope {
 export const AREA_SUBSCOPES: Readonly<Record<string, Readonly<Record<string, SubScope>>>> =
   Object.freeze({
     /*
+     * THE LARGEST UNIT IN THE RUN, MEASURED BY WHAT A REVIEWER MUST ACTUALLY READ.
+     *
+     * SPEC: the repeated ENGINE_ERROR on this unit, 1.0.1 acceptance.
+     *
+     * `Serva self-acceptance authority` is 13 files and about 274,000 characters — 49,000 more
+     * than the next largest unit — and it is the ONLY unit that has ever failed to produce a
+     * judgement: twice in six rounds, both times `ENGINE_ERROR`, while no other unit failed
+     * once.
+     *
+     * I dismissed size as the cause the first time, on the grounds that the same unit had
+     * succeeded elsewhere with the same payload. That refutes "size always fails"; it does not
+     * refute "size puts this unit on the margin", which six rounds of data support and one
+     * round could not distinguish.
+     *
+     * The existing ceiling counts FILES, and by that measure this unit was comfortable at 13
+     * of 20. What a reviewer has to read is characters, so the file count was measuring the
+     * wrong thing for the one unit it needed to catch.
+     *
+     * Split by responsibility, and the second half is defined as "the rest of the area" rather
+     * than a second list, so a file added here later lands somewhere by default instead of
+     * falling out of the partition.
+     */
+    'Serva self-acceptance authority': {
+      'Serva self-acceptance authority — the proof model': {
+        prefixes: [
+          'src/acceptance/proof.ts',
+          'src/acceptance/requirements.ts',
+          'src/acceptance/verificationRecord.ts',
+          'src/acceptance/portabilityProof.ts',
+          'src/acceptance/evidenceClass.ts',
+          'src/acceptance/reviewAuthority.ts',
+          'src/acceptance/status.ts',
+        ],
+      },
+      'Serva self-acceptance authority — the review and live chains': {
+        prefixes: ['src/acceptance/'],
+        except: [
+          'src/acceptance/proof.ts',
+          'src/acceptance/requirements.ts',
+          'src/acceptance/verificationRecord.ts',
+          'src/acceptance/portabilityProof.ts',
+          'src/acceptance/evidenceClass.ts',
+          'src/acceptance/reviewAuthority.ts',
+          'src/acceptance/status.ts',
+        ],
+      },
+    },
+
+    /*
      * TWENTY-THREE FILES IN ONE SITTING, AND THE REVIEWER READ TWENTY-TWO.
      *
      * SPEC: the 1.0.1 security scope triage.

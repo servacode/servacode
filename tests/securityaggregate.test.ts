@@ -818,7 +818,20 @@ describe('a unit that never received its required context has not decided anythi
    * rather than read off the record being judged. Two records, one per direction, and the two
    * conditions are never folded into each other.
    */
-  const UNIT = 'Serva self-acceptance authority';
+  /*
+   * DERIVED, NOT NAMED. A hard-coded unit name silently stopped matching when the area was
+   * split, and both tests below went on passing while testing nothing — which is the failure
+   * they exist to catch, arriving in the test itself.
+   */
+  const UNIT = String(
+    REQUIRED_SCOPE.flatMap((area) => reviewUnitsFor(area)).find((u) => u.context.length > 0)?.unit,
+  );
+
+  it('the fixture names a unit that actually requires context', () => {
+    expect(UNIT, 'no unit declares context, so the tests below would prove nothing').not.toBe(
+      'undefined',
+    );
+  });
 
   it('an ACCEPTED record whose declared context never arrived carries no authority', () => {
     const rt = project();
