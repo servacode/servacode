@@ -239,19 +239,48 @@ export function validateReviewerResult(input: ReviewValidationInput): ReviewVali
   if (capability === undefined) {
     problems.push('Run ' + input.runRef + ' has no CAPABILITY_BOUND event.');
   } else {
-    const available = Array.isArray(capability['available'])
-      ? (capability['available'] as unknown[]).filter((x): x is string => typeof x === 'string')
-      : [];
-    const forbidden = available.filter((t) => REVIEWER_FORBIDDEN_TOOLS.includes(t));
-    if (forbidden.length > 0) {
+    /*
+     * A GRANT THAT CANNOT BE READ IS NOT A GRANT OF NOTHING.
+     *
+     * SPEC: finding EAA-SR-1 (MEDIUM), 1.0.1 security review.
+     *
+     * These read `available` and `filesystem.write` and treated a missing or malformed field
+     * as an empty list — so a capability event whose shape did not match silently satisfied
+     * the read-only guarantee that independent acceptance rests on. The check degraded OPEN,
+     * which is the one direction a check about authority must never degrade.
+     *
+     * Measured before tightening: real CAPABILITY_BOUND events carry `available` as an array
+     * and `filesystem` as `{read, write, readDenied}`, so requiring the shape refuses nothing
+     * that legitimately happens today.
+     */
+    if (!Array.isArray(capability['available'])) {
       problems.push(
-        'The reviewer run had write or execute tools available (' +
-          forbidden.join(', ') +
-          '), so it was not read-only.',
+        'Run ' +
+          input.runRef +
+          ' records a capability grant with no readable tool list, so it cannot be shown read-only.',
       );
+    } else {
+      const available = (capability['available'] as unknown[]).filter(
+        (x): x is string => typeof x === 'string',
+      );
+      const forbidden = available.filter((t) => REVIEWER_FORBIDDEN_TOOLS.includes(t));
+      if (forbidden.length > 0) {
+        problems.push(
+          'The reviewer run had write or execute tools available (' +
+            forbidden.join(', ') +
+            '), so it was not read-only.',
+        );
+      }
     }
-    const write = capability['filesystem'] as { write?: unknown } | undefined;
-    if (Array.isArray(write?.write) && write.write.length > 0) {
+
+    const filesystem = capability['filesystem'] as { write?: unknown } | undefined;
+    if (filesystem === undefined || !Array.isArray(filesystem.write)) {
+      problems.push(
+        'Run ' +
+          input.runRef +
+          ' records no readable filesystem scope, so its write authority is unknown.',
+      );
+    } else if (filesystem.write.length > 0) {
       problems.push('The reviewer run had a writable filesystem scope.');
     }
   }

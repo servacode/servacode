@@ -436,7 +436,23 @@ export function planSwitch(
    * Going BACK to a build that understands less still requires knowing the projects, and still
    * refuses when it does not. That is the case the refusal was written for.
    */
-  const leaving = install.current?.storeSchema ?? install.running.storeSchema;
+  /*
+   * THE FLOOR IS WHAT EITHER BUILD COULD HAVE WRITTEN.
+   *
+   * SPEC: finding IUR-REV-1 (MEDIUM), 1.0.1 security review.
+   *
+   * This preferred the CURRENT pointer's schema over the RUNNING build's. The two are
+   * deliberately allowed to differ — `install adopt` records one version while the invoked
+   * build keeps executing — and the store may have been written by either. Taking one and
+   * ignoring the other sets the data-loss floor below what is actually on disk.
+   *
+   * The higher of the two is the only floor that cannot lose a field: whichever build wrote
+   * last, a target that understands at least as much understands what it wrote.
+   */
+  const leaving = Math.max(
+    install.current?.storeSchema ?? install.running.storeSchema,
+    install.running.storeSchema,
+  );
   const cannotLoseData = target.storeSchema >= leaving;
 
   /*

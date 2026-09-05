@@ -2,6 +2,7 @@ import { qualificationForRun } from '../substrate/qualificationRecord.js';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
+import { digestOf } from '../core/hash.js';
 import { SERVA_VERSION } from '../portability/version.js';
 import { ACCEPTANCE_LINES, REQUIREMENTS, requirementsFor } from './requirements.js';
 import { ProofStatus, resolveProof } from './proof.js';
@@ -178,8 +179,29 @@ export function defaultRunResolver(root: string): RunResolver {
         if (latest === undefined) continue;
         const envelope = JSON.parse(readFileSync(join(dir, latest), 'utf8')) as {
           body?: { agentId?: string; outcome?: string };
+          digest?: unknown;
         };
-        if (envelope.body !== undefined) return envelope.body;
+        if (envelope.body === undefined) continue;
+
+        /*
+         * THE SAME INTEGRITY CHECK THE STORE MAKES, BECAUSE THIS READS PAST THE STORE.
+         *
+         * SPEC: finding SC-SSA-REV-C2 (MEDIUM), 1.0.1 security review.
+         *
+         * `Store.getCanon` refuses a record whose body no longer matches its recorded digest —
+         * "modified out of band" — and that tamper-evidence is the property the acceptance
+         * model leans on when it treats a persisted run as a fact. This function reads the
+         * version file directly, for reasons that are good (a live fixture's store is not this
+         * project's, and opening a foreign Store to answer two fields is heavier than it is
+         * worth), and in doing so it skipped the one check that made the read trustworthy.
+         *
+         * A run record that does not match its digest resolves to nothing here. An unresolved
+         * run is already the safe answer everywhere above: it refuses, it never assumes.
+         */
+        if (typeof envelope.digest !== 'string' || digestOf(envelope.body) !== envelope.digest) {
+          return undefined;
+        }
+        return envelope.body;
       } catch {
         /* An unreadable record is an unresolved run, never a resolved one. */
         return undefined;

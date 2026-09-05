@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { join, relative } from 'node:path';
 import { EnforcementClass } from '../vocab/index.js';
 import { QualificationAttempt } from '../substrate/types.js';
-import { CONTENT_DIR, MANIFEST_NAME, createBackup, verifyBackup } from '../portability/backup.js';
+import { CONTENT_DIR, createBackup, verifyBackup } from '../portability/backup.js';
 import { inspectRestore, performRestore } from '../portability/restore.js';
 import { MACHINE_BOUND_KEYS } from '../portability/machine.js';
 import { isServaProject } from '../app/services.js';
@@ -156,8 +156,21 @@ export function walkPortability(input: PortabilityWalkInput): PortabilityWalkRes
   /* --------------------------------------------- 3. nothing secret, nothing machine-bound */
 
   const bundleFiles = existsSync(bundlePath) ? tree(bundlePath) : [];
+  /*
+   * EVERY TEXT FILE IN THE BUNDLE, NOT ONLY THE ONES ENDING `.json`.
+   *
+   * SPEC: finding SC-SSA-REV-C1 (MEDIUM), 1.0.1 security review.
+   *
+   * The trace is written as `.jsonl` and a project carries ordinary documents, so filtering on
+   * `.json` meant the scan read the manifest and the canon and nothing else — while the thing
+   * a credential is most likely to be sitting in is a note or a log line.
+   *
+   * Binary is skipped by extension rather than by sniffing: a scan that tried to decode a
+   * video would spend its time on bytes that cannot carry a readable credential anyway.
+   */
+  const BINARY = /\.(png|jpe?g|gif|ico|pdf|zip|gz|tar|woff2?|ttf|eot|mp4|mp3|wasm|exe|dll)$/i;
   const bundleText = bundleFiles
-    .filter((f) => f.endsWith('.json') || f.endsWith(MANIFEST_NAME))
+    .filter((f) => !BINARY.test(f))
     .map((f) => {
       try {
         return readFileSync(join(bundlePath, f), 'utf8');

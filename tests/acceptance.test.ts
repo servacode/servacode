@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AcceptanceState,
@@ -612,6 +612,53 @@ describe('defaultRunResolver resolves a run the Store really wrote', () => {
     expect(resolved, 'the run the Store just wrote did not resolve').toBeDefined();
     expect(resolved?.outcome).toBe('COMPLETED');
     expect(resolved?.agentId).toBe('SC-AGENT-220');
+  });
+
+  it('a run record edited out of band resolves to nothing', () => {
+    /*
+     * SPEC: finding SC-SSA-REV-C2 (MEDIUM), 1.0.1 security review.
+     *
+     * `Store.getCanon` refuses a record whose body no longer matches its recorded digest, and
+     * that tamper-evidence is what lets the acceptance model treat a persisted run as a fact.
+     * This resolver reads the version file directly — for good reasons: a live fixture's store
+     * is not this project's — and skipped the one check that made the read trustworthy.
+     *
+     * Edited here the way an out-of-band edit actually looks: the body changed, the digest
+     * left as it was. An unresolved run is the safe answer, and every caller already refuses
+     * on it rather than assuming.
+     */
+    const root = tempRoot();
+    roots.push(root);
+    const rt = ServaRuntime.init('RahalGo', 'idea', { root });
+    try {
+      const tx = rt.store.begin();
+      tx.putCanon('agentRunRecord', 'SC-RUN-000044', {
+        runId: 'SC-RUN-000044',
+        agentId: 'SC-AGENT-220',
+        outcome: 'FAILED',
+      });
+      tx.commit();
+    } finally {
+      rt.close();
+    }
+
+    const file = join(root, '.serva', 'canon', 'agentRunRecord', 'SC-RUN-000044', 'v1.json');
+    const envelope = JSON.parse(readFileSync(file, 'utf8')) as {
+      body: { outcome: string };
+      digest: string;
+    };
+    /* Sanity: it resolves before the edit, so the assertion below is about the edit. */
+    expect(
+      defaultRunResolver(process.cwd())({ runId: 'SC-RUN-000044', storePath: root }),
+    ).toBeDefined();
+
+    envelope.body.outcome = 'COMPLETED';
+    writeFileSync(file, JSON.stringify(envelope), 'utf8');
+
+    expect(
+      defaultRunResolver(process.cwd())({ runId: 'SC-RUN-000044', storePath: root }),
+      'a record modified out of band must not resolve as a fact',
+    ).toBeUndefined();
   });
 
   it('still resolves a store path relative to the package root', () => {

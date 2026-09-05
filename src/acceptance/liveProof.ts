@@ -26,9 +26,24 @@ import type { SubstrateQualification } from '../substrate/types.js';
  *   LIVE PASS + an invented run id + an invented fingerprint
  *
  * so nothing here trusts an id. **Caller-provided ids are lookup hints, not authority.** Every
- * one is resolved against the Store, the trace, Git and this machine, and then checked to
- * belong to the SAME execution as all the others — because six real ids from six different runs
- * would otherwise assemble into a chain that never existed.
+ * one is resolved against the Store, the trace and Git, and then checked to belong to the SAME
+ * execution as all the others — because six real ids from six different runs would otherwise
+ * assemble into a chain that never existed.
+ *
+ * THE MACHINE IS THE EXCEPTION, AND SAYING SO IS THE POINT.
+ *
+ * SPEC: finding SSA-RLC-1 (MEDIUM), 1.0.1 security review.
+ *
+ * This paragraph used to say "and this machine". The MACHINE check compares two fields the
+ * caller supplied against each other, and on the acceptance path both are the literal
+ * `resolver-does-not-remeasure`: nothing can re-measure, after the fact, the machine a past
+ * run happened on. `status.ts` has always said that plainly where it supplies them; this
+ * header claimed more than the function does, which is how a reader comes to believe a
+ * comparison was made that was not.
+ *
+ * What IS re-derived is everything else, and it is not little: the ChangeSet bound to that
+ * producer run, the measured evidence, an independent authorised reviewer, the gate, an
+ * accepted commit that exists in git, and for LIVE-SERVA the owner request in front of it.
  *
  * The checks are ordered cheapest-first only where that does not change the answer. Each one
  * exists because skipping it admits a specific lie, and the comment on each says which.
