@@ -158,3 +158,41 @@ export const OpenQuestionSchema = artifact({
   resolvedByRefs: z.array(RefSchema).default([]),
 });
 export type OpenQuestion = z.output<typeof OpenQuestionSchema>;
+
+/**
+ * IS THIS SETTLED QUESTION SOMETHING SERVA MAY ACT ON, FOR THIS DEPARTMENT?
+ *
+ * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/OLER-CTX-1, 1.0.1 review.
+ *
+ * OPEN_QUESTION is UNIVERSAL in the authority model: any department may write one. The runner
+ * turned an ANSWERED one into a directive in another department's TRUSTED context — "this is a
+ * decision, proceed on it, do not raise it again" — and pulled in every canon its
+ * `resolvedByRefs` named, on the strength of `raisedBy`, `state` and `answer` alone. All three
+ * are body fields written by whoever wrote the artifact, so a department could forge a
+ * settlement, address it to a TARGET department, and put words in its context.
+ *
+ * The sibling path had already been hardened for exactly this shape: an owner decision reaching
+ * a department's context must satisfy `isAuthoritativeOwnerAnswer` AND carry attribution
+ * matching that department and work item. The guard went into one path and not the other —
+ * which is the class this review keeps finding, so this is the single predicate both use.
+ *
+ * What it requires, and why each one:
+ *
+ *   ANSWERED with an answer or resolving canon — a settlement that settles nothing is not one;
+ *   `resolvedByRefs` non-empty — the legitimate writer always names the canon that discharged
+ *     it, precisely so a reader can check rather than believe a sentence;
+ *   attribution naming THIS department's agent — a forger writes under its own attribution,
+ *     and `put` never re-stamps meta, so the raiser's identity survives the fulfilment;
+ *   the same work item — a settlement from another item says nothing about this one.
+ */
+export function isSettlementFor(
+  q: OpenQuestion,
+  who: { readonly departmentId: string; readonly agentId: string; readonly workItemId?: string },
+): boolean {
+  if (q.state !== 'ANSWERED') return false;
+  if (q.raisedBy !== who.departmentId) return false;
+  if (q.meta.attribution.agentId !== who.agentId) return false;
+  if (who.workItemId !== undefined && q.meta.workItemId !== who.workItemId) return false;
+  if (q.resolvedByRefs.length === 0) return false;
+  return q.answer !== undefined && q.answer.trim() !== '';
+}

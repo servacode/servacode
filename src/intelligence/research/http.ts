@@ -146,8 +146,44 @@ export function httpRetriever(options: HttpRetrieverOptions = {}): Retriever {
           return { url, title: url, text: '', ok: false, error: 'HTTP ' + String(response.status) };
         }
 
-        const body = await response.text();
-        if (body.length > MAX_BYTES) {
+        /*
+         * BOUNDED WHILE READING, NOT AFTER.
+         *
+         * SPEC: finding OLER-NET-1 (MEDIUM), 1.0.1 security review.
+         *
+         * This was `await response.text()` followed by a length check, so the limit rejected a
+         * page only once the whole of it was already in memory — and the comment on MAX_BYTES
+         * claims the opposite: "small enough that one hostile page cannot exhaust memory". An
+         * allowlisted host that turns hostile could stream until the abort timeout and take
+         * whatever it liked before the check ever ran.
+         *
+         * Read in chunks, stop at the limit, and abort the response so nothing keeps arriving
+         * after the answer is known. A limit that is enforced after the fact is a report, not
+         * a limit.
+         */
+        const body = await (async (): Promise<string | undefined> => {
+          const stream = response.body;
+          if (stream === null || stream === undefined) return await response.text();
+          const decoder = new TextDecoder();
+          const reader = stream.getReader();
+          let text = '';
+          try {
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              text += decoder.decode(value, { stream: true });
+              if (text.length > MAX_BYTES) {
+                await reader.cancel().catch(() => undefined);
+                return undefined;
+              }
+            }
+          } finally {
+            reader.releaseLock();
+          }
+          return text + decoder.decode();
+        })();
+
+        if (body === undefined || body.length > MAX_BYTES) {
           return {
             url,
             title: url,

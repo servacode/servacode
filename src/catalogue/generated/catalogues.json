@@ -1309,9 +1309,7 @@
           "stage": "045"
         }
       ],
-      "unparsedStageTerms": [
-        "045 + root-cause record"
-      ],
+      "unparsedStageTerms": ["045 + root-cause record"],
       "stagesRaw": "040, 041, 042, 045 + root-cause record",
       "notes": "Regression test mandatory"
     },
@@ -1434,9 +1432,7 @@
           "stage": "013"
         }
       ],
-      "unparsedStageTerms": [
-        "013 or targeted research"
-      ],
+      "unparsedStageTerms": ["013 or targeted research"],
       "stagesRaw": "013 or targeted research",
       "notes": "Produces findings + proposals; **produces no code**"
     },

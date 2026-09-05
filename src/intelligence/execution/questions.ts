@@ -1,6 +1,6 @@
 import { ARTIFACT_TYPES } from '../repository.js';
 import { OwnerDecisionRequestSchema } from '../artifacts/governance.js';
-import { OpenQuestionSchema } from '../artifacts/framing.js';
+import { OpenQuestionSchema, isSettlementFor } from '../artifacts/framing.js';
 import { repository } from '../repository.js';
 import type { ArtifactType } from '../repository.js';
 import type { Store } from '../../store/store.js';
@@ -189,6 +189,19 @@ export interface NormalizeInput {
   readonly unresolved: readonly string[];
   readonly store: Store;
   readonly workItemId: string;
+  /**
+   * Who is asking. Needed to tell an authentic settlement from an assertion.
+   *
+   * SPEC: finding OLER-CTX-2 (MEDIUM), 1.0.1 security review — the sibling of OLER-CTX-1.
+   *
+   * The bookkeeping below suppresses a question when an OpenQuestion with a matching key is
+   * already OPEN or ANSWERED. OPEN_QUESTION is universal, so without an identity to check
+   * against, any department could forge one whose key collides with a real need and the real
+   * question would never be asked. Owner-reserved text was already protected; everything else
+   * was not.
+   */
+  readonly departmentId: string;
+  readonly agentId: string;
   /** The department's own outputs: canon it owes rather than canon it is owed. */
   readonly produces: readonly string[];
   /** True when Serva can lawfully retrieve for this run. */
@@ -301,11 +314,30 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
        nothing about this one. */
     if (q.meta.workItemId !== undefined && q.meta.workItemId !== input.workItemId) continue;
 
+    /*
+     * Only THIS department's own, authentic records are bookkeeping for THIS department.
+     *
+     * A WITHDRAWN question is not a settlement and carries no answer, so it is accepted only
+     * from the department that raised it under its own attribution — the same identity test,
+     * without the requirement that something discharged it.
+     */
+    const mine = q.raisedBy === input.departmentId && q.meta.attribution.agentId === input.agentId;
+
     if (q.state === 'ANSWERED' || q.state === 'WITHDRAWN') {
-      settledByDepartment.set(questionKey(q.question), q.id);
+      if (
+        q.state === 'WITHDRAWN'
+          ? mine
+          : isSettlementFor(q, {
+              departmentId: input.departmentId,
+              agentId: input.agentId,
+              workItemId: input.workItemId,
+            })
+      ) {
+        settledByDepartment.set(questionKey(q.question), q.id);
+      }
       continue;
     }
-    outstanding.set(questionKey(q.question), q.askedOf);
+    if (mine) outstanding.set(questionKey(q.question), q.askedOf);
   }
 
   /* ------------------------------------------------------------------ 3. route each one */

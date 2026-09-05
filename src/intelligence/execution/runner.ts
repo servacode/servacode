@@ -37,6 +37,7 @@ import type { Store, Transaction } from '../../store/store.js';
 import type { AgentContract } from '../../agents/schema.js';
 import type { IntelligenceMeta } from '../provenance.js';
 import { isAuthoritativeOwnerAnswer } from '../artifacts/governance.js';
+import { isSettlementFor } from '../artifacts/framing.js';
 
 /**
  * THE ONE INTELLIGENCE DEPARTMENT RUNNER.
@@ -648,11 +649,26 @@ export async function runDepartment<S extends z.ZodTypeAny>(
     OpenQuestionSchema,
   )
     .list()
-    .filter(
-      (q) =>
-        q.raisedBy === config.id &&
-        q.state === 'ANSWERED' &&
-        (q.meta.workItemId === ctx.workItemId || q.meta.workItemId === undefined),
+    /*
+     * THE SAME GUARD THE OWNER-ANSWER PATH ALREADY HAD.
+     *
+     * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/OLER-CTX-1, 1.0.1.
+     *
+     * What follows becomes a DIRECTIVE in this department's trusted context — "proceed on it,
+     * do not raise it again" — plus every canon the settlement names. This filter read
+     * `raisedBy`, `state` and `answer`, all of them body fields written by whoever wrote the
+     * artifact, and OPEN_QUESTION is universal: any department may write one. So any
+     * department could address a fabricated settlement to any other and put words in its head.
+     *
+     * `isSettlementFor` is the predicate the owner-decision path already used in spirit, in
+     * one place now so a third consumer cannot reinvent a weaker version of it.
+     */
+    .filter((q) =>
+      isSettlementFor(q, {
+        departmentId: config.id,
+        agentId: config.agentId,
+        workItemId: ctx.workItemId,
+      }),
     )
     .flatMap((q) => [
       {
@@ -914,6 +930,8 @@ export async function runDepartment<S extends z.ZodTypeAny>(
       unresolved,
       store: deps.store,
       workItemId: ctx.workItemId,
+      departmentId: config.id,
+      agentId: config.agentId,
       produces: config.produces,
       /*
        * RESEARCH AUTHORITY IS NOT THE PRESENCE OF A GATEWAY.

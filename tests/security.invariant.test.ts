@@ -18,6 +18,7 @@ import {
 } from '../src/substrate/types.js';
 import { GuestReach } from '../src/substrate/transport.js';
 import { isAuthoritativeOwnerAnswer } from '../src/intelligence/artifacts/governance.js';
+import { isSettlementFor } from '../src/intelligence/artifacts/framing.js';
 import { ContractRegistry } from '../src/agents/registry.js';
 import { ServaRuntime } from '../src/app/runtime.js';
 import { cleanup, tempRoot } from './helpers.js';
@@ -737,5 +738,107 @@ describe('an owner answer is proved, not asserted by state', () => {
       'these decide owner authority from a field; use isAuthoritativeOwnerAnswer:\n' +
         offenders.join('\n'),
     ).toEqual([]);
+  });
+});
+
+describe("a settled obligation reaching a trusted context must be that department's own", () => {
+  /*
+   * SPEC: HIGH finding ORGANIZATIONAL-LEARNING-EXECUTION-AND-RESEARCH/OLER-CTX-1, 1.0.1.
+   *
+   * The sibling of the owner-answer block above, found by a SECOND independent review of code
+   * the first had already accepted. `settledObligations` turns an ANSWERED OpenQuestion into a
+   * DIRECTIVE in a department's trusted context — "this has been discharged, proceed on it, do
+   * not raise it again" — and pulls in every canon its `resolvedByRefs` names.
+   *
+   * It filtered on `raisedBy`, `state` and `answer`. All three are body fields written by
+   * whoever wrote the artifact, and OPEN_QUESTION is UNIVERSAL: any department may write one.
+   * So a department could address a fabricated settlement to another department and put words
+   * in its head, along with any canon it chose to name.
+   *
+   * Exactly the shape the owner-answer path was hardened against — in the sibling that never
+   * got the guard. One predicate, and a structural ban on the alternative.
+   */
+  function settlement(over: Record<string, unknown> = {}) {
+    return {
+      id: 'SC-OQ-000001',
+      question: 'How long is a reservation held?',
+      state: 'ANSWERED',
+      answer: 'thirty minutes',
+      askedOf: 'RESEARCH',
+      raisedBy: 'DEPT-PRODUCT',
+      blocks: [],
+      sourceFields: [],
+      resolvedByRefs: [{ id: 'SC-RFND-000001' }],
+      meta: {
+        provenance: { marking: 'SYSTEM', component: 'intelligence-runner' },
+        attribution: { at: '2026-08-30T00:00:00.000Z', agentId: 'SC-AGENT-030' },
+        workItemId: 'SC-WI-000990',
+      },
+      ...over,
+    } as never;
+  }
+
+  const WHO = {
+    departmentId: 'DEPT-PRODUCT',
+    agentId: 'SC-AGENT-030',
+    workItemId: 'SC-WI-000990',
+  };
+
+  const metaOf = (agentId: string, workItemId: string) => ({
+    provenance: { marking: 'SYSTEM', component: 'intelligence-runner' },
+    attribution: { at: '2026-08-30T00:00:00.000Z', agentId },
+    workItemId,
+  });
+
+  it("a department's own discharged obligation is one it may act on", () => {
+    expect(isSettlementFor(settlement(), WHO)).toBe(true);
+  });
+
+  it('a settlement written by another agent is refused', () => {
+    /*
+     * THE ATTACK. `raisedBy` names the target department; the attribution says who actually
+     * wrote it. A forger cannot write under somebody else's attribution, and `put` never
+     * re-stamps meta — so the raiser's identity survives the fulfilment and can be checked.
+     */
+    expect(isSettlementFor(settlement({ meta: metaOf('SC-AGENT-999', 'SC-WI-000990') }), WHO)).toBe(
+      false,
+    );
+  });
+
+  it("a settlement addressed to another department is not this department's", () => {
+    expect(isSettlementFor(settlement({ raisedBy: 'DEPT-SOMEBODY-ELSE' }), WHO)).toBe(false);
+  });
+
+  it('a settlement from another work item says nothing about this one', () => {
+    expect(isSettlementFor(settlement({ meta: metaOf('SC-AGENT-030', 'SC-WI-OTHER') }), WHO)).toBe(
+      false,
+    );
+  });
+
+  it('a settlement naming no canon that discharged it is a sentence, not evidence', () => {
+    /* The legitimate writer always names the canon, precisely so a reader can check it. */
+    expect(isSettlementFor(settlement({ resolvedByRefs: [] }), WHO)).toBe(false);
+  });
+
+  it('an OPEN or WITHDRAWN question has settled nothing', () => {
+    expect(isSettlementFor(settlement({ state: 'OPEN' }), WHO)).toBe(false);
+    expect(isSettlementFor(settlement({ state: 'WITHDRAWN' }), WHO)).toBe(false);
+  });
+
+  it('ANSWERED with no answer in it is refused', () => {
+    expect(isSettlementFor(settlement({ answer: undefined }), WHO)).toBe(false);
+    expect(isSettlementFor(settlement({ answer: '   ' }), WHO)).toBe(false);
+  });
+
+  it('both consumers use the predicate rather than reinventing it', () => {
+    /*
+     * The structural half. The defect was not a missing idea — the idea existed one file away.
+     * It was a second consumer written without it, so this asserts that neither consumer
+     * decides settlement from body fields of its own accord.
+     */
+    const runner = readFileSync('src/intelligence/execution/runner.ts', 'utf8');
+    expect(runner).toContain('isSettlementFor(q, {');
+    const questions = readFileSync('src/intelligence/execution/questions.ts', 'utf8');
+    expect(questions).toContain('isSettlementFor(q, {');
   });
 });

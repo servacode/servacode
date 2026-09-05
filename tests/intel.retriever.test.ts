@@ -76,6 +76,58 @@ describe('a page cannot send Serva somewhere nobody approved', () => {
     expect(page.error).toContain('larger than');
   });
 
+  it('an oversized response stops being read, rather than being read and then rejected', async () => {
+    /*
+     * SPEC: finding OLER-NET-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The limit used to be applied to `await response.text()` — so a hostile page was fully in
+     * memory before anything objected, while the constant's own comment claims it is "small
+     * enough that one hostile page cannot exhaust memory".
+     *
+     * This stream would never end on its own. What is asserted is that reading STOPS: the
+     * retriever cancels the body, and pulls only enough chunks to pass the limit rather than
+     * however many the server cares to send.
+     */
+    const CHUNK = 100_000;
+    let pulled = 0;
+    let cancelled = false;
+
+    const endless = {
+      getReader() {
+        return {
+          read: async () => {
+            pulled += 1;
+            return { done: false, value: new TextEncoder().encode('x'.repeat(CHUNK)) };
+          },
+          cancel: async () => {
+            cancelled = true;
+          },
+          releaseLock: () => undefined,
+        };
+      },
+    };
+
+    const streaming = (async () =>
+      ({
+        status: 200,
+        ok: true,
+        headers: { get: () => 'text/html' },
+        body: endless,
+        text: async () => {
+          throw new Error('the body must be read as a stream, not buffered whole');
+        },
+      }) as unknown as Response) as unknown as typeof fetch;
+
+    const r = httpRetriever({ fetchImpl: streaming });
+    const page = await r.fetch('https://example.com/endless', 5_000);
+
+    expect(page.ok).toBe(false);
+    expect(page.error).toContain('larger than');
+    expect(cancelled, 'the response must be cancelled, not left streaming').toBe(true);
+    /* 2 MB limit over 100 KB chunks: it must stop within a chunk or two of the limit. */
+    expect(pulled).toBeLessThanOrEqual(2_000_000 / CHUNK + 2);
+  });
+
   it('a failure is reported once, and not retried', async () => {
     let calls = 0;
     const counting = (async () => {

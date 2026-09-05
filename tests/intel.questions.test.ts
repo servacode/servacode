@@ -30,6 +30,18 @@ afterEach(() => {
 });
 
 const WORK_ITEM = 'SC-WI-000990';
+/*
+ * The department these questions belong to, and the agent that writes for it.
+ *
+ * SPEC: findings OLER-CTX-1 (HIGH) / OLER-CTX-2 (MEDIUM), 1.0.1 security review.
+ *
+ * A question raised by the runner always carries `raisedBy` and an attribution naming the
+ * department's agent. These fixtures carried neither, so they described artifacts the
+ * legitimate path cannot produce — and no test here could have noticed that an unattributed
+ * OpenQuestion was being trusted, because every fixture was unattributed.
+ */
+const DEPARTMENT = 'DEPT-PRODUCT';
+const AGENT = 'SC-AGENT-030';
 
 function setup(): { store: Store; deps: StoreDeps } {
   const { store, root, deps } = freshStore();
@@ -46,6 +58,8 @@ function normalize(
     produces?: readonly string[];
     canResearch?: boolean;
     runId?: string;
+    departmentId?: string;
+    agentId?: string;
   },
 ) {
   return normalizeOpenQuestions({
@@ -53,6 +67,8 @@ function normalize(
     unresolved: o.unresolved ?? [],
     store: f.store,
     workItemId: WORK_ITEM,
+    departmentId: o.departmentId ?? DEPARTMENT,
+    agentId: o.agentId ?? AGENT,
     produces: o.produces ?? [],
     canResearch: o.canResearch ?? false,
     ...(o.runId === undefined ? {} : { runId: o.runId }),
@@ -335,11 +351,12 @@ describe('a department cannot decide that the owner has already decided', () => 
       askedOf: 'OWNER',
       state: 'ANSWERED',
       answer: 'the department recorded this as settled',
-      resolvedByRefs: [],
+      raisedBy: DEPARTMENT,
+      resolvedByRefs: [{ id: 'SC-ANY-000001' }],
       sourceFields: [],
       meta: {
         provenance: { marking: 'SYSTEM', component: 'a department' },
-        attribution: { at: f.deps.clock.now() },
+        attribution: { at: f.deps.clock.now(), agentId: AGENT },
         workItemId: WORK_ITEM,
       },
     } as never);
@@ -466,7 +483,13 @@ describe('an owner-reserved question is only suppressed by something that asks t
 
   function openQuestion(
     f: { store: Store; deps: StoreDeps },
-    o: { question: string; askedOf: string; state: string },
+    o: {
+      question: string;
+      askedOf: string;
+      state: string;
+      raisedBy?: string;
+      agentId?: string;
+    },
   ): string {
     const id = f.deps.ids.next('SC-OQ');
     const tx = f.store.begin();
@@ -478,17 +501,64 @@ describe('an owner-reserved question is only suppressed by something that asks t
       askedOf: o.askedOf,
       state: o.state,
       ...(o.state === 'ANSWERED' ? { answer: 'a department wrote this' } : {}),
-      resolvedByRefs: [],
+      raisedBy: o.raisedBy ?? DEPARTMENT,
+      resolvedByRefs: o.state === 'ANSWERED' ? [{ id: 'SC-ANY-000001' }] : [],
       sourceFields: [],
       meta: {
         provenance: { marking: 'SYSTEM', component: 'a department' },
-        attribution: { at: f.deps.clock.now() },
+        attribution: { at: f.deps.clock.now(), agentId: o.agentId ?? AGENT },
         workItemId: WORK_ITEM,
       },
     } as never);
     tx.commit();
     return id;
   }
+
+  it('a question forged under another department cannot suppress a real one', () => {
+    /*
+     * SPEC: finding OLER-CTX-2 (MEDIUM), 1.0.1 security review — sibling of OLER-CTX-1.
+     *
+     * OPEN_QUESTION is UNIVERSAL: any department may write one. The bookkeeping that stops a
+     * question being asked twice keyed only on the question TEXT, so a department could
+     * persist an ANSWERED question whose key collides with another department's real need and
+     * that need would be routed ALREADY_ANSWERED — never asked, never fulfilled, with no
+     * obligation behind it.
+     *
+     * Same artifact, same text, written under somebody else's identity: it must not settle
+     * anything here.
+     */
+    const f = setup();
+    const NEED = 'The reservation hold duration is not specified anywhere in the brief';
+    openQuestion(f, {
+      question: NEED,
+      askedOf: 'RESEARCH',
+      state: 'ANSWERED',
+      raisedBy: 'DEPT-SOMEBODY-ELSE',
+      agentId: 'SC-AGENT-999',
+    });
+
+    const out = normalize(f, { escalations: [{ condition: 'blocked', detail: NEED }] });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.routing, 'a forged settlement must not answer this').not.toBe(
+      QuestionRouting.ALREADY_ANSWERED,
+    );
+  });
+
+  it("a department's own authentic settlement still suppresses, as it must", () => {
+    /*
+     * The other half: the guard must not break the thing the bookkeeping exists for. A real
+     * settlement — raised by this department, attributed to its agent, naming the canon that
+     * discharged it — still stops the question being raised twice across a restart.
+     */
+    const f = setup();
+    /* Deliberately NOT owner-reserved text: that is settled by the owner and nobody else. */
+    const NEED = 'The reservation hold duration is not specified anywhere in the brief';
+    openQuestion(f, { question: NEED, askedOf: 'RESEARCH', state: 'ANSWERED' });
+
+    const out = normalize(f, { escalations: [{ condition: 'blocked', detail: NEED }] });
+    expect(out).toHaveLength(1);
+    expect(out[0]?.routing).toBe(QuestionRouting.ALREADY_ANSWERED);
+  });
 
   it('an obligation parked with RESEARCH does not discharge an owner question', () => {
     const f = setup();
