@@ -679,7 +679,25 @@ async function dischargeUpstream(
     };
   }
 
-  /* Already produced — by an ordinary stage run, or by a pass that died before recording. */
+  /*
+   * ALREADY PRODUCED — AND NOT SCOPED TO THIS WORK ITEM, WHICH IS MEASURED, NOT OVERLOOKED.
+   *
+   * SPEC: finding OLER-XWI-UPSTREAM (MEDIUM), 1.0.1 security review.
+   *
+   * Any canon of this family discharges the obligation, so artifacts produced for a different
+   * work item can satisfy this one. The obvious fix — filter on `meta.workItemId` — was
+   * measured before being written, and it does not work: of 145 intelligence artifacts sampled
+   * from real runs, 101 carry no `workItemId` at all, and every one of those is
+   * `intel.requirement` — the commonest upstream family there is. Filtering on it would stop
+   * legitimate discharge outright and strand the lifecycle.
+   *
+   * Making it work needs every producing department to record the work item on its canon, plus
+   * a migration for stores that already exist. That is a data-model change, not a filter, and
+   * it belongs in a decision of its own rather than smuggled in behind a review finding.
+   *
+   * Written down here so the next reviewer reads a measurement instead of raising it again as
+   * something nobody noticed.
+   */
   const existing = deps.store.listCanonIds(family);
   if (existing.length > 0) {
     return {

@@ -804,6 +804,57 @@ describe('a historical resolution cannot mute a current finding', () => {
   });
 });
 
+describe("a reviewer's own verdict is read, not only its findings", () => {
+  /*
+   * SPEC: finding SSA-RLC-AGG-1 (MEDIUM), 1.0.1 security review.
+   *
+   * The aggregate refused NOT_VERIFIED and said nothing about BLOCKED. Blocked units had
+   * always been refused in practice — on their unresolved CRITICAL/HIGH findings, caught
+   * elsewhere — never on the verdict itself. So a reviewer that read its area and said "I am
+   * blocking this" while raising nothing above MEDIUM was overruled by silence.
+   *
+   * The fixture below is exactly that shape: BLOCKED, with one MEDIUM and nothing higher.
+   */
+  it('a BLOCKED unit stops the proof even when nothing it found is CRITICAL or HIGH', () => {
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === REQUIRED_SCOPE[0]
+        ? {
+            verdict: ReviewVerdict.BLOCKED,
+            findings: [
+              {
+                id: 'BLOCKED-BY-JUDGEMENT-1',
+                severity: Severity.MEDIUM,
+                area: String(REQUIRED_SCOPE[0]),
+                statement: 'the reviewer will not accept this, and says so in its verdict',
+                evidence: ['src/somewhere.ts:1'],
+              },
+            ],
+          }
+        : {},
+    );
+
+    const result = aggregate(rt);
+    expect(result.review, 'a proof must not be minted over a reviewer objection').toBeUndefined();
+    expect(result.refusals.join(' ')).toContain('did not accept what it reviewed');
+  });
+
+  it('and the refusal names the verdict rather than assuming which one it was', () => {
+    /*
+     * Written as "anything that is not ACCEPTED" rather than a list of today's two verdicts,
+     * so a third one refuses here the day it is added. Asserted on the message, which is the
+     * part a reader acts on.
+     */
+    const rt = project();
+    seedCompleteReview(rt.store, (unit) =>
+      unit === REQUIRED_SCOPE[0] ? { verdict: ReviewVerdict.NOT_VERIFIED, findings: [] } : {},
+    );
+    const said = aggregate(rt).refusals.join(' ');
+    expect(said).toContain('NOT_VERIFIED');
+    expect(said).toContain('it decided nothing');
+  });
+});
+
 describe('a unit that never received its required context has not decided anything', () => {
   /*
    * SPEC: the omission at 7595c20a, and the acceptance bar set after it.

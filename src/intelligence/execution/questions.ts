@@ -254,7 +254,18 @@ export function normalizeOpenQuestions(input: NormalizeInput): readonly OpenQues
     OwnerDecisionRequestSchema,
   )
     .list()
-    .filter((d) => d.meta.workItemId === input.workItemId || d.meta.workItemId === undefined);
+    /*
+     * SCOPED, WITH NO "BELONGS TO EVERYTHING" CASE.
+     *
+     * SPEC: finding OLER-SCOPE-OWNERDEC (MEDIUM), 1.0.1 security review — the sibling of
+     * OLER-REV-1, which was the same clause in the obligations map.
+     *
+     * `derived()` stamps `workItemId` on every artifact a department writes, so admitting an
+     * UNSCOPED owner decision admitted only what a department did not write — while letting it
+     * settle questions for every work item at once. OWNER_DECISION_REQUEST is universal, which
+     * is what makes that worth closing rather than tidying.
+     */
+    .filter((d) => d.meta.workItemId === input.workItemId);
 
   const answeredByKey = new Map<string, string>();
   for (const d of answered) {

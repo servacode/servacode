@@ -387,8 +387,30 @@ export function aggregateSecurityReview(input: AggregateInput): AggregateOutcome
         );
       }
 
-      if (record.verdict === ReviewVerdict.NOT_VERIFIED) {
-        refusals.push('"' + unit + '" returned NOT_VERIFIED, so it decided nothing');
+      /*
+       * A UNIT THAT DID NOT ACCEPT DOES NOT CONTRIBUTE AN ACCEPTANCE.
+       *
+       * SPEC: finding SSA-RLC-AGG-1 (MEDIUM), 1.0.1 security review.
+       *
+       * This refused NOT_VERIFIED and said nothing about BLOCKED. Earlier rounds did refuse
+       * blocked units — but on their unresolved CRITICAL/HIGH findings, caught further down,
+       * never on the verdict itself. So a reviewer that read its area and said "I am blocking
+       * this" while raising nothing above MEDIUM was overruled by silence, and the proof was
+       * minted over its objection. A judgement produced and not read, again.
+       *
+       * Written as "anything that is not ACCEPTED" rather than as a list of the two verdicts
+       * that exist today: a third verdict added later refuses here on the day it is added,
+       * which a list would not do.
+       */
+      if (record.verdict !== ReviewVerdict.ACCEPTED) {
+        refusals.push(
+          '"' +
+            unit +
+            '" returned ' +
+            record.verdict +
+            ', so it did not accept what it reviewed' +
+            (record.verdict === ReviewVerdict.NOT_VERIFIED ? ' — it decided nothing' : ''),
+        );
       }
 
       findings.push(...currentFindings(usable, scopeId, input.repository));
