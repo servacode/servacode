@@ -190,7 +190,23 @@ export function gitCommitExists(repoRoot: string, commit: string): boolean {
  *   the violation is DURABLY RECORDED, so nobody has to take this analysis on trust;
  *   NOT ONE contradicted claim is credited as acceptance evidence;
  *   the acceptance rests on independently MEASURED evidence;
- *   nothing the Producer got wrong leaves a material effect unmeasured.
+ *   nothing the Producer got wrong leaves a material effect of that KIND unmeasured.
+ *
+ * THE LAST LINE SAYS "KIND" BECAUSE THAT IS WHAT IT CHECKS.
+ *
+ * SPEC: finding SSA-RLC-REV-2 (MEDIUM), 1.0.1 security review.
+ *
+ * It used to say "a material effect", which reads as the specific effect. What
+ * `assessProducerContainment` actually requires is that evidence bound to this ChangeSet was
+ * produced by a runtime component that MEASURES that kind of effect — SC-RTC-005 for a
+ * FILE_WRITTEN claim, say — not that the measurement concerned the same file.
+ *
+ * Matching the specific effect is not possible against what evidence records: `claim` and
+ * `detail` are free text and there is no structured subject to compare a contradicted claim
+ * against. Adding one is a data-model change across every runtime component, not a tightening
+ * here — so the wording is corrected to what the check does, and the residual is named rather
+ * than implied: a contradicted FILE_WRITTEN claim about file X is treated as covered when the
+ * only SC-RTC-005 measurement for that ChangeSet concerned file Y.
  *
  * The last one is the subtle one and the reason this is a function rather than a flag. A
  * contradicted claim about having read a file is noise; a contradicted claim about having

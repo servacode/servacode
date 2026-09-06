@@ -1401,30 +1401,83 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
    * inline reader it replaced never parsed the schema, so these fixtures were half-records
    * that the resolver was never strict enough to notice.
    */
-  const ran = (command: string, over: Record<string, unknown> = {}) => ({
-    command,
-    exitCode: 0,
-    startedAt: '2026-08-24T00:00:00.000Z',
-    endedAt: '2026-08-24T00:01:00.000Z',
-    durationMs: 60_000,
-    testsPassed: 1600,
-    testsFailed: 0,
-    ...over,
-  });
+  /*
+   * A command cites the report it produced, because the real writer does.
+   *
+   * SPEC: finding SC-SSA-REV-OFFLINE-CLAIMS (MEDIUM), 1.0.1 security review — a required
+   * command with no report is a claim with nothing behind it, and is refused. This fixture
+   * described a record `scripts/verify-evidence.mjs` never writes.
+   */
+  const reportFor = (root: string, command: string): { path: string; digest: string } => {
+    const rel = 'evidence/acceptance-run/' + command.replace(/[^a-z0-9]+/gi, '-') + '.json';
+    const full = join(root, ...rel.split('/'));
+    mkdirSync(join(full, '..'), { recursive: true });
+    writeFileSync(full, JSON.stringify({ command, ok: true }), 'utf8');
+    return { path: rel, digest: String(fileDigest(full)) };
+  };
 
-  const green = {
+  const ran = (
+    root: string,
+    command: string,
+    over: Record<string, unknown> = {},
+  ): Record<string, unknown> => {
+    const report = reportFor(root, command);
+    return {
+      command,
+      exitCode: 0,
+      startedAt: '2026-08-24T00:00:00.000Z',
+      endedAt: '2026-08-24T00:01:00.000Z',
+      durationMs: 60_000,
+      testsPassed: 1600,
+      testsFailed: 0,
+      reportPath: report.path,
+      reportDigest: report.digest,
+      ...over,
+    };
+  };
+
+  /* Built per root, because each command's report is a real file inside that package. */
+  const green = (root: string) => ({
     producedBy: 'scripts/verify.mjs',
     producedAt: '2026-08-24T00:00:00.000Z',
     implementationCommit: COMMIT,
     treeDigest: TREE,
-    commands: [ran('npm run verify'), ran('npm run test:vscode', { testsPassed: 35 })],
-  };
+    commands: [ran(root, 'npm run verify'), ran(root, 'npm run test:vscode', { testsPassed: 35 })],
+  });
+
+  it('a required command that cites no report is a claim with nothing behind it', () => {
+    /*
+     * SPEC: finding SC-SSA-REV-OFFLINE-CLAIMS (MEDIUM), 1.0.1 security review.
+     *
+     * `exitCode` and `testsPassed` are fields in a JSON file. The only thing tying them to a
+     * suite that ran is the report they cite, and that binding was OPTIONAL — so a hand-written
+     * record with exit 0, a plausible count and the right tree digest passed with no suite
+     * behind it. "EVIDENCE FILE TEXT IS NOT AUTHORITY" is the first line of this model, and
+     * here the text was the authority.
+     *
+     * It does not close the DETERMINISTIC ceiling — whoever can write the record can write the
+     * report — but it costs them the whole report rather than one integer.
+     */
+    const root = pkg();
+    const stripped = green(root);
+    offlineProof(root, {
+      ...stripped,
+      commands: stripped.commands.map((c) => {
+        const { reportPath: _p, reportDigest: _d, ...rest } = c as Record<string, unknown>;
+        return rest;
+      }),
+    });
+
+    const resolved = resolve(root, 'OFFLINE-VERIFICATION');
+    expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
+    expect(resolved.refusals.join(' ')).toContain('cites no report');
+  });
 
   it('refuses a record whose command exited non-zero', () => {
     const root = pkg();
     offlineProof(root, {
-      ...green,
-      commands: [ran('npm run verify', { exitCode: 1, testsPassed: 1200 })],
+      ...green(root),
+      commands: [ran(root, 'npm run verify', { exitCode: 1, testsPassed: 1200 })],
     });
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
@@ -1434,8 +1487,8 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
   it('refuses a record with failing tests', () => {
     const root = pkg();
     offlineProof(root, {
-      ...green,
-      commands: [ran('npm run verify', { testsPassed: 1200, testsFailed: 17 })],
+      ...green(root),
+      commands: [ran(root, 'npm run verify', { testsPassed: 1200, testsFailed: 17 })],
     });
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
@@ -1444,7 +1497,7 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
 
   it('refuses a record bound to a different commit', () => {
     const root = pkg();
-    offlineProof(root, { ...green, implementationCommit: 'c'.repeat(40) });
+    offlineProof(root, { ...green(root), implementationCommit: 'c'.repeat(40) });
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
   });
@@ -1452,14 +1505,14 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
   it('refuses a record with no commands at all', () => {
     /* A verification that ran nothing verified nothing, however clean it looks. */
     const root = pkg();
-    offlineProof(root, { ...green, commands: [] });
+    offlineProof(root, { ...green(root), commands: [] });
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status).toBe(ProofStatus.NOT_VERIFIED);
   });
 
   it('a genuinely green record resolves', () => {
     const root = pkg();
-    offlineProof(root, green);
+    offlineProof(root, green(root));
     const resolved = resolveProof('OFFLINE-VERIFICATION', { root, repository: REPOSITORY });
     expect(resolved.status, resolved.refusals.join('; ')).toBe(ProofStatus.PASS);
   });

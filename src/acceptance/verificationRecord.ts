@@ -164,6 +164,32 @@ export function resolveVerificationRecord(input: ResolveVerificationInput): Veri
     if (command.testsPassed !== undefined && command.testsPassed === 0) {
       refusals.push('`' + required + '` reported no passing tests, so nothing was verified');
     }
+    /*
+     * A REQUIRED COMMAND CITES A REPORT, OR IT IS A SENTENCE ABOUT ITSELF.
+     *
+     * SPEC: finding SC-SSA-REV-OFFLINE-CLAIMS (MEDIUM), 1.0.1 security review.
+     *
+     * `exitCode` and `testsPassed` are plain fields in a JSON file. The only thing tying them
+     * to a suite that ran is the report they cite — and that binding was optional, so a
+     * hand-written record with exit 0, a plausible count, the right tree digest and no report
+     * at all satisfied every check. "EVIDENCE FILE TEXT IS NOT AUTHORITY" is the first line of
+     * this whole model, and here the text was the authority.
+     *
+     * Required now for the commands that must be green. Measured before demanding it: the
+     * writer already cites `evidence/acceptance-run/offline-suite.json` and
+     * `extension-host.json` with digests for both, so this refuses nothing that legitimately
+     * happens — it refuses the record nobody ran.
+     *
+     * It does not close the DETERMINISTIC ceiling, and does not pretend to: somebody who can
+     * write the record can also write the report. It costs them the whole report rather than
+     * one integer, and the JUDGED and LIVE lines are what actually carry acceptance.
+     */
+    if (command.reportPath === undefined || command.reportDigest === undefined) {
+      refusals.push(
+        '`' + required + '` cites no report, so its result is a claim with nothing behind it',
+      );
+    }
+
     /* The report it cites, re-digested. A report edited afterwards is not the one that ran. */
     if (command.reportPath !== undefined && command.reportDigest !== undefined) {
       const reportFile = join(input.root, ...command.reportPath.split('/'));
