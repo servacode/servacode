@@ -202,7 +202,22 @@ export function leakageRefusal(
    * Deliberately the smallest mechanism that keeps the promise. It cannot catch a client Serva
    * has never heard of, and the comment says so rather than implying otherwise.
    */
-  knownNames: readonly string[] = [],
+  /*
+   * REQUIRED, WITH NO DEFAULT.
+   *
+   * SPEC: finding ORGANIZATIONAL-LEARNING-ARTIFACTS/OLA-1 (MEDIUM), 1.0.1 security review.
+   *
+   * This defaulted to `[]`, so a caller that forgot it got no name filtering at all and no
+   * signal that names went unchecked — a confidentiality control failing toward disclosure,
+   * quietly. It had already happened once in this codebase: the argument was added and one
+   * call site kept invoking the one-argument form, so the check existed at one door of the
+   * wall and not the other.
+   *
+   * A default cannot fix that, because a default IS the silence. Required instead: omitting it
+   * is a compile error, which is the only kind of reminder that cannot be forgotten. Callers
+   * with genuinely no names to check pass `[]` and say so at the call site.
+   */
+  knownNames: readonly string[],
 ): readonly string[] {
   const found: string[] = [];
 

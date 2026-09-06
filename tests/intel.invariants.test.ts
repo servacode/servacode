@@ -1067,20 +1067,43 @@ describe('impact analysis leaves no dimension unassessed', () => {
 
 describe('cross-project learning carries nothing identifying', () => {
   it('paths, URLs, code, emails, ids and credentials are all refused', () => {
-    expect(leakageRefusal('use the pattern from SC-PROJ-0012').join(' ')).toContain(
+    expect(leakageRefusal('use the pattern from SC-PROJ-0012', []).join(' ')).toContain(
       'project identifier',
     );
-    expect(leakageRefusal('see /home/acme/src/billing.ts').join(' ')).toContain('file path');
-    expect(leakageRefusal('function computeVat() {').join(' ')).toContain('source-code fragment');
-    expect(leakageRefusal('contact bob@acme.com').join(' ')).toContain('email address');
-    expect(leakageRefusal('api_key was rotated').join(' ')).toContain('credential');
-    expect(leakageRefusal('postgres://user@host/db').join(' ')).toContain('connection string');
+    expect(leakageRefusal('see /home/acme/src/billing.ts', []).join(' ')).toContain('file path');
+    expect(leakageRefusal('function computeVat() {', []).join(' ')).toContain(
+      'source-code fragment',
+    );
+    expect(leakageRefusal('contact bob@acme.com', []).join(' ')).toContain('email address');
+    expect(leakageRefusal('api_key was rotated', []).join(' ')).toContain('credential');
+    expect(leakageRefusal('postgres://user@host/db', []).join(' ')).toContain('connection string');
+  });
+
+  it('a caller that passes no names gets no name filtering, and that is now visible', () => {
+    /*
+     * SPEC: finding ORGANIZATIONAL-LEARNING-ARTIFACTS/OLA-1 (MEDIUM), 1.0.1 security review.
+     *
+     * `knownNames` defaulted to `[]`, so a caller that forgot it silently got no name check on
+     * a confidentiality control — and this file had eight such calls, which the compiler found
+     * the moment the default was removed.
+     *
+     * The empty list still means "no names to check" and always did. What changed is that it
+     * has to be written down, so the difference between the two calls below is a decision
+     * somebody made rather than one nobody noticed.
+     */
+    const text = 'reuse the pattern we built for Northwind Bakery';
+    expect(leakageRefusal(text, []), 'no names given, so no name is recognised').toEqual([]);
+    const caught = leakageRefusal(text, ['Northwind Bakery']);
+    expect(caught, 'the name Serva actually holds is caught').not.toEqual([]);
+    /* And the refusal does not repeat the name it refused: a message is not a place for it. */
+    expect(caught.join(' ')).not.toContain('Northwind Bakery');
   });
 
   it('a genuine generalisation passes', () => {
     expect(
       leakageRefusal(
         'When a marketplace charges a percentage commission, make the rate effective-dated so historical orders keep the rate that applied at the time.',
+        [],
       ),
     ).toEqual([]);
   });
@@ -1119,7 +1142,7 @@ describe('cross-project learning carries nothing identifying', () => {
 
     for (const text of MUST_REFUSE) {
       it('refuses: ' + text, () => {
-        expect(leakageRefusal(text).join(' '), text).toContain('file path');
+        expect(leakageRefusal(text, []).join(' '), text).toContain('file path');
       });
     }
   });
@@ -1145,7 +1168,7 @@ describe('cross-project learning carries nothing identifying', () => {
 
     for (const text of MUST_ALLOW) {
       it('allows: ' + text, () => {
-        expect(leakageRefusal(text), text).toEqual([]);
+        expect(leakageRefusal(text, []), text).toEqual([]);
       });
     }
   });
@@ -1175,18 +1198,20 @@ describe('cross-project learning carries nothing identifying', () => {
 
     for (const text of SECRET_VALUES) {
       it('refuses: ' + text.slice(0, 52), () => {
-        expect(leakageRefusal(text).join(' '), text).toMatch(/key|private key|token|credential/i);
+        expect(leakageRefusal(text, []).join(' '), text).toMatch(
+          /key|private key|token|credential/i,
+        );
       });
     }
 
     it('still refuses a labelled credential', () => {
-      expect(leakageRefusal('the api_key was rotated').join(' ')).toContain('credential');
+      expect(leakageRefusal('the api_key was rotated', []).join(' ')).toContain('credential');
     });
 
     it('does not refuse prose that merely discusses secrecy', () => {
       /* The word is not the thing. A lesson ABOUT credential handling must be able to cross. */
       expect(
-        leakageRefusal('rotate credentials on a schedule rather than after an incident'),
+        leakageRefusal('rotate credentials on a schedule rather than after an incident', []),
       ).toEqual([]);
     });
   });
@@ -1234,7 +1259,7 @@ describe('cross-project learning carries nothing identifying', () => {
     });
 
     it('with no names supplied, behaves exactly as before', () => {
-      expect(leakageRefusal('RahalGo staff would not use the two-tap screen')).toEqual([]);
+      expect(leakageRefusal('RahalGo staff would not use the two-tap screen', [])).toEqual([]);
     });
 
     it('a genuine generalisation still passes with names supplied', () => {

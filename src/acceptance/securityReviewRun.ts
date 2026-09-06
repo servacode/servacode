@@ -554,6 +554,13 @@ export const AREA_CONTEXT: Record<string, readonly string[]> = Object.freeze({
    * could only report the equality as load-bearing and unverified (EHB-2).
    */
   'Engineering HARD boundary': ['src/substrate/boundary.ts'],
+  /*
+   * The leakage wall recognises a Serva project identifier by its SHAPE, and whether that
+   * shape can be shorter than the pattern allows is decided by `IdSchema` — which the unit
+   * could not see. It said so and returned NOT_VERIFIED rather than guessing, which is the
+   * right refusal and a scope defect rather than a code one.
+   */
+  'organizational learning — artifacts': ['src/domain/schemas.ts'],
 });
 
 export function reviewUnitsFor(area: string): readonly ReviewUnit[] {
