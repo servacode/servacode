@@ -360,6 +360,35 @@ describe('a corrupt or tampered backup is refused, not repaired', () => {
     expect(result.problems.join(' ')).toContain('missing from the bundle');
   });
 
+  it('a crafted detached HEAD does not reach the manifest verbatim', () => {
+    /*
+     * SPEC: finding RELEASE-HANDOVER/RELH-REVIEW-1 (MEDIUM), 1.0.1 security review.
+     *
+     * `.git/HEAD` is file content, so it is input. The `ref:` arm of that read was hardened for
+     * BACKUP-RESTORE-F1 and its commit id checked against a shape; the DETACHED arm returned
+     * the raw contents into the manifest unchecked — a field the credential scan never sees,
+     * because that scan runs over copied content only. The guard went into one arm of the same
+     * `if` and not the other.
+     */
+    const { root } = seedProject();
+    writeFileSync(
+      join(root, '.git', 'HEAD'),
+      'sk-ant-api03-' + 'K7mQ2wX9tLpV4nB6cYzR8dHs' + String.fromCharCode(10),
+      'utf8',
+    );
+
+    const destination = join(tmp(), 'bundle-head');
+    createBackup(
+      { clock: clock() },
+      { projects: [{ projectId: 'PRJ-1', name: 'RahalGo', root }], destination },
+    );
+
+    const manifest = readFileSync(join(destination, MANIFEST_NAME), 'utf8');
+    expect(manifest, 'raw HEAD content must not reach the manifest').not.toContain(
+      'K7mQ2wX9tLpV4nB6cYzR8dHs',
+    );
+  });
+
   it('a credential hidden in an innocently-named file is refused on the way IN', () => {
     /*
      * SPEC: finding RELEASE-HANDOVER/RELH-1 (MEDIUM), 1.0.1 security review.

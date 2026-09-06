@@ -373,7 +373,25 @@ export const EngineeringEvidenceSchema = z
 export type EngineeringEvidence = z.output<typeof EngineeringEvidenceSchema>;
 
 export function recordEvidence(tx: Transaction, evidence: EngineeringEvidence): void {
-  tx.putCanon(EVIDENCE_CANON_TYPE, evidence.id, evidence);
+  /*
+   * THE SAME REDACTION BOUNDARY THE EXECUTION RECORD HAS.
+   *
+   * SPEC: finding SEC-EVIDENCE-DETAIL (MEDIUM), 1.0.1 security review — the sibling of
+   * SEC-REV-EXEC-1, which closed this for `terminationReason` and stopped there.
+   *
+   * `claim` and `detail` are free text, written by executors and reviewers describing what
+   * they ran and what they saw — the same material as an execution excerpt, and it goes to the
+   * same place: immutable canon, where an unredacted value cannot be withdrawn afterwards.
+   * Every other free-text channel into T-CANON passes through here; this one did not.
+   *
+   * The whole record is redacted rather than two named fields, so a field added to the schema
+   * later is covered the day it is written.
+   */
+  tx.putCanon(EVIDENCE_CANON_TYPE, evidence.id, {
+    ...evidence,
+    claim: redactSecrets(evidence.claim).text,
+    detail: redactSecrets(evidence.detail).text,
+  });
 }
 
 export function listEvidence(store: Store): EngineeringEvidence[] {

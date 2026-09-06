@@ -348,7 +348,29 @@ export function validateReviewerResult(input: ReviewValidationInput): ReviewVali
     }
   }
 
-  // 9. The payload is a valid reviewer verdict by Serva's own schema.
+  /*
+   * 9. The payload is a valid reviewer verdict by Serva's own schema.
+   *
+   * WHAT THIS DOES NOT DO, MEASURED RATHER THAN ASSUMED.
+   *
+   * SPEC: finding EAA-SR-A1 (MEDIUM), 1.0.1 security review, and the reason it is not fixed
+   * here rather than not noticed.
+   *
+   * The verdict's CONTENT comes from the caller. Everything around it is re-derived — the run
+   * exists, terminated COMPLETED, was made by the expected agent, under a read-only capability
+   * grant, in a session distinct from the Producer's, by an agent that is not the Producer —
+   * but the outcome itself is not compared against what the reviewer actually returned.
+   *
+   * It cannot be, from what this store holds. The trace records that a structured output
+   * existed and how long it was (`OUTPUT_RECEIVED`: `hasStructuredOutput`, `textLength`) and
+   * does not keep the output. Persisting model output verbatim into the trace so that it could
+   * be compared is a much larger decision than this finding, and it runs directly at the
+   * boundary that keeps such content bounded and redacted.
+   *
+   * So the gap is real, narrow, and named: a caller that fabricates a verdict while citing a
+   * genuine, independent, read-only reviewer run is not caught here. It is caught nowhere else
+   * either, and saying so is worth more than a check that looks like it would.
+   */
   const parsed = ReviewerVerdictSchema.safeParse(input.verdict);
   if (!parsed.success) {
     problems.push(

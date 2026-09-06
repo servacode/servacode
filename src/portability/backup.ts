@@ -455,6 +455,11 @@ function walkProject(root: string, bundlePrefix: string): WalkOutput {
   return { entries, excluded, warnings };
 }
 
+/** What `git.head` was ever meant to hold, and nothing else. */
+const COMMIT_ID = /^[0-9a-f]{7,40}$/i;
+/** Git's own ref-name rules, narrowed: no spaces, no traversal, no control characters. */
+const BRANCH_NAME = /^[A-Za-z0-9._\/-]{1,255}$/;
+
 /** Git identity, read from the repository rather than asserted. */
 function gitIdentity(root: string): { head?: string; branch?: string; present: boolean } {
   const gitDir = join(root, '.git');
@@ -484,10 +489,30 @@ function gitIdentity(root: string): { head?: string; branch?: string; present: b
         refPath !== undefined && existsSync(refPath)
           ? readFileSync(refPath, 'utf8').trim()
           : undefined;
-      const head = raw !== undefined && /^[0-9a-f]{7,40}$/i.test(raw) ? raw : undefined;
-      return { present: true, branch, ...(head === undefined ? {} : { head }) };
+      const head = COMMIT_ID.test(raw ?? '') ? raw : undefined;
+      /*
+       * The branch name is content too, so it is bounded to what git will accept as a ref
+       * rather than shipped verbatim: `refs/heads/<anything>` is a line somebody can write.
+       */
+      const named = BRANCH_NAME.test(branch) ? branch : undefined;
+      return {
+        present: true,
+        ...(named === undefined ? {} : { branch: named }),
+        ...(head === undefined ? {} : { head }),
+      };
     }
-    return { present: true, head: headRaw };
+
+    /*
+     * DETACHED HEAD IS THE SAME QUESTION, AND WAS NOT ASKED.
+     *
+     * SPEC: finding RELEASE-HANDOVER/RELH-REVIEW-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The branch above was hardened for BACKUP-RESTORE-F1 and its commit id checked against a
+     * shape. This branch returned the raw contents of `.git/HEAD` unchecked into the manifest
+     * — a field `credentialScan` never sees, because the scan runs over copied content only.
+     * The guard went into one arm of the same `if` and not the other.
+     */
+    return { present: true, ...(COMMIT_ID.test(headRaw) ? { head: headRaw } : {}) };
   } catch {
     return { present: true };
   }

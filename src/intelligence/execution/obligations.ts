@@ -92,7 +92,17 @@ export function outstandingObligations(store: Store, workItemId: string): readon
       (q) =>
         q.state === OpenQuestionState.OPEN &&
         (q.askedOf === 'RESEARCH' || q.askedOf === 'UPSTREAM_DEPARTMENT') &&
-        (q.meta.workItemId === workItemId || q.meta.workItemId === undefined),
+        /*
+         * SCOPED, WITH NO "BELONGS TO EVERYTHING" CASE.
+         *
+         * SPEC: finding OLER-REV-1 (MEDIUM), 1.0.1 security review.
+         *
+         * `|| q.meta.workItemId === undefined` made an unscoped question an obligation of
+         * EVERY work item. OPEN_QUESTION is universal, and every question the runner raises
+         * carries `ctx.workItemId` — so the clause admitted only artifacts the legitimate path
+         * never writes, which is the shape of a fail-open rather than a convenience.
+         */
+        q.meta.workItemId === workItemId,
     );
 }
 
