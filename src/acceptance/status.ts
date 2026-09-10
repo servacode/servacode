@@ -20,12 +20,7 @@ import { systemClock } from '../core/clock.js';
 import { TimeOrderedIdSource } from '../core/ids.js';
 import { Store } from '../store/store.js';
 import { listChangeSets } from '../engineering/changeset.js';
-import {
-  assessProducerContainment,
-  assessVerificationBlock,
-  resolveLiveEngineering,
-  resolveLiveServa,
-} from './liveProof.js';
+import { assessContainmentForRun, resolveLiveEngineering, resolveLiveServa } from './liveProof.js';
 import { ExecutionAvailability, QualificationAttempt } from '../substrate/types.js';
 import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
 import { aggregateSecurityReview } from './securityAggregate.js';
@@ -260,19 +255,13 @@ export function defaultContainmentAssessor(): (ref: RunRef) => ContainmentVerdic
        *
        * The outcome is read from the terminal record rather than taken from the caller, so a
        * proof cannot select the more forgiving assessment by describing itself differently.
+       * That reasoning now lives in `assessContainmentForRun` and is shared with
+       * `resolveLiveEngineering`, which had its own weaker copy.
+       *
+       * SPEC: finding SSA-RLC-PARTIAL-1 (MEDIUM), 1.0.1 security review — the two copies had
+       * drifted, and the weaker one was on the path that mints the proof.
        */
-      const outcome = store.getCanon<{ outcome?: string }>('agentRunRecord', ref.runId)?.body
-        ?.outcome;
-
-      if (outcome === 'PARTIAL') {
-        const block = assessVerificationBlock(store, ref.runId, changeSet.changeSetId);
-        return {
-          contained: block.contained,
-          producerOutcome: block.producerOutcome,
-          reasons: block.reasons,
-        };
-      }
-      return assessProducerContainment(store, ref.runId, changeSet.changeSetId);
+      return assessContainmentForRun(store, ref.runId, changeSet.changeSetId);
     } catch {
       /* An unreadable store decides nothing, and deciding nothing is a refusal. */
       return undefined;

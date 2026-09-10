@@ -124,6 +124,37 @@ describe('every change shape integrates exactly', () => {
     expect(compareIdentities(identityFromChangeSet(cs), r.committedIdentity)).toEqual([]);
   }, 60_000);
 
+  it('an executable-bit flip after verification is a mismatch, not an identical file', () => {
+    /*
+     * SPEC: finding GIT-INT-MODE-1 (MEDIUM), 1.0.1 security review.
+     *
+     * Identity proved CONTENT equality only. Flipping a regular file to executable leaves the
+     * blob id untouched, so the verified ChangeSet and the accepted commit compared EQUAL
+     * while differing in the executable bit — an axis the "EXACTLY the verified ChangeSet"
+     * invariant claims to close.
+     *
+     * Compared as identities rather than through a real commit, because the point is what the
+     * comparison can SEE: same path, same blob, different mode.
+     */
+    const verified = {
+      baseCommit: 'b'.repeat(40),
+      facts: new Map([['src/tool.sh', { content: 'abc123', symlink: false, mode: '100644' }]]),
+      digest: 'ignored',
+      source: 'VERIFIED_CHANGESET' as const,
+    };
+    const committed = {
+      ...verified,
+      facts: new Map([['src/tool.sh', { content: 'abc123', symlink: false, mode: '100755' }]]),
+      source: 'COMMIT' as const,
+    };
+
+    const diffs = compareIdentities(verified as never, committed as never);
+    expect(diffs, 'a mode flip must be seen').toHaveLength(1);
+    expect(diffs[0]?.path).toBe('src/tool.sh');
+    expect(diffs[0]?.expected).toContain('100644');
+    expect(diffs[0]?.actual).toContain('100755');
+  });
+
   it('accepts a new file', async () => {
     const f = await fixture();
     writeFileSync(W(f, 'src/added.js'), 'module.exports = 4;\n', 'utf8');
@@ -299,7 +330,9 @@ describe('the comparison itself', () => {
       identityFromChangeSet({
         changeSetId: 'SC-CS-3',
         baseCommit: 'aaaaaaa',
-        entries: [{ status: 'M', path: 'a.js', isBinary: false, isSymlink: false }],
+        entries: [
+          { status: 'M', path: 'a.js', isBinary: false, isSymlink: false, gitMode: '100644' },
+        ],
       } as unknown as ChangeSet),
     ).toThrowError(/has no blob id/);
   });

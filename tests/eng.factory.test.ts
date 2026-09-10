@@ -1431,6 +1431,35 @@ describe('a credential printed by a build does not become permanent record', () 
     expect(source).toContain("redactSecrets(result.refusalReason ?? 'refused by substrate').text");
   });
 
+  it('redacts a private-key block whatever its label says', () => {
+    /*
+     * SPEC: finding SECRETS-REDACT-ENCRYPTED-KEY (MEDIUM), 1.0.1 security review.
+     *
+     * The pattern enumerated RSA | EC | DSA | OPENSSH | PGP, so
+     * `-----BEGIN ENCRYPTED PRIVATE KEY-----` — one of the commonest labels — matched nothing
+     * and its body went verbatim into immutable canon. The words before "PRIVATE KEY" were
+     * never the thing worth enumerating.
+     */
+    const BODY = 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj';
+    for (const label of ['ENCRYPTED ', '', 'RSA ', 'SOMETHINGNEW ']) {
+      const pem =
+        'building...' +
+        String.fromCharCode(10) +
+        '-----BEGIN ' +
+        label +
+        'PRIVATE KEY-----' +
+        String.fromCharCode(10) +
+        BODY +
+        String.fromCharCode(10) +
+        '-----END ' +
+        label +
+        'PRIVATE KEY-----';
+      const r = redactSecrets(pem);
+      expect(r.text, label + 'key body survived').not.toContain(BODY);
+      expect(r.count, label).toBeGreaterThan(0);
+    }
+  });
+
   it('leaves ordinary output exactly as it was', () => {
     /* A redactor that rewrites innocent text makes every excerpt untrustworthy. */
     const plain = 'tsc --noEmit\n0 errors\nBuild succeeded in 4.1s';

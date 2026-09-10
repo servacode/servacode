@@ -57,7 +57,21 @@ export interface SecretRule {
 export const SECRET_RULES: readonly SecretRule[] = Object.freeze([
   {
     category: SecretCategory.PRIVATE_KEY,
-    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/,
+    /*
+     * ANY LABEL, NOT A LIST OF THE ONES SOMEBODY THOUGHT OF.
+     *
+     * SPEC: finding SECRETS-REDACT-ENCRYPTED-KEY (MEDIUM), 1.0.1 security review.
+     *
+     * This enumerated `RSA | EC | DSA | OPENSSH | PGP` and so did not match
+     * `-----BEGIN ENCRYPTED PRIVATE KEY-----`, which is one of the commonest labels there is.
+     * An encrypted key block printed by a build was therefore neither detected nor redacted,
+     * and its body went verbatim into immutable canon — the exact permanent-channel leak
+     * SEC-EXEC-1 exists to close, left open for one word.
+     *
+     * `(?:[A-Z0-9]+ )*` matches whatever label a tool puts there, including none. The words
+     * before "PRIVATE KEY" were never the thing worth enumerating; the block was.
+     */
+    pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/,
     severity: 'HIGH',
     description: 'A PEM private key block.',
   },
@@ -302,12 +316,12 @@ const REDACTION_EXTENTS: readonly {
   {
     category: SecretCategory.PRIVATE_KEY,
     pattern:
-      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
+      /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----/g,
   },
   {
     /* Truncated output: a BEGIN with no END takes everything after it. */
     category: SecretCategory.PRIVATE_KEY,
-    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*/g,
+    pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----[\s\S]*/g,
   },
 ]);
 

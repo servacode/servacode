@@ -49,6 +49,18 @@ export interface IntegrationFact {
   /** The git blob id of the path's final content, or DELETED. */
   readonly content: string;
   readonly symlink: boolean;
+  /**
+   * The git file mode — `100644`, `100755`, `120000` — or DELETED.
+   *
+   * SPEC: finding GIT-INT-MODE-1 (MEDIUM), 1.0.1 security review.
+   *
+   * Identity proved CONTENT equality and nothing else, so flipping a regular file to
+   * executable produced the same blob id and compared equal: an accepted commit could differ
+   * from the verified ChangeSet in the executable bit with nothing to notice. The invariant
+   * this comparison exists for is "EXACTLY the verified ChangeSet", and the mode is an axis of
+   * that. `treeEntries` already returned it; only the symlink test was reading it.
+   */
+  readonly mode: string;
 }
 
 export interface IntegrationIdentity {
@@ -66,7 +78,7 @@ const SYMLINK_MODE = '120000';
 function digestFacts(baseCommit: string, facts: ReadonlyMap<string, IntegrationFact>): string {
   const sorted = [...facts.entries()]
     .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-    .map(([path, f]) => ({ path, content: f.content, symlink: f.symlink }));
+    .map(([path, f]) => ({ path, content: f.content, symlink: f.symlink, mode: f.mode }));
   return digestOf(canonicalJson({ baseCommit, entries: sorted }));
 }
 
@@ -81,12 +93,12 @@ export function identityFromChangeSet(changeSet: ChangeSet): IntegrationIdentity
   const facts = new Map<string, IntegrationFact>();
   for (const e of changeSet.entries) {
     if (e.status === 'D') {
-      facts.set(e.path, { content: DELETED, symlink: false });
+      facts.set(e.path, { content: DELETED, symlink: false, mode: DELETED });
       continue;
     }
     // A rename's old side is a deletion. A copy's is not.
     if (e.status === 'R' && e.from !== undefined) {
-      facts.set(e.from, { content: DELETED, symlink: false });
+      facts.set(e.from, { content: DELETED, symlink: false, mode: DELETED });
     }
     if (e.blobId === undefined) {
       return fail({
@@ -98,7 +110,7 @@ export function identityFromChangeSet(changeSet: ChangeSet): IntegrationIdentity
         specRef: 'Phase 4 §23',
       });
     }
-    facts.set(e.path, { content: e.blobId, symlink: e.isSymlink });
+    facts.set(e.path, { content: e.blobId, symlink: e.isSymlink, mode: e.gitMode });
   }
   return {
     baseCommit: changeSet.baseCommit,
@@ -144,16 +156,17 @@ export async function identityFromGit(
   const facts = new Map<string, IntegrationFact>();
   for (const e of entries) {
     if (e.status === 'D') {
-      facts.set(e.path, { content: DELETED, symlink: false });
+      facts.set(e.path, { content: DELETED, symlink: false, mode: DELETED });
       continue;
     }
     if (e.status === 'R' && e.from !== undefined) {
-      facts.set(e.from, { content: DELETED, symlink: false });
+      facts.set(e.from, { content: DELETED, symlink: false, mode: DELETED });
     }
     const blob = tree.get(e.path);
     facts.set(e.path, {
       content: blob?.blobId ?? 'MISSING',
       symlink: blob?.mode === SYMLINK_MODE,
+      mode: blob?.mode ?? 'MISSING',
     });
   }
 
@@ -185,11 +198,16 @@ export function compareIdentities(
     });
   }
   const render = (f: IntegrationFact | undefined): string =>
-    f === undefined ? 'absent' : (f.symlink ? 'symlink ' : '') + f.content;
+    f === undefined ? 'absent' : (f.symlink ? 'symlink ' : '') + f.content + ' mode ' + f.mode;
 
   for (const [path, want] of expected.facts) {
     const got = actual.facts.get(path);
-    if (got === undefined || got.content !== want.content || got.symlink !== want.symlink) {
+    if (
+      got === undefined ||
+      got.content !== want.content ||
+      got.symlink !== want.symlink ||
+      got.mode !== want.mode
+    ) {
       diffs.push({ path, expected: render(want), actual: render(got) });
     }
   }

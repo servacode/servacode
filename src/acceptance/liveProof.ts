@@ -433,6 +433,42 @@ export interface VerificationBlock {
  *
  * An arbitrary `PARTIAL` fails at the first of these. That is the point.
  */
+/**
+ * WHICH CONTAINMENT QUESTION THIS RUN HAS TO ANSWER, DECIDED ONCE.
+ *
+ * SPEC: finding SSA-RLC-PARTIAL-1 (MEDIUM), 1.0.1 security review.
+ *
+ * There were two consumers and two rules. `defaultContainmentAssessor` in status.ts read the
+ * run's outcome from the STORE and, for a PARTIAL run, asked `assessVerificationBlock` — the
+ * function written precisely to tell an honest verification block from an unfinished change,
+ * and the only one that demands an independent measurement of the check the Producer could not
+ * run. `resolveLiveEngineering` asked `assessProducerContainment` unconditionally.
+ *
+ * The weaker rule was on the MINTING path: `scripts/prove-live.mjs` resolves through
+ * `resolveLiveEngineering`. So an unfinished PARTIAL change with some measured evidence and a
+ * passing review could resolve as a valid engineering chain, while the acceptance status view
+ * of the same run applied the stricter test.
+ *
+ * The outcome is read from the store here too, for the reason status.ts already gave: a proof
+ * cannot select the more forgiving assessment by describing itself differently.
+ */
+export function assessContainmentForRun(
+  store: Store,
+  producerRunId: string,
+  changeSetId: string,
+): ProducerContainment {
+  const outcome = terminalRun(store, producerRunId)?.outcome;
+  if (String(outcome) === 'PARTIAL') {
+    const block = assessVerificationBlock(store, producerRunId, changeSetId);
+    return {
+      contained: block.contained,
+      producerOutcome: block.producerOutcome,
+      reasons: block.reasons,
+    } as ProducerContainment;
+  }
+  return assessProducerContainment(store, producerRunId, changeSetId);
+}
+
 export function assessVerificationBlock(
   store: Store,
   producerRunId: string,
@@ -907,7 +943,7 @@ export function resolveLiveEngineering(
   const containment =
     producerRunId === undefined
       ? undefined
-      : assessProducerContainment(input.store, producerRunId, changeSet.changeSetId);
+      : assessContainmentForRun(input.store, producerRunId, changeSet.changeSetId);
 
   if (containment !== undefined && !containment.contained) {
     for (const reason of containment.reasons) refuse('PRODUCER_CONTAINMENT', reason);

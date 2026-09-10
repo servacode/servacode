@@ -36,6 +36,20 @@ export const ChangedEntrySchema = z
     from: z.string().optional(),
     isBinary: z.boolean(),
     isSymlink: z.boolean(),
+    /**
+     * The git file mode this path holds — `100644`, `100755`, `120000`, or DELETED.
+     *
+     * SPEC: finding GIT-INT-MODE-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The integration check proves the accepted commit is EXACTLY the verified ChangeSet, and
+     * it could only prove CONTENT equality: flipping a regular file to executable leaves the
+     * blob id untouched, so the two compared equal and an accepted commit could differ from
+     * what was verified in the executable bit with nothing to notice.
+     *
+     * Required rather than optional, because an entry that cannot say what mode it held cannot
+     * be compared on one — and a comparison that quietly skips is the defect, not the fix.
+     */
+    gitMode: z.string().min(1),
     /** Digest of the file as it stands. Absent for a deletion. */
     digest: z.string().optional(),
     /**
@@ -189,6 +203,9 @@ export async function buildChangeSet(
   return changeSet;
 }
 
+/** The sentinel `IntegrationFact` uses for a path that is not there afterwards. */
+const DELETED_MODE = 'DELETED';
+
 function describeEntry(
   workspacePath: string,
   c: ChangedPath,
@@ -202,6 +219,7 @@ function describeEntry(
       ...(c.from === undefined ? {} : { from: c.from }),
       isBinary: false,
       isSymlink: false,
+      gitMode: DELETED_MODE,
     });
   }
   // lstat, never stat: a symlink must be recorded as a symlink rather than
@@ -218,6 +236,7 @@ function describeEntry(
       ...(c.from === undefined ? {} : { from: c.from }),
       isBinary: false,
       isSymlink: true,
+      gitMode: '120000',
       digest: digestOf(target.toString('utf8')),
       blobId: gitBlobId(target),
       sizeBytes: target.length,
@@ -230,6 +249,7 @@ function describeEntry(
       ...(c.from === undefined ? {} : { from: c.from }),
       isBinary: false,
       isSymlink: false,
+      gitMode: DELETED_MODE,
     });
   }
   const buf = readFileSync(abs);
@@ -239,9 +259,12 @@ function describeEntry(
    * it is the one the integration check compares against the index.
    */
   const blobId = blobIds.get(c.path);
+  /* Git records exactly two modes for a regular file, and the executable bit is the axis. */
+  const gitMode = (l.mode & 0o111) === 0 ? '100644' : '100755';
   return ChangedEntrySchema.parse({
     status: c.status,
     path: c.path,
+    gitMode,
     ...(c.from === undefined ? {} : { from: c.from }),
     isBinary: looksBinary(buf),
     isSymlink: false,

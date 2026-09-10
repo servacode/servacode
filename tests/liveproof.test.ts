@@ -851,6 +851,36 @@ describe('a PARTIAL caused by the intentional Producer execution policy', () => 
     return {};
   }
 
+  it('the MINTING path applies this same test, not the weaker one', () => {
+    /*
+     * SPEC: finding SSA-RLC-PARTIAL-1 (MEDIUM), 1.0.1 security review.
+     *
+     * There were two consumers and two rules. `defaultContainmentAssessor` in status.ts read
+     * the outcome from the store and, for PARTIAL, asked `assessVerificationBlock` — the
+     * function written to tell an honest verification block from an unfinished change.
+     * `resolveLiveEngineering` asked `assessProducerContainment` unconditionally, and
+     * `scripts/prove-live.mjs` mints through `resolveLiveEngineering`. The weaker rule was on
+     * the path that produces the proof.
+     *
+     * The fixture is a PARTIAL that explains NOTHING: no escalation, so nobody said why the
+     * run stopped. `assessVerificationBlock` refuses that — an unexplained PARTIAL is "I did
+     * not finish the work". The weaker assessment does not, because no contradicted material
+     * claim is left uncovered and measured evidence exists.
+     */
+    const rt = project();
+    seedBlockedProducer(rt.store, 'SC-RUN-000004', { escalations: [] });
+    chain(rt.store);
+
+    /* The strict test refuses it... */
+    const strict = assessVerificationBlock(rt.store, 'SC-RUN-000004', 'SC-CS-000002');
+    expect(strict.contained, strict.reasons.join('; ')).toBe(false);
+
+    /* ...and so must the resolution that mints the proof. */
+    const result = resolve(rt);
+    expect(result.resolved, JSON.stringify(result.refusals)).toBe(false);
+    expect(result.refusals.map((r) => r.check)).toContain('PRODUCER_CONTAINMENT');
+  });
+
   it('resolves when the block is attributable to the policy and everything else holds', () => {
     const rt = project();
     seedBlockedProducer(rt.store, 'SC-RUN-000004');
