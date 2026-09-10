@@ -142,6 +142,20 @@ export async function buildChangeSet(
       digest: e.digest ?? null,
       blobId: e.blobId ?? null,
       isSymlink: e.isSymlink,
+      /*
+       * SPEC: finding ENG-GIT-F1 (MEDIUM), 1.0.1 security review — the half of GIT-INT-MODE-1
+       * that the first fix missed.
+       *
+       * The mode was added to the entry and to the integration comparison, and left out of the
+       * identity this digest is built from. `chmod +x` on a tracked file leaves content and
+       * blob id untouched, so the identity collided with the earlier ChangeSet and the stale
+       * one was returned — meaning evidence gathered before the mode changed was treated as
+       * still applying to a change that now differs in the executable bit.
+       *
+       * The comment below says the digest covers content so that editing a file moves it. The
+       * mode is part of what the path holds, and covering it is the same idea one axis over.
+       */
+      gitMode: e.gitMode,
     })),
   };
 

@@ -10,6 +10,7 @@ import type { AgentContract } from '../../agents/schema.js';
 import type { Store, Transaction } from '../../store/store.js';
 import type { Clock } from '../../core/clock.js';
 import type { IdSource } from '../../core/ids.js';
+import { researchSeeds } from './seeds.js';
 
 /**
  * THE RESEARCH GATEWAY — Serva retrieves; the agent never holds a network tool.
@@ -154,9 +155,29 @@ export async function retrieveForResearch(
     return { outcome: RetrievalOutcome.REFUSED, captures: [], refusals: disclosure };
   }
 
-  /* --- hosts must have been declared BEFORE the fetch --- */
+  /*
+   * --- hosts must have been declared BEFORE the fetch, AND be ones this deployment allows ---
+   *
+   * SPEC: finding OLER-REQ-HOSTS (MEDIUM), 1.0.1 security review.
+   *
+   * The host boundary was read from the REQUEST alone. RESEARCH_REQUEST is a universal write
+   * type — any department's scoped writer may author one — and `ScopedCanonWriter` constrains
+   * OWNER_DECISION_REQUEST purposes, not ResearchRequest fields. So a request authored
+   * directly could name any host it liked and the gateway would honour it, while the safe
+   * path (`raiseResearchObligations`) forces the hosts from `researchSeeds()`.
+   *
+   * "Recording one grants nothing" was true of WHO may fetch — the researcher's contract —
+   * and not of WHERE. Both lists must now allow the host: the deployment's seeds bound what is
+   * reachable at all, and the request narrows within them. A request cannot widen its own
+   * boundary, which is the only thing that made this a boundary.
+   */
+  const seeds = researchSeeds().hosts;
   const refusals: string[] = [];
   const permitted = o.urls.filter((u) => {
+    if (!hostAllowed(u, seeds)) {
+      refusals.push('host is not one this deployment permits at all: ' + u);
+      return false;
+    }
     if (hostAllowed(u, o.request.allowedHosts)) return true;
     refusals.push('host not declared in the research request: ' + u);
     return false;

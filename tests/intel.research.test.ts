@@ -361,6 +361,13 @@ describe('captured external content is data, never instruction', () => {
   }, 30_000);
 
   it('a host the request never declared is not fetched', async () => {
+    /*
+     * The host IS one this deployment permits, so the refusal under test is the REQUEST's own
+     * narrowing rather than the deployment bound added for OLER-REQ-HOSTS. Both refuse; this
+     * test is about the one it was written for.
+     */
+    const { configureResearchSeeds } = await import('../src/intelligence/departments/research.js');
+    configureResearchSeeds({ hosts: ['example.com', 'elsewhere.test'], urls: [] });
     const f = freshStore();
     roots.push(f.root);
     const { retrieveForResearch } = await import('../src/intelligence/research/gateway.js');
@@ -401,6 +408,63 @@ describe('captured external content is data, never instruction', () => {
       },
     );
     expect(result.refusals.join(' ')).toContain('host not declared');
+    expect(f.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toHaveLength(0);
+  }, 30_000);
+
+  it('a request cannot widen the hosts this deployment permits', async () => {
+    /*
+     * SPEC: finding OLER-REQ-HOSTS (MEDIUM), 1.0.1 security review.
+     *
+     * The host boundary was read from the REQUEST alone. RESEARCH_REQUEST is a universal write
+     * type, and the scoped writer constrains OWNER_DECISION_REQUEST purposes rather than
+     * ResearchRequest fields — so a request authored directly could name any host and the
+     * gateway honoured it, while the safe path forces the hosts from `researchSeeds()`.
+     *
+     * "Recording one grants nothing" was true of WHO may fetch, not of WHERE.
+     */
+    const { configureResearchSeeds } = await import('../src/intelligence/departments/research.js');
+    configureResearchSeeds({ hosts: ['example.com'], urls: [] });
+    const f = freshStore();
+    roots.push(f.root);
+    const { retrieveForResearch } = await import('../src/intelligence/research/gateway.js');
+    const { ResearchRequestSchema } = await import('../src/intelligence/research/capture.js');
+    const at = f.deps.clock.now();
+    const tx = f.store.begin();
+    const req = repository(f.store, ARTIFACT_TYPES.RESEARCH_REQUEST, ResearchRequestSchema).put(
+      tx,
+      {
+        id: f.deps.ids.next('SC-RR'),
+        createdAt: at,
+        question: 'pricing',
+        purpose: 'scan',
+        scope: 'public',
+        /* The request declares a host the deployment never permitted. */
+        allowedHosts: ['attacker.test'],
+        dataAllowedToLeave: [],
+        maxSources: 3,
+        meta: {
+          provenance: { marking: SourceMarking.SYSTEM, component: 'test' },
+          attribution: { at },
+        },
+      },
+    );
+    tx.commit();
+
+    const result = await retrieveForResearch(
+      {
+        store: f.store,
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        retriever: fakeRetriever(CLEAN_PAGES),
+      },
+      {
+        contract: ContractRegistry.shared().get('SC-AGENT-060'),
+        request: req,
+        urls: ['https://attacker.test/pricing'],
+        runId: 'r1',
+      },
+    );
+    expect(result.refusals.join(' ')).toContain('not one this deployment permits');
     expect(f.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toHaveLength(0);
   }, 30_000);
 

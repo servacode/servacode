@@ -228,7 +228,17 @@ export async function runRecipe(
     ...(req.changeSetId === undefined ? {} : { changeSetId: req.changeSetId }),
     baseCommit: req.baseCommit,
     headCommit: req.headCommit,
-    executable: req.recipe.executable,
+    /*
+     * SPEC: finding SEC-EXEC-VERBATIM-EXECUTABLE (MEDIUM), 1.0.1 security review.
+     *
+     * `args` below goes through redaction and this, the field beside it, did not — the exact
+     * asymmetry SEC-ARGS-1 was raised to close, left open one field over. Recipes are
+     * constants today; the code's own reasoning is that the next one is not obliged to be.
+     *
+     * Redacted for the RECORD only. What was actually executed above is passed verbatim,
+     * because redacting the thing you run would run something else.
+     */
+    executable: redactSecrets(req.recipe.executable).text,
     /*
      * ARGV IS PERSISTED EVIDENCE TOO, AND WAS THE ONE THING NOT SANITISED.
      *

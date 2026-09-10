@@ -10,6 +10,7 @@ import { isServaProject } from '../app/services.js';
 import { ServaRuntime } from '../app/runtime.js';
 import type { SubstrateQualification } from '../substrate/types.js';
 import type { BackupManifest } from '../portability/backup.js';
+import { scanText } from '../engineering/secrets.js';
 
 /**
  * THE PORTABILITY WALKTHROUGH, PERFORMED RATHER THAN DESCRIBED.
@@ -184,14 +185,21 @@ export function walkPortability(input: PortabilityWalkInput): PortabilityWalkRes
    * Credential SHAPES rather than a list of known secrets. A scan that only looked for
    * strings it had seen before would pass on the first credential nobody had thought of.
    */
-  const credentialShapes: readonly [string, RegExp][] = [
-    ['api key', /\bsk-[A-Za-z0-9_-]{16,}/],
-    ['bearer token', /\bBearer\s+[A-Za-z0-9._-]{20,}/],
-    ['private key block', /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-    ['oauth refresh token', /"refresh_token"\s*:/],
-    ['session token', /"access_token"\s*:/],
-  ];
-  const found = credentialShapes.filter(([, re]) => re.test(bundleText)).map(([name]) => name);
+  /*
+   * THE SAME RULES THE ENGINEERING SCAN USES, NOT A SECOND SMALLER LIST.
+   *
+   * SPEC: finding SC-SSA-CRED-SHAPES (MEDIUM), 1.0.1 security review.
+   *
+   * This carried its own five shapes while `SECRET_RULES` in engineering/secrets.ts carries
+   * the vendor shapes, connection strings, JWTs and generic assignments — and was widened
+   * twice during this campaign. AWS keys, GitHub tokens, Google API keys, a database URL with
+   * inline credentials: none matched here, so a credential in a note could travel while the
+   * step reported "nothing matched".
+   *
+   * Two rule sets for one question is how the weaker one survives. There is one now, and a
+   * shape added to it protects both walks the day it is written.
+   */
+  const found = [...new Set(scanText('bundle', bundleText).map((f) => f.category))];
   step(
     'NO_CREDENTIALS',
     'nothing in the bundle matches a credential shape',
