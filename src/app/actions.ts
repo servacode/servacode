@@ -35,8 +35,23 @@ import type { ServaRuntime } from './runtime.js';
  *
  *   CONSEQUENCE IS DECLARED, AND CONFIRMATION IS NOT INFERRED. An action that changes
  *   project truth, overwrites a project, or authorises something carries `consequential`
- *   and refuses without an explicit confirmation token from the caller. A UI that had
- *   already shown a dialog cannot skip it by remembering that it did.
+ *   and refuses unless the caller confirms on this call. A UI that had already shown a
+ *   dialog cannot skip it by remembering that it did.
+ *
+ *   WHAT CONFIRMATION IS NOT. SPEC: finding AAA-CONFIRM-1 (MEDIUM), 1.0.1 security review.
+ *
+ *   This said "an explicit confirmation token", and a token is what it is not: `confirmed`
+ *   is a boolean on the request, so a forged or injected message can carry `confirmed: true`
+ *   as easily as it carries the action id. Against a compromised webview it defends nothing,
+ *   and the two properties above were the ones doing that work all along - dispatch by id
+ *   against this table, and a schema that parses rather than casts. Confirmation defends
+ *   against INFERENCE, which is a different and real failure: a UI deciding on the owner's
+ *   behalf that asking once was enough.
+ *
+ *   Narrowed rather than fixed, because the fix is not here. A claim of anti-forgery would
+ *   need the confirmation minted outside the webview - by the extension host, bound to this
+ *   action and this payload - and until that exists, saying "token" would leave a reader
+ *   believing a protection that is not in the code.
  *
  * What this deliberately does NOT contain is an action that sets a status, marks a gate,
  * or declares readiness. Those are derived, and an action that could set one would make

@@ -974,6 +974,50 @@ describe('independence is established, never assumed from a missing field', () =
     ).rejects.toThrowError(/Producer run was not identified/);
   }, 60_000);
 
+  it('a run that recorded no engine session cannot be shown to be independent', async () => {
+    /*
+     * SPEC: finding EAA-SESSION-RESIDUAL (MEDIUM), 1.0.1 security review.
+     *
+     * The distinctness check ran only when BOTH runs recorded an `engineSessionRef`, so when
+     * either was missing the comparison had nothing to compare and did not refuse - the same
+     * shape as EAA-1 above, one field along. A reviewer sharing the Producer's session passed
+     * whenever the engine did not report one.
+     *
+     * The residual's stated reason was that demanding the field would refuse every review under
+     * an engine that does not report one. That is measurable, and it was measured: across the
+     * 29 governed runs of the 0fe5215d security round, 29 recorded an engineSessionRef. The
+     * fake adapter reports one per run too. So the field is present in practice, and requiring
+     * it fails CLOSED for an engine that stops reporting it rather than passing silently.
+     */
+    const f = await setup();
+    const { item, w, v } = await verifiedFor(f);
+
+    f.engine.script(REVIEWER, {
+      structuredOutput: envelope({
+        criterionId: 'EC-REVIEW',
+        outcome: 'PASS',
+        changeSetId: v.changeSet.changeSetId,
+        summary: 'Looks fine.',
+        findings: [],
+        confidence: 'HIGH',
+      }),
+    });
+
+    /* A real, resolvable Producer run whose record carries no engine session. */
+    const producerRunId = producerRunWithoutSession(f, item);
+
+    await expect(
+      dispatchReviewer(f.dispatchDeps, {
+        item,
+        workspace: w,
+        changeSet: v.changeSet,
+        evidence: v.evidence,
+        diff: '',
+        producerRunRef: producerRunId,
+      }),
+    ).rejects.toThrowError(/engine session/i);
+  }, 60_000);
+
   it('a Producer reference that resolves to nothing is refused', async () => {
     /*
      * Otherwise the requirement is satisfiable by inventing a run id, which is a weaker
@@ -1005,6 +1049,26 @@ describe('independence is established, never assumed from a missing field', () =
     ).rejects.toThrowError(/does not resolve to a recorded run/);
   }, 60_000);
 });
+
+/**
+ * A resolvable Producer run whose record carries no engine session.
+ *
+ * Written directly rather than dispatched, because the fake adapter reports a session for
+ * every run - which is the measurement the requirement rests on, and so is no way to
+ * produce the shape being refused.
+ */
+function producerRunWithoutSession(f: Fixture, item: { workItemId: string }): string {
+  const runId = 'SC-RUN-00000000000000NOSESS';
+  const tx = f.store.begin();
+  tx.putCanon('agentRunRecord', runId, {
+    runId,
+    agentId: PRODUCER,
+    workItemId: item.workItemId,
+    outcome: 'COMPLETED',
+  });
+  tx.commit();
+  return runId;
+}
 
 /** A verified attempt with no Producer dispatched, for the two refusals above. */
 async function verifiedFor(f: Fixture) {

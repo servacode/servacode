@@ -328,23 +328,35 @@ export function validateReviewerResult(input: ReviewValidationInput): ReviewVali
       );
     } else {
       const producerSession = producerRecord['engineSessionRef'];
-      if (
-        sessionRef !== undefined &&
-        typeof producerSession === 'string' &&
-        sessionRef === producerSession
-      ) {
+      /*
+       * THE RESIDUAL, MEASURED AND THEN CLOSED.
+       *
+       * SPEC: finding EAA-SESSION-RESIDUAL (MEDIUM), 1.0.1 security review, second pass.
+       *
+       * This used to compare the two sessions only when BOTH runs recorded one, and said so as
+       * a known residual. That is the same shape as the defect above it, one field along:
+       * absence removed the check instead of failing it, so a reviewer sharing the Producer's
+       * session passed whenever the engine reported no session.
+       *
+       * The reason given for leaving it was that demanding the field would refuse every review
+       * under an engine that does not report one. That is a measurable claim and it was
+       * measured rather than repeated: across the 29 governed runs of the 0fe5215d security
+       * round, 29 recorded an `engineSessionRef`, and the fake adapter reports one per run.
+       *
+       * So the field is present in practice, and requiring it fails CLOSED for an engine that
+       * stops reporting one - which is the direction this check must fail in. Serva cannot show
+       * the sessions differed without both of them, and it no longer claims it can.
+       */
+      if (sessionRef === undefined || typeof producerSession !== 'string') {
+        problems.push(
+          'The ' +
+            (sessionRef === undefined ? 'reviewer' : 'Producer') +
+            ' run recorded no engine session, so the reviewer cannot be shown to have used a ' +
+            'different engine session from the one that wrote the change.',
+        );
+      } else if (sessionRef === producerSession) {
         problems.push("The reviewer shared the Producer's engine session.");
       }
-      /*
-       * KNOWN RESIDUAL, stated rather than hidden: when either run records no engine session,
-       * the comparison has nothing to compare and this does not refuse. `engineSessionRef` is
-       * written only when the engine reports one (agents/runtime.ts), so demanding it would
-       * refuse every review under an engine that does not — a behavioural change wider than
-       * the defect being fixed here, and one this codebase cannot yet demonstrate is safe.
-       *
-       * What the defect WAS is closed: independence no longer depends on the caller choosing
-       * to pass `producerRunRef`, and a fabricated reference is refused.
-       */
     }
   }
 

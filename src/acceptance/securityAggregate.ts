@@ -274,6 +274,33 @@ function isResolvedHere(f: ScopeFinding, repository: RepositoryIdentity): boolea
  *
  * Neither half is forgeable alone. The claim cannot conjure a run's silence, and silence with no
  * claim still means only that nobody looked.
+ *
+ * WHY THE RECORD'S OWN OUTPUT IS STILL NOT CROSS-CHECKED, AND WHY ADDING ONE WOULD NOT HELP.
+ *
+ * SPEC: finding SSA-RLC-CHAIN-3 (MEDIUM), 1.0.1 security review, second pass.
+ *
+ * `resolveSecurityReviewAttempt` proves provenance and not content: it establishes that the
+ * record binds to this commit and tree and that its `reviewerRunId` resolves to a COMPLETED run
+ * by the named agent holding a verifier authority, but it never compares the record's declared
+ * findings and verdict against what that run actually returned. A record could therefore cite a
+ * legitimate run while asserting something else.
+ *
+ * It cannot be closed from what this store holds, and that was measured rather than assumed:
+ * across the 29 governed runs of the 0fe5215d round, the trace records of a reviewer's output
+ * are `OUTPUT_RECEIVED` events carrying `hasStructuredOutput` and `textLength` and nothing more
+ * — 29 of 29, no exceptions. There is no copy of the output to re-read.
+ *
+ * Storing one would move the problem rather than solve it. The attacker this finding posits
+ * already holds canon-write access, which is what it takes to author a record that lies; the
+ * same access authors a matching raw output beside it. store.ts is explicit that canon is
+ * tamper-EVIDENT and not tamper-proof, and a check that an attacker can satisfy by writing one
+ * more file is a check that reads as protection while providing none. This is the same ceiling
+ * as EAA-SR-A1 in engineering/review.ts condition 9, reached from the other side.
+ *
+ * What bounds it instead is that the two consumers are fail-safe by construction, which is a
+ * property of the aggregate rather than a hope: `currentFindings` gathers HIGH and CRITICAL
+ * findings from EVERY usable attempt, so a later clean attempt cannot drop one; and suppression
+ * needs the corroboration above. Disposed as a disclosed residual, not as fixed.
  */
 /**
  * Which review UNIT raised this finding?
