@@ -394,14 +394,36 @@ export function recordEvidence(tx: Transaction, evidence: EngineeringEvidence): 
    * same place: immutable canon, where an unredacted value cannot be withdrawn afterwards.
    * Every other free-text channel into T-CANON passes through here; this one did not.
    *
-   * The whole record is redacted rather than two named fields, so a field added to the schema
-   * later is covered the day it is written.
+   * THE WHOLE RECORD, WHICH IS WHAT THIS ALREADY SAID.
+   *
+   * SPEC: finding EVIDENCE-REDACT-NAMED-FIELDS-ONLY (MEDIUM), 1.0.1 review, second pass.
+   *
+   * The sentence above promised that a field added to the schema later is covered the day it
+   * is written, and the code underneath it spread `...evidence` and overrode two named fields
+   * - so the next free-text field would reach immutable canon unredacted. Nothing leaks today,
+   * because `claim` and `detail` are the only free text this schema has; the defect is that
+   * the comment described a general rule and the code implemented two special cases, which is
+   * the exact asymmetry SEC-EVIDENCE-DETAIL was raised to close, reintroduced in the fix for
+   * it.
+   *
+   * Every string in the record now passes through the same rule. Ids, digests and commits are
+   * strings too and go through unchanged: `SECRET_RULES` matches credential SHAPES, and a hex
+   * digest or an `SC-`-prefixed id is not one. This is the rule the comment claimed, rather
+   * than a longer list of names to keep in step with the schema.
    */
-  tx.putCanon(EVIDENCE_CANON_TYPE, evidence.id, {
-    ...evidence,
-    claim: redactSecrets(evidence.claim).text,
-    detail: redactSecrets(evidence.detail).text,
-  });
+  tx.putCanon(EVIDENCE_CANON_TYPE, evidence.id, redactDeep(evidence) as EngineeringEvidence);
+}
+
+/** Every string inside a record, redacted by the one rule. Structure is preserved. */
+function redactDeep(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value).text;
+  if (Array.isArray(value)) return value.map(redactDeep);
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = redactDeep(v);
+    return out;
+  }
+  return value;
 }
 
 export function listEvidence(store: Store): EngineeringEvidence[] {

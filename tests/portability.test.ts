@@ -339,6 +339,51 @@ describe('a corrupt or tampered backup is refused, not repaired', () => {
     expect(result.problems.join(' ')).toContain('integrity digest');
   });
 
+  it('a bundle bigger than this build will read is refused before it is walked', () => {
+    /*
+     * SPEC: finding RELEASE-HANDOVER/RELH-F1 (MEDIUM), 1.0.1 security review.
+     *
+     * BACKUP_LIMITS bound the WRITING side only - a project this machine already holds, where
+     * the totals are whatever they are. The header promised a bundle arriving from elsewhere is
+     * treated as hostile and its totals capped, and the reading side capped nothing: the schema
+     * puts no maximum on `inventory`, so a crafted manifest was walked in full by verify and
+     * then again by restore.
+     *
+     * Tiny limits rather than a 200,000-entry fixture, because the property under test is that
+     * the declared totals are checked at all, and a test that had to build the real limit would
+     * be paying the cost the fix exists to refuse.
+     */
+    const bundle = goodBundle();
+    const tiny = { maxEntries: 1, maxTotalBytes: 8 * 1024 * 1024 * 1024, maxFileBytes: 512 };
+
+    const result = verifyBackup(bundle, tiny);
+
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(' ')).toMatch(/entries, over the/);
+    expect(result.summary).toContain('larger than this build will read');
+  });
+
+  it('refuses a manifest whose declared bytes exceed the total, and one oversized file', () => {
+    const bundle = goodBundle();
+    const byTotal = verifyBackup(bundle, {
+      maxEntries: 200_000,
+      maxTotalBytes: 1,
+      maxFileBytes: 512 * 1024 * 1024,
+    });
+    expect(byTotal.problems.join(' ')).toMatch(/bytes, over the/);
+
+    const byFile = verifyBackup(bundle, {
+      maxEntries: 200_000,
+      maxTotalBytes: 8 * 1024 * 1024 * 1024,
+      maxFileBytes: 1,
+    });
+    expect(byFile.problems.join(' ')).toMatch(/per-file limit/);
+  });
+
+  it('a bundle within the limits still verifies, so the cap is a bound and not a wall', () => {
+    expect(verifyBackup(goodBundle()).ok).toBe(true);
+  });
+
   it('a file added to the bundle that the manifest never listed is reported', () => {
     const bundle = goodBundle();
     writeFileSync(join(bundle, CONTENT_DIR, 'smuggled.txt'), 'extra\n', 'utf8');

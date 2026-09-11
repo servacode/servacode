@@ -45,9 +45,30 @@ import {
  *
  * WHAT THIS STILL CANNOT DO. There is no signing key, so a determined author with the
  * repository can recompute digests and mint a DETERMINISTIC proof for a tree that really
- * does exist. What they cannot mint is a reviewer AgentRun or a live Producer run, which is
- * why the two lines that gate `READY` are exactly those two. The ceiling is stated rather
- * than papered over.
+ * does exist. JUDGED and LIVE are stronger because a reviewer AgentRun and a live Producer
+ * run are facts about the world rather than claims in the document, which is why the two
+ * lines that gate `READY` are exactly those two.
+ *
+ * HOW MUCH STRONGER, EXACTLY. SPEC: finding SSA-PM-1 (MEDIUM), 1.0.1 security review.
+ *
+ * This used to say that a reviewer AgentRun and a live Producer run are what such an author
+ * "cannot mint", full stop, and that is a sentence about a signature Serva does not have.
+ * The resolver re-checks a run record's body against its own digest (defaultRunResolver in
+ * status.ts), and store.ts is explicit about what that is worth: tamper-EVIDENCE, not
+ * tamper-proofing - "an attacker with write access to the store could recompute the digest
+ * as easily as we can".
+ *
+ * What an out-of-band store writer genuinely cannot fabricate is narrower and worth naming
+ * precisely: the agent id's authority in the shared ContractRegistry, which is code rather
+ * than store content, and the git tree. Everything else about a run is as strong as the
+ * append-only enforcement of the run store, which lives outside this module and is where the
+ * guarantee actually rests.
+ *
+ * So the honest form of the claim is: minting a JUDGED or LIVE proof requires write access to
+ * the governed store and leaves evidence of tampering, where minting a DETERMINISTIC one
+ * requires neither. That is a real difference and it is not the same as "cannot". The ceiling
+ * is stated rather than papered over - which is what the previous sentence was doing while
+ * saying it did not.
  */
 
 export const VerificationType = {

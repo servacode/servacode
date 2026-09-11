@@ -156,6 +156,22 @@ export async function buildChangeSet(
        * mode is part of what the path holds, and covering it is the same idea one axis over.
        */
       gitMode: e.gitMode,
+      /*
+       * SPEC: finding ENG-GIT-REV-1 (MEDIUM), 1.0.1 security review — the same omission again,
+       * one field along, found the same way.
+       *
+       * This projection is a hand-written list of the entry fields that count, so a field that
+       * is not typed here is a difference the identity cannot see. `from` carries the source of
+       * a rename or copy, and integration DOES honour it: identityFromChangeSet uses it to mark
+       * the old side DELETED. The two halves of the system disagreed about what makes two
+       * changes different.
+       *
+       * Rename A to C, or rename B to C with identical content, and every field above matched —
+       * same status, same destination path, same digest, same blob id, same mode. The digest
+       * collided, the earlier ChangeSet came back, and evidence bound to a change that deletes A
+       * was treated as applying to one that deletes B.
+       */
+      from: e.from ?? null,
     })),
   };
 

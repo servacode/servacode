@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  renameSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -30,6 +31,8 @@ import {
 import { reconcileWorkspaces, DivergenceKind } from '../src/engineering/reconcile.js';
 import { buildSandboxProfile, sandboxProfileDrift } from '../src/engineering/sandboxProfile.js';
 import { scanChangeSetForSecrets } from '../src/engineering/secrets.js';
+import { recordEvidence } from '../src/engineering/execution.js';
+import { EvidenceClass } from '../src/vocab/index.js';
 import type { SecretsScanResult } from '../src/engineering/secrets.js';
 import { cleanup, freshStore } from './helpers.js';
 import type { Store } from '../src/store/store.js';
@@ -1046,5 +1049,154 @@ describe('the credential gate cannot pass a file it did not scan', () => {
     expect(r.notScanned).toHaveLength(0);
     expect(r.complete).toBe(true);
     expect(r.blocking).toBe(false);
+  });
+});
+
+/* ============================================= identity covers the whole of what changed */
+
+describe('a rename from a different source is a different change', () => {
+  /*
+   * SPEC: finding ENG-GIT-REV-1 (MEDIUM), 1.0.1 security review.
+   *
+   * The second half of ENG-GIT-F1, found the same way that one was: the identity projection
+   * is a hand-written list of the entry fields that count, and `from` was not on it. The
+   * integration comparison DOES honour `from` - it marks the old side DELETED - so the two
+   * halves of the system disagreed about what makes two changes different.
+   *
+   * Rename A to C, or rename B to C with identical content, and everything the identity
+   * looked at was equal: same status, same path, same digest, same blob id, same mode. The
+   * digest collided, `buildChangeSet` returned the earlier ChangeSet, and evidence bound to a
+   * change that deleted A was treated as applying to one that deletes B.
+   */
+  function twinRepo(): { repo: string; base: string } {
+    const { root } = freshStore();
+    roots.push(root);
+    const repo = join(root, 'twin-repo');
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'fixture@localhost');
+    git('config', 'user.name', 'Fixture');
+    git('config', 'commit.gpgsign', 'false');
+    /* Two tracked files with byte-identical content: the only thing a rename of either to
+       the same destination can differ in is where it came from. */
+    writeFileSync(join(repo, 'src', 'a.js'), 'module.exports = 1;\n', 'utf8');
+    writeFileSync(join(repo, 'src', 'b.js'), 'module.exports = 1;\n', 'utf8');
+    git('add', '.');
+    git('commit', '-q', '-m', 'base');
+    return { repo, base: git('rev-parse', 'HEAD').trim() };
+  }
+
+  it('does not collapse onto the ChangeSet recorded for the other source', async () => {
+    const { repo, base } = twinRepo();
+    const { mgr, git, store } = managerFor(repo);
+    const { deps } = freshStore();
+    const workspace = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000012',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+    const deps2 = { store, git, clock: deps.clock, ids: deps.ids };
+    const wt = workspace.path;
+
+    /* a.js -> c.js */
+    renameSync(join(wt, 'src', 'a.js'), join(wt, 'src', 'c.js'));
+    await git.stagePaths(['src/a.js', 'src/c.js'], wt);
+    const first = await buildChangeSet(deps2, workspace);
+
+    /* undo, then b.js -> c.js, with c.js byte-identical to before */
+    rmSync(join(wt, 'src', 'c.js'), { force: true });
+    writeFileSync(join(wt, 'src', 'a.js'), 'module.exports = 1;\n', 'utf8');
+    renameSync(join(wt, 'src', 'b.js'), join(wt, 'src', 'c.js'));
+    await git.stagePaths(['src/a.js', 'src/b.js', 'src/c.js'], wt);
+    const second = await buildChangeSet(deps2, workspace);
+
+    const froms = (cs: typeof first): string[] =>
+      cs.entries.map((e) => (e as { from?: string }).from ?? '-');
+    expect(
+      second.changeSetId,
+      'the second change deletes a different file and must not reuse the first ChangeSet: ' +
+        froms(first).join(',') +
+        ' vs ' +
+        froms(second).join(','),
+    ).not.toBe(first.changeSetId);
+    expect(second.digest).not.toBe(first.digest);
+  });
+});
+
+/* ============================================= the whole record, as the comment promised */
+
+describe('evidence redaction covers the record and not a list of names', () => {
+  /*
+   * SPEC: finding EVIDENCE-REDACT-NAMED-FIELDS-ONLY (MEDIUM), 1.0.1 security review.
+   *
+   * recordEvidence's own comment promised "the whole record is redacted rather than two named
+   * fields, so a field added to the schema later is covered the day it is written", and the
+   * code spread the record and overrode `claim` and `detail`. The next free-text field would
+   * have reached immutable canon unredacted - the same asymmetry the fix was written to close.
+   *
+   * The extra field below stands for that future field: it is what a schema addition looks
+   * like arriving at this function.
+   */
+  it('redacts a field the schema does not name yet', () => {
+    const f = freshStore();
+    roots.push(f.root);
+    const key = 'AKIA' + 'Z3K7QW9TR5MB2XCD';
+    const tx = f.store.begin();
+    recordEvidence(tx, {
+      id: 'SC-EEV-000001',
+      evidenceClass: EvidenceClass.ANALYSIS,
+      claim: 'ran the check',
+      basis: 'DERIVED',
+      workItemId: 'SC-WI-000001',
+      changeSetId: 'SC-CS-000001',
+      workspaceId: 'SC-WS-000001',
+      headCommit: 'a'.repeat(40),
+      outcome: 'PASS',
+      detail: 'nothing to report',
+      capturedAt: '2026-09-11T00:00:00.000Z',
+      capturedBy: 'RUNTIME',
+      futureNote: 'the runner logged ' + key + ' while it worked',
+    } as never);
+    tx.commit();
+
+    const body = JSON.stringify(f.store.getCanon('engineeringEvidence', 'SC-EEV-000001')?.body);
+    expect(body, 'a credential reached immutable canon').not.toContain(key);
+  });
+
+  it('leaves ids, digests and commits alone, because they are not credential shapes', () => {
+    const f = freshStore();
+    roots.push(f.root);
+    const commit = 'b'.repeat(40);
+    const tx = f.store.begin();
+    recordEvidence(tx, {
+      id: 'SC-EEV-000002',
+      evidenceClass: EvidenceClass.ANALYSIS,
+      claim: 'ran the check',
+      basis: 'DERIVED',
+      workItemId: 'SC-WI-000001',
+      changeSetId: 'SC-CS-000001',
+      workspaceId: 'SC-WS-000001',
+      headCommit: commit,
+      outcome: 'PASS',
+      detail: 'nothing to report',
+      capturedAt: '2026-09-11T00:00:00.000Z',
+      capturedBy: 'RUNTIME',
+    });
+    tx.commit();
+
+    const body = f.store.getCanon('engineeringEvidence', 'SC-EEV-000002')?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body['headCommit']).toBe(commit);
+    expect(body['id']).toBe('SC-EEV-000002');
+    expect(body['changeSetId']).toBe('SC-CS-000001');
   });
 });

@@ -730,7 +730,14 @@ export interface VerifyResult {
  * thing is. The result is non-throwing for the same reason: "this backup is bad" is
  * information, not an exception.
  */
-export function verifyBackup(bundlePath: string): VerifyResult {
+export function verifyBackup(
+  bundlePath: string,
+  limits: {
+    readonly maxEntries: number;
+    readonly maxTotalBytes: number;
+    readonly maxFileBytes: number;
+  } = BACKUP_LIMITS,
+): VerifyResult {
   const problems: string[] = [];
   const manifestPath = join(bundlePath, MANIFEST_NAME);
   if (!existsSync(manifestPath)) {
@@ -775,6 +782,64 @@ export function verifyBackup(bundlePath: string): VerifyResult {
     problems.push(
       'the manifest does not match its own integrity digest, so its inventory cannot be trusted',
     );
+  }
+
+  /*
+   * THE CAP, ON THE SIDE THAT FACES A BUNDLE FROM SOMEWHERE ELSE.
+   *
+   * SPEC: finding RELEASE-HANDOVER/RELH-F1 (MEDIUM), 1.0.1 security review.
+   *
+   * BACKUP_LIMITS was enforced only while WRITING a backup - over a project this machine
+   * already holds, where the totals are whatever they are. The header promised that on the way
+   * back in a bundle is treated as hostile and totals are capped, and the reading side did not
+   * cap anything: `BackupManifestSchema` puts no maximum on `inventory`, so a crafted manifest
+   * declaring millions of entries was walked in full, by verify and then by restore.
+   *
+   * The same shape as RELH-1 directly below, which found the credential scan running on the
+   * writing side only. A limit that binds the party who is not the threat is not a limit.
+   *
+   * Checked from the manifest's DECLARED totals and before the walk, because the walk is the
+   * cost: refusing after iterating an inventory has already paid for it. The per-file cap is
+   * declared here too, since `entry.bytes` is compared to the real size further down and a
+   * bundle that lies about it fails there instead.
+   */
+  const declaredBytes = manifest.inventory.reduce((sum, e) => sum + e.bytes, 0);
+  const oversized = manifest.inventory.filter((e) => e.bytes > limits.maxFileBytes);
+  const tooBig: string[] = [];
+  if (manifest.inventory.length > limits.maxEntries) {
+    tooBig.push(
+      'the manifest declares ' +
+        String(manifest.inventory.length) +
+        ' entries, over the ' +
+        String(limits.maxEntries) +
+        ' this build will read',
+    );
+  }
+  if (declaredBytes > limits.maxTotalBytes) {
+    tooBig.push(
+      'the manifest declares ' +
+        String(declaredBytes) +
+        ' bytes, over the ' +
+        String(limits.maxTotalBytes) +
+        ' this build will read',
+    );
+  }
+  if (oversized.length > 0) {
+    tooBig.push(
+      String(oversized.length) +
+        ' entry/entries declare more than the ' +
+        String(limits.maxFileBytes) +
+        ' byte per-file limit, the first being ' +
+        String(oversized[0]?.path),
+    );
+  }
+  if (tooBig.length > 0) {
+    /* Returned rather than accumulated: the walk below is the cost being refused. */
+    return {
+      ok: false,
+      problems: [...problems, ...tooBig],
+      summary: 'this bundle is larger than this build will read',
+    };
   }
 
   const contentRoot = join(bundlePath, CONTENT_DIR);
