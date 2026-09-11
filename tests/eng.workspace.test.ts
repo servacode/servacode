@@ -1213,3 +1213,79 @@ describe('evidence redaction covers the record and not a list of names', () => {
     expect(body['changeSetId']).toBe('SC-CS-000001');
   });
 });
+
+/* ============================================= scope is judged where the path lands */
+
+describe('a path is judged where it lands, on every axis', () => {
+  /*
+   * SPEC: finding ENG-GIT-SCOPE-LEXICAL-1 (MEDIUM), 1.0.1 security review.
+   *
+   * checkScopeConformance says a path is judged where it actually lands, and only the escape
+   * test resolved anything. Allow, forbid, credential shape and lockfile all judged the
+   * lexically normalized name, which does not collapse '..' - so a path under an allowed
+   * prefix that lands somewhere else inside the worktree passed every one of them, and the
+   * escape test had nothing to report because it never left the worktree.
+   */
+  it('does not admit a ..-bearing path because its name starts with an allowed prefix', async () => {
+    const { repo, base } = makeRepo();
+    const { mgr, store } = managerFor(repo);
+    const { deps } = freshStore();
+    void store;
+    void deps;
+    const workspace = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000013',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+    mkdirSync(join(workspace.path, 'secrets'), { recursive: true });
+    writeFileSync(join(workspace.path, 'secrets', 'notes.txt'), 'x', 'utf8');
+
+    const changeSet = {
+      entries: [
+        {
+          status: 'A',
+          path: 'src/../secrets/notes.txt',
+          isBinary: false,
+          isSymlink: false,
+          gitMode: '100644',
+        },
+      ],
+    } as never;
+
+    const r = checkScopeConformance(workspace, changeSet, { allow: ['src/'], forbid: [] });
+
+    expect(
+      r.findings.map((f) => f.kind),
+      'a path that lands in secrets/ is not in src/',
+    ).toContain('OUTSIDE_ALLOWED_SCOPE');
+    expect(r.conformant).toBe(false);
+  });
+
+  it('still admits an ordinary path under the allowed prefix', async () => {
+    /* The fix must judge more accurately, not refuse more. */
+    const { repo, base } = makeRepo();
+    const { mgr } = managerFor(repo);
+    const workspace = await mgr.create({
+      projectId: repo,
+      workItemId: 'SC-WI-000014',
+      attempt: 1,
+      producerAgentId: 'SC-AGENT-150',
+      baseCommit: base,
+      expectedScope: SCOPE,
+      sandboxProfileDigest: 'd'.repeat(64),
+      substrateClass: 'HARD',
+    });
+    const changeSet = {
+      entries: [
+        { status: 'M', path: 'src/app.js', isBinary: false, isSymlink: false, gitMode: '100644' },
+      ],
+    } as never;
+    const r = checkScopeConformance(workspace, changeSet, { allow: ['src/'], forbid: [] });
+    expect(r.findings.map((f) => f.kind)).not.toContain('OUTSIDE_ALLOWED_SCOPE');
+  });
+});

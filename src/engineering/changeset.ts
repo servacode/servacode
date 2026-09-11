@@ -410,7 +410,26 @@ export function checkScopeConformance(
         continue;
       }
 
-      const normal = normalizePath(rel);
+      /*
+       * WHERE IT LANDS, FOR EVERY AXIS AND NOT ONLY FOR ESCAPE.
+       *
+       * SPEC: finding ENG-GIT-SCOPE-LEXICAL-1 (MEDIUM), 1.0.1 security review.
+       *
+       * The comment above says a path is judged where it actually lands, and only the
+       * ESCAPES_WORKSPACE test above used the resolved path. Everything below - allow, forbid,
+       * credential shape, lockfile, git metadata - judged `normalizePath(rel)`, which replaces
+       * separators and strips a leading './' and does not collapse '..' or follow a link.
+       *
+       * So `src/../secrets/.env` matched the `src/` prefix and was in scope while landing in
+       * `secrets/`, and a link under an allowed prefix was judged by its own name rather than
+       * by its target. Both stay inside the worktree, so the escape test - the one check that
+       * did resolve - had nothing to report.
+       *
+       * The finding still reports `rel`, because that is what the change says and what an
+       * owner needs to see; the JUDGEMENT is made on where it goes.
+       */
+      const landed = normalizePath(relative(workspaceReal, real));
+      const normal = landed === '' ? normalizePath(rel) : landed;
       if (normal.startsWith('.git/') || normal === '.git') {
         findings.push({
           kind: ScopeFindingKind.GIT_METADATA,

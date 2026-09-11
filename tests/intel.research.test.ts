@@ -559,6 +559,65 @@ describe('captured external content is data, never instruction', () => {
     );
   });
 
+  it('a secret in the URL is a disclosure, not only a secret in the question', async () => {
+    /*
+     * SPEC: finding OLER-REV-URL (MEDIUM), 1.0.1 security review - the third in this family,
+     * after OLER-REQ-HOSTS (where a request may reach) and OLER-DISCLOSE-SELF-AUTH (what it
+     * may approve for itself).
+     *
+     * The guard's haystack was the question and the scope, and then the gateway fetched each
+     * URL verbatim. Host allowlisting decides which SERVER is contacted and says nothing about
+     * what is written on the way there: a client's name in a query string reaches that
+     * server's logs exactly as surely as one in the question.
+     */
+    const { configureResearchSeeds } = await import('../src/intelligence/departments/research.js');
+    configureResearchSeeds({ hosts: ['example.com'], urls: [] });
+    const f = freshStore();
+    roots.push(f.root);
+    const { retrieveForResearch } = await import('../src/intelligence/research/gateway.js');
+    const { ResearchRequestSchema } = await import('../src/intelligence/research/capture.js');
+    const at = f.deps.clock.now();
+    const tx = f.store.begin();
+    const req = repository(f.store, ARTIFACT_TYPES.RESEARCH_REQUEST, ResearchRequestSchema).put(
+      tx,
+      {
+        id: f.deps.ids.next('SC-RR'),
+        createdAt: at,
+        /* The question itself is clean. Everything incriminating is in the URL. */
+        question: 'what do comparable products charge',
+        purpose: 'scan',
+        scope: 'public pricing pages',
+        allowedHosts: ['example.com'],
+        dataAllowedToLeave: [],
+        maxSources: 3,
+        meta: {
+          provenance: { marking: SourceMarking.SYSTEM, component: 'test' },
+          attribution: { at },
+        },
+      },
+    );
+    tx.commit();
+
+    const result = await retrieveForResearch(
+      {
+        store: f.store,
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        retriever: fakeRetriever(CLEAN_PAGES),
+      },
+      {
+        contract: ContractRegistry.shared().get('SC-AGENT-060'),
+        request: req,
+        urls: ['https://example.com/search?q=Acme+Holdings+contract+renewal'],
+        runId: 'r1',
+        projectSecrets: ['Acme Holdings'],
+      },
+    );
+
+    expect(result.refusals.join(' ')).toContain('not approved to leave');
+    expect(f.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toHaveLength(0);
+  }, 30_000);
+
   it('an agent whose contract declares no network cannot cause retrieval', async () => {
     const f = freshStore();
     roots.push(f.root);

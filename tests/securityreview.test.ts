@@ -1478,3 +1478,38 @@ describe('a targeted re-check informs a decision and can never satisfy one', () 
     expect(outcome.areas.length).toBe(1);
   });
 });
+
+describe('the document does not choose which store answers for it', () => {
+  /*
+   * SPEC: finding SSA-RLC-REV-STOREPATH-1 (MEDIUM), 1.0.1 security review.
+   *
+   * SSA-3 in securityReview.ts says evidence file text is not authority, "including here", and
+   * moved the reviewer's authority and the producer set off the document and into the store.
+   * The document still named WHICH STORE. A forged review could carry a crafted store beside
+   * it - a fabricated COMPLETED run, no implementation producers - and both the run resolution
+   * and the independence re-derivation would read from it, commit and tree being the only
+   * values pinned to the real repository and both of them public.
+   *
+   * When the caller names the store, the document may agree with it and nothing else.
+   */
+  it('refuses a review that names a store other than the one this acceptance reads', () => {
+    const root = tempRoot();
+    roots.push(root);
+    write(root, review());
+
+    const resolution = resolve(root, undefined, { storePath: join(root, 'somewhere-else') });
+
+    expect(resolution.refusals.join(' ')).toContain('does not choose which store answers for it');
+    expect(resolution.resolved).toBe(false);
+  });
+
+  it('accepts the review when the two agree, so this is a binding and not a wall', () => {
+    const root = tempRoot();
+    roots.push(root);
+    write(root, review());
+
+    const refusals = resolve(root, undefined, { storePath: '.serva-review' }).refusals.join(' ');
+
+    expect(refusals).not.toContain('does not choose which store answers for it');
+  });
+});

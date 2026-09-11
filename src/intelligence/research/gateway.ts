@@ -150,7 +150,7 @@ export async function retrieveForResearch(
   assertResearchAuthority(o.contract);
 
   /* --- would the question itself disclose something? --- */
-  const disclosure = disclosureRefusal(o.request, o.projectSecrets ?? []);
+  const disclosure = disclosureRefusal(o.request, o.projectSecrets ?? [], [], o.urls);
   if (disclosure.length > 0) {
     return { outcome: RetrievalOutcome.REFUSED, captures: [], refusals: disclosure };
   }

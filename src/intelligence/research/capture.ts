@@ -218,6 +218,30 @@ export type ResearchRequest = z.output<typeof ResearchRequestSchema>;
  * undone.
  */
 /**
+ * A URL as a reader of the other end's logs would see it.
+ *
+ * SPEC: finding OLER-REV-URL (MEDIUM), 1.0.1 security review.
+ *
+ * Written because the test for that finding failed WITH the first fix in place: the secret
+ * travelled as `Acme+Holdings` in a query string and a substring scan for "Acme Holdings"
+ * found nothing. A guard that only catches a secret nobody encoded is a guard against
+ * accidents, and this one exists for the other case.
+ *
+ * Percent-escapes and the `+`-for-space form are undone, both of which a server decodes
+ * before writing its log. Decoding can throw on a malformed escape; the raw text is kept
+ * alongside so a URL that cannot be decoded is still scanned as it stands.
+ */
+function readableUrl(u: string): string {
+  let decoded = u;
+  try {
+    decoded = decodeURIComponent(u.replace(/\+/g, ' '));
+  } catch {
+    /* Malformed escape: the raw form below is still scanned. */
+  }
+  return u + ' ' + decoded;
+}
+
+/**
  * A REQUEST CANNOT APPROVE ITS OWN DISCLOSURE.
  *
  * SPEC: finding OLER-DISCLOSE-SELF-AUTH (MEDIUM), 1.0.1 security review.
@@ -240,13 +264,36 @@ export function disclosureRefusal(
   req: ResearchRequest,
   projectSecrets: readonly string[],
   ownerApproved: readonly string[] = [],
+  urls: readonly string[] = [],
 ): readonly string[] {
   const approved = new Set(ownerApproved.map((d) => d.toLowerCase().trim()));
   const allowed = new Set(
     req.dataAllowedToLeave.map((d) => d.toLowerCase()).filter((d) => approved.has(d.trim())),
   );
   const found: string[] = [];
-  const haystack = (req.question + ' ' + req.scope).toLowerCase();
+  /*
+   * THE URLS GO OUT TOO, AND THEY WERE NOT LOOKED AT.
+   *
+   * SPEC: finding OLER-REV-URL (MEDIUM), 1.0.1 security review - the third finding in this
+   * family, after OLER-REQ-HOSTS (where a request may reach) and OLER-DISCLOSE-SELF-AUTH
+   * (what it may approve for itself).
+   *
+   * The haystack was the question and the scope, and then `retrieveForResearch` fetched each
+   * URL verbatim. Host allowlisting decides WHICH SERVER is contacted and says nothing about
+   * what is written on the way: a client's name in a path segment or a query string reaches
+   * that server's logs exactly as surely as one in the question would.
+   *
+   * The function's own sentence is "would this request disclose project material it should
+   * not", and a URL it is about to fetch is part of the request in every sense but the field
+   * it was stored in.
+   */
+  const haystack = (
+    req.question +
+    ' ' +
+    req.scope +
+    ' ' +
+    urls.map(readableUrl).join(' ')
+  ).toLowerCase();
   for (const secret of projectSecrets) {
     const needle = secret.toLowerCase().trim();
     if (needle.length < 4) continue;

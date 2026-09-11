@@ -1,11 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { IsoSchema } from '../domain/schemas.js';
 import type { RepositoryIdentity } from './proof.js';
 import type { ContractRegistry } from '../agents/registry.js';
 import type { Store } from '../store/store.js';
-import { implementationProducersFrom, reviewerAuthorityOf } from './reviewAuthority.js';
+import {
+  VERIFIER_AUTHORITIES,
+  implementationProducersFrom,
+  reviewerAuthorityOf,
+} from './reviewAuthority.js';
 
 /** One scope name, reduced to its identity. Case-folded and trimmed, and nothing more. */
 export function normalizeScope(name: string): string {
@@ -166,6 +170,30 @@ export interface ResolveSecurityInput {
   readonly repository?: RepositoryIdentity;
   /** Opens the store the reviewer run lives in. Injected so tests need no filesystem. */
   readonly openStore?: (storePath: string) => Store | undefined;
+  /**
+   * Where the reviewer run's store is, according to the CALLER.
+   *
+   * SPEC: finding SSA-RLC-REV-STOREPATH-1 (MEDIUM), 1.0.1 security review.
+   *
+   * SSA-3 in this file says evidence file text is not authority, "including here", and moved
+   * the reviewer's authority and the producer set off the document and into the store. The
+   * document still named WHICH STORE. A forged review could carry a crafted store beside it
+   * holding a fabricated COMPLETED run and no implementation producers, and the run
+   * resolution and the independence re-derivation would both read from it - commit and tree
+   * being the only values pinned to the real repository, and both public.
+   *
+   * When the caller names the store, the document may only agree with it: a review naming a
+   * different one is refused rather than followed.
+   *
+   * WHAT THIS DOES NOT DO, measured rather than assumed. When no caller names a store, the
+   * document's path is still used, because the evidence genuinely lives where the run ran and
+   * the acceptance runner does not know where that was. Confining it to the package root is
+   * not available either: LIVE-ENGINEERING.json in this repository records a storePath under
+   * the machine's TEMP directory, which is correct - a live Producer fixture is not inside the
+   * tree it changes. The residual is the one store.ts already names, that write access to the
+   * filesystem is above this ceiling, and it is now disclosed for this path too.
+   */
+  readonly storePath?: string;
   /** Authorities that count as a verifier's rather than a producer's. */
   readonly verifierAuthorities?: ReadonlySet<string>;
   /**
@@ -177,7 +205,15 @@ export interface ResolveSecurityInput {
   readonly registry?: ContractRegistry;
 }
 
-const DEFAULT_VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
+/*
+ * A THIRD COPY OF THE SAME SET, ONE FILE OVER FROM THE TWO JUST MERGED.
+ *
+ * SPEC: finding SSA-PM-A1 (MEDIUM), 1.0.1 security review - not named for this file, and the
+ * same defect. proof.ts and reviewAuthority.ts each held this set and were unified; this is
+ * the default for the resolver a caller may override, and it was the one nobody counted.
+ * Finding two copies of a rule is a reason to look for the third.
+ */
+const DEFAULT_VERIFIER_AUTHORITIES: ReadonlySet<string> = VERIFIER_AUTHORITIES;
 
 /**
  * Resolve a security review against the repository, the store and its own findings.
@@ -240,7 +276,16 @@ export function resolveSecurityReview(input: ResolveSecurityInput): SecurityReso
 
   /* ------------------------------------------------------------------- the run */
 
-  const store = input.openStore?.(review.storePath);
+  if (input.storePath !== undefined && resolve(input.storePath) !== resolve(review.storePath)) {
+    refusals.push(
+      'the review names the store at ' +
+        review.storePath +
+        ', and this acceptance reads ' +
+        input.storePath +
+        '; a document does not choose which store answers for it',
+    );
+  }
+  const store = input.openStore?.(input.storePath ?? review.storePath);
   if (store === undefined) {
     refusals.push('the store at ' + review.storePath + ' could not be opened to resolve the run');
   } else {
