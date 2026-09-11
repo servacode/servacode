@@ -9,7 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   ALLOWED_GIT_VERBS,
   FORBIDDEN_GIT_VERBS,
@@ -19,6 +19,7 @@ import {
   parseNameStatusZ,
   parsePorcelainZ,
 } from '../src/engineering/git.js';
+import type { GitRunner } from '../src/engineering/git.js';
 import { EngineeringWorkspaceManager, WorkspaceState } from '../src/engineering/workspace.js';
 import { CHANGESET_CANON_TYPE } from '../src/engineering/changeset.js';
 import {
@@ -28,6 +29,8 @@ import {
 } from '../src/engineering/changeset.js';
 import { reconcileWorkspaces, DivergenceKind } from '../src/engineering/reconcile.js';
 import { buildSandboxProfile, sandboxProfileDrift } from '../src/engineering/sandboxProfile.js';
+import { scanChangeSetForSecrets } from '../src/engineering/secrets.js';
+import type { SecretsScanResult } from '../src/engineering/secrets.js';
 import { cleanup, freshStore } from './helpers.js';
 import type { Store } from '../src/store/store.js';
 
@@ -878,5 +881,170 @@ describe('every declared divergence kind can actually be detected', () => {
       const emitted = source.includes('kind: DivergenceKind.' + kind);
       expect(emitted, kind + ' is declared but never emitted').toBe(true);
     }
+  });
+});
+
+/* ============================================= a failed observation is not "nothing changed" */
+
+describe('the observer cannot report nothing when it could not tell', () => {
+  /*
+   * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/ENG-GIT-OBS-1 (MEDIUM), 1.0.1 review.
+   *
+   * Every one of these reads the SAME failure from git and used to answer with the empty
+   * value for its return type: no changed paths, an empty diff, an empty blob map, a clean
+   * status. The module's stated property is that Serva OBSERVES the change authoritatively,
+   * and an observation that failed is not an observation that found nothing.
+   */
+  const failing: GitRunner = async () => ({
+    ok: false,
+    stdout: '',
+    stderr: 'fatal: not a git repository',
+    exitCode: 128,
+  });
+
+  it('refuses rather than reporting an empty change set when the diff fails', async () => {
+    const git = new GitService({ repoRoot: process.cwd(), runner: failing });
+    await expect(git.changedPaths('abc1234', process.cwd())).rejects.toThrow(/could not/i);
+  });
+
+  it('refuses rather than reporting an empty diff', async () => {
+    const git = new GitService({ repoRoot: process.cwd(), runner: failing });
+    await expect(git.diff('abc1234', process.cwd())).rejects.toThrow(/could not/i);
+  });
+
+  it('refuses rather than reporting an empty blob map', async () => {
+    const git = new GitService({ repoRoot: process.cwd(), runner: failing });
+    await expect(git.blobIdsFor(['a.ts'], process.cwd())).rejects.toThrow(/could not/i);
+  });
+
+  it('refuses rather than reporting a clean checkout it never read', async () => {
+    /*
+     * The one the finding did not name and the worst of the four: `isClean` is built on
+     * `status`, so a git failure answered the question "is this checkout dirty?" with "no".
+     */
+    const git = new GitService({ repoRoot: process.cwd(), runner: failing });
+    await expect(git.status(process.cwd())).rejects.toThrow(/could not/i);
+    await expect(git.isClean(process.cwd())).rejects.toThrow(/could not/i);
+  });
+
+  it('still refuses when only the untracked half fails, since that half is the point', async () => {
+    /*
+     * An untracked file is how a producer writes outside its scope. Losing that listing
+     * silently is losing the case the listing exists for.
+     */
+    let call = 0;
+    const halfFailing: GitRunner = async () => {
+      call += 1;
+      return call === 1
+        ? { ok: true, stdout: '', stderr: '', exitCode: 0 }
+        : { ok: false, stdout: '', stderr: 'fatal: ls-files died', exitCode: 128 };
+    };
+    const git = new GitService({ repoRoot: process.cwd(), runner: halfFailing });
+    await expect(git.changedPaths('abc1234', process.cwd())).rejects.toThrow(/could not/i);
+  });
+
+  it('refuses a blob listing git answered short, rather than pairing the wrong file', async () => {
+    const short: GitRunner = async () => ({
+      ok: true,
+      stdout: 'a'.repeat(40) + '\n',
+      stderr: '',
+      exitCode: 0,
+    });
+    const git = new GitService({ repoRoot: process.cwd(), runner: short });
+    await expect(git.blobIdsFor(['a.ts', 'b.ts'], process.cwd())).rejects.toThrow(/could not/i);
+  });
+});
+
+/* ============================================= a file that was never read is not a clean file */
+
+describe('the credential gate cannot pass a file it did not scan', () => {
+  /*
+   * SPEC: findings SEC-SCAN-LARGEFILE-1 and SEC-SCAN-SKIP-SILENT-2 (both MEDIUM), 1.0.1 review.
+   *
+   * EC-SECRETS states "The change introduces no committed credential" and is BLOCKING. The
+   * scan answered that sentence from the files it managed to read, and computed `blocking`
+   * from findings alone - so a credential in a file the scan skipped produced a clean PASS.
+   *
+   * Two skips, one class. A file over MAX_SCAN_BYTES was disclosed but not counted; a file
+   * whose PATH ended in an image extension, or whose entry carried isBinary, was not even
+   * disclosed. A guess about a file's content is not a measurement of it.
+   */
+  /*
+   * NOT AWS's documented example key: the rules downgrade a value containing EXAMPLE on
+   * purpose, so testing with one would prove the placeholder rule and not the skip rule.
+   */
+  const AWS = 'AKIA' + 'Z3K7QW9TR5MB2XCD';
+
+  function scanRepo(
+    files: { path: string; body: string | Buffer; isBinary?: boolean }[],
+  ): SecretsScanResult {
+    const { root } = freshStore();
+    roots.push(root);
+    const dir = join(root, 'scan-fixture');
+    mkdirSync(dir, { recursive: true });
+    for (const f of files) {
+      const abs = join(dir, ...f.path.split('/'));
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, f.body as never);
+    }
+    return scanChangeSetForSecrets(
+      { path: dir } as never,
+      {
+        entries: files.map((f) => ({
+          path: f.path,
+          status: 'A',
+          isBinary: f.isBinary === true,
+          isSymlink: false,
+        })),
+      } as never,
+    );
+  }
+
+  it('does not pass a credential sitting in a file too large to scan', () => {
+    const padding = 'x'.repeat(2_000_001);
+    const r = scanRepo([{ path: 'src/big.ts', body: padding + '\nconst k = "' + AWS + '";\n' }]);
+    expect(r.notScanned.map((n) => n.path)).toContain('src/big.ts');
+    expect(r.complete).toBe(false);
+    expect(r.blocking).toBe(true);
+  });
+
+  it('scans a text file whose extension merely claims it is an image', () => {
+    /* The extension is the committer's claim. The content is the measurement. */
+    const r = scanRepo([{ path: 'src/logo.png', body: 'const k = "' + AWS + '";\n' }]);
+    expect(r.findings.map((f) => f.path)).toContain('src/logo.png');
+    expect(r.blocking).toBe(true);
+  });
+
+  it('scans an entry marked binary rather than excusing it', () => {
+    const r = scanRepo([
+      { path: 'src/blob.bin', body: Buffer.from(' ' + AWS + ' '), isBinary: true },
+    ]);
+    expect(r.findings.map((f) => f.path)).toContain('src/blob.bin');
+    expect(r.blocking).toBe(true);
+  });
+
+  it('discloses a changed file that is not on disk, rather than counting it clean', () => {
+    const missing = scanChangeSetForSecrets(
+      { path: join('no', 'such', 'dir') } as never,
+      {
+        entries: [{ path: 'src/gone.ts', status: 'A', isBinary: false, isSymlink: false }],
+      } as never,
+    );
+    expect(missing.notScanned.map((n) => n.path)).toContain('src/gone.ts');
+    expect(missing.complete).toBe(false);
+  });
+
+  it('still reports complete, and does not block, when it read everything', () => {
+    const r = scanRepo([{ path: 'src/ok.ts', body: 'const n = 1;\n' }]);
+    expect(r.complete).toBe(true);
+    expect(r.blocking).toBe(false);
+    expect(r.notScanned).toHaveLength(0);
+  });
+
+  it('still excludes by LOCATION silently, because that is policy and not a gap', () => {
+    const r = scanRepo([{ path: 'node_modules/p/i.js', body: 'const k = "' + AWS + '";\n' }]);
+    expect(r.notScanned).toHaveLength(0);
+    expect(r.complete).toBe(true);
+    expect(r.blocking).toBe(false);
   });
 });

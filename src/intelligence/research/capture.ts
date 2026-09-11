@@ -217,11 +217,34 @@ export type ResearchRequest = z.output<typeof ResearchRequestSchema>;
  * client's confidential requirements in a third party's query logs, and it cannot be
  * undone.
  */
+/**
+ * A REQUEST CANNOT APPROVE ITS OWN DISCLOSURE.
+ *
+ * SPEC: finding OLER-DISCLOSE-SELF-AUTH (MEDIUM), 1.0.1 security review.
+ *
+ * The sibling of OLER-REQ-HOSTS, one field across. That finding was about WHERE a request may
+ * reach and this one is about WHAT it may carry; both were read from the request alone.
+ * RESEARCH_REQUEST is a universal write type - any department's scoped writer may author one,
+ * and `ScopedCanonWriter` constrains OWNER_DECISION_REQUEST purposes rather than
+ * ResearchRequest fields - so a directly-authored request could list a client's name in its
+ * own `dataAllowedToLeave` and this guard would step aside for it. Fixing WHERE and leaving
+ * WHAT is how a class survives being closed.
+ *
+ * `ownerApproved` is the outer bound and the request narrows within it, exactly as the
+ * deployment's seeds bound the hosts. Both in-product writers set `dataAllowedToLeave` to `[]`
+ * (runner.ts, research.ts), so nothing legitimate ever depended on the self-grant, and with no
+ * owner approval in hand nothing leaves at all - which is the default the field's own comment
+ * already claimed.
+ */
 export function disclosureRefusal(
   req: ResearchRequest,
   projectSecrets: readonly string[],
+  ownerApproved: readonly string[] = [],
 ): readonly string[] {
-  const allowed = new Set(req.dataAllowedToLeave.map((d) => d.toLowerCase()));
+  const approved = new Set(ownerApproved.map((d) => d.toLowerCase().trim()));
+  const allowed = new Set(
+    req.dataAllowedToLeave.map((d) => d.toLowerCase()).filter((d) => approved.has(d.trim())),
+  );
   const found: string[] = [];
   const haystack = (req.question + ' ' + req.scope).toLowerCase();
   for (const secret of projectSecrets) {

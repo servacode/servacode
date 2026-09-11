@@ -295,6 +295,34 @@ export class GitService {
     return this.runner(args, cwd, this.timeoutMs);
   }
 
+  /**
+   * A FAILED OBSERVATION IS NOT AN OBSERVATION THAT FOUND NOTHING.
+   *
+   * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/ENG-GIT-OBS-1 (MEDIUM), 1.0.1 review.
+   *
+   * Each of the reads below answered a failed git call with the empty value for its own
+   * return type: no changed paths, an empty diff, an empty blob map, a clean status. Four
+   * shapes, one sentence - "could not determine" reported as "nothing there" - and it is the
+   * more dangerous of the two directions every time, because the whole module exists so that
+   * Serva OBSERVES the change rather than believing an account of it.
+   *
+   * `isClean` is the one the finding did not name and the plainest of them: a git failure
+   * answered "is this checkout dirty?" with "no".
+   *
+   * So an unreadable repository refuses here, where the read happened and the stderr is still
+   * in hand, instead of travelling onward as a fact about the working tree.
+   */
+  private observationFailed(what: string, r: GitResult): never {
+    return fail({
+      code: 'E_CONTEXT_INSUFFICIENT',
+      message: 'git could not tell Serva ' + what,
+      remedy:
+        'The observation failed; it did not come back empty. Resolve the git error and observe again, because an unread repository is not an unchanged one.',
+      details: { stderr: r.stderr.slice(0, 400), exitCode: r.exitCode },
+      specRef: 'Phase 4 §22, §31',
+    });
+  }
+
   async isRepo(): Promise<boolean> {
     const r = await this.git(['rev-parse', '--is-inside-work-tree']);
     return r.ok && r.stdout.trim() === 'true';
@@ -322,7 +350,7 @@ export class GitService {
   /** Porcelain v1 status, parsed. Used to detect a dirty checkout, never to fix one. */
   async status(cwd = this.repoRoot): Promise<ChangedPath[]> {
     const r = await this.git(['status', '--porcelain=v1', '-z', '--untracked-files=all'], cwd);
-    if (!r.ok) return [];
+    if (!r.ok) this.observationFailed('whether ' + cwd + ' has uncommitted changes', r);
     return parsePorcelainZ(r.stdout);
   }
 
@@ -342,14 +370,16 @@ export class GitService {
       ['diff', '--name-status', '-z', '--find-renames', baseCommit],
       cwd,
     );
-    const out = tracked.ok ? parseNameStatusZ(tracked.stdout) : [];
+    if (!tracked.ok) {
+      this.observationFailed('which tracked files changed since ' + baseCommit, tracked);
+    }
+    const out = parseNameStatusZ(tracked.stdout);
     // An untracked file is a change the diff against a commit will not show, and an
     // agent writing a new file outside its scope is precisely the case that matters.
     const untracked = await this.git(['ls-files', '--others', '--exclude-standard', '-z'], cwd);
-    if (untracked.ok) {
-      for (const p of untracked.stdout.split('\0')) {
-        if (p.length > 0) out.push({ status: '?', path: p });
-      }
+    if (!untracked.ok) this.observationFailed('which untracked files exist in ' + cwd, untracked);
+    for (const p of untracked.stdout.split('\0')) {
+      if (p.length > 0) out.push({ status: '?', path: p });
     }
     return out;
   }
@@ -376,14 +406,23 @@ export class GitService {
     if (paths.length === 0) return out;
     for (const p of paths) assertNotOptionLike(p, 'path');
     const r = await this.git(['hash-object', '--', ...paths], cwd);
-    if (!r.ok) return out;
+    if (!r.ok) this.observationFailed('what blob ids it would store for these paths', r);
     const ids = r.stdout.split(/\r?\n/).filter((x) => x.length > 0);
     /*
      * Only pair them up when the counts agree. A short read means git skipped something,
      * and zipping a short list against the paths would attach one file's identity to
      * another — the exact failure this whole comparison exists to catch.
      */
-    if (ids.length !== paths.length) return out;
+    if (ids.length !== paths.length) {
+      this.observationFailed(
+        'a blob id for every path: it answered ' +
+          String(ids.length) +
+          ' for ' +
+          String(paths.length) +
+          ' path(s)',
+        r,
+      );
+    }
     for (let i = 0; i < paths.length; i++) out.set(paths[i] as string, ids[i] as string);
     return out;
   }
@@ -391,7 +430,8 @@ export class GitService {
   async diff(baseCommit: string, cwd: string): Promise<string> {
     assertNotOptionLike(baseCommit, 'base commit');
     const r = await this.git(['diff', '--no-color', '--find-renames', baseCommit], cwd);
-    return r.ok ? r.stdout : '';
+    if (!r.ok) this.observationFailed('what changed since ' + baseCommit, r);
+    return r.stdout;
   }
 
   async addWorktree(path: string, branch: string, baseCommit: string): Promise<GitResult> {

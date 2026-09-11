@@ -180,15 +180,39 @@ export interface SecretsScanResult {
    * saying so for each would bury the cases that matter.
    */
   readonly notScanned: readonly { readonly path: string; readonly reason: string }[];
+  /**
+   * Whether every file in the change was actually read.
+   *
+   * SPEC: findings SEC-SCAN-LARGEFILE-1 and SEC-SCAN-SKIP-SILENT-2 (both MEDIUM), 1.0.1 review.
+   *
+   * `blocking` answers "did we find a credential". This answers "were we in a position to
+   * find one", and they are different questions. EC-SECRETS states that the change introduces
+   * no committed credential and is BLOCKING; a scan that skipped a file cannot support that
+   * sentence, whatever it found in the files it did read.
+   */
+  readonly complete: boolean;
   readonly blocking: boolean;
 }
 
-/** Files a scan does not open: generated, vendored, or not text. */
-const SKIP_PATTERNS: readonly RegExp[] = Object.freeze([
+/**
+ * Files a scan does not open, BY LOCATION.
+ *
+ * SPEC: finding SEC-SCAN-SKIP-SILENT-2 (MEDIUM), 1.0.1 security review.
+ *
+ * This list used to carry image and archive EXTENSIONS beside the three directories, and the
+ * two are not the same kind of rule. A directory is where a file lives, which is a fact about
+ * the repository; an extension is what a file is called, which is a claim by whoever named it.
+ * `secrets.png` is one rename away from a credential the scan reports nothing about, and the
+ * skip was silent, so there was no line in the report to notice.
+ *
+ * Content is now measured rather than guessed at, so the extension rules are gone instead of
+ * being tightened: a file whose bytes are binary is still read, because a credential pasted
+ * into a binary is a credential, and the rules are ASCII shapes that a byte scan finds.
+ */
+const EXCLUDED_LOCATIONS: readonly RegExp[] = Object.freeze([
   /(^|\/)node_modules\//,
   /(^|\/)dist\//,
   /(^|\/)\.git\//,
-  /\.(png|jpe?g|gif|ico|pdf|zip|gz|tar|woff2?|ttf|eot|mp4|mp3|wasm)$/i,
 ]);
 
 const MAX_SCAN_BYTES = 2_000_000;
@@ -212,17 +236,30 @@ export function scanChangeSetForSecrets(
 
   for (const entry of changeSet.entries) {
     if (entry.status === 'D') continue;
-    if (entry.isBinary || entry.isSymlink) {
+    if (EXCLUDED_LOCATIONS.some((re) => re.test(entry.path))) {
       skipped += 1;
       continue;
     }
-    if (SKIP_PATTERNS.some((re) => re.test(entry.path))) {
+    /*
+     * A symlink has no content of its own here: what it points at is either already in the
+     * change under its own path, or outside the change entirely. It is still disclosed,
+     * because "there was nothing of mine to read" is not the same as "I read it".
+     */
+    if (entry.isSymlink) {
       skipped += 1;
+      notScanned.push({
+        path: entry.path,
+        reason: 'is a symlink, so no content of its own was read',
+      });
       continue;
     }
     const abs = join(workspace.path, entry.path);
     if (!existsSync(abs)) {
       skipped += 1;
+      notScanned.push({
+        path: entry.path,
+        reason: 'is named by the change but is not on disk, so it was not read',
+      });
       continue;
     }
     let text: string;
@@ -236,7 +273,12 @@ export function scanChangeSetForSecrets(
         });
         continue;
       }
-      text = buf.toString('utf8');
+      /*
+       * latin1 for bytes that are not valid UTF-8: utf8 decoding replaces them, and a
+       * replacement character landing inside a key is a credential the rules no longer match.
+       * Every rule here is an ASCII shape, so one byte to one character is what they want.
+       */
+      text = entry.isBinary ? buf.toString('latin1') : buf.toString('utf8');
     } catch {
       skipped += 1;
       notScanned.push({ path: entry.path, reason: 'could not be read' });
@@ -251,8 +293,15 @@ export function scanChangeSetForSecrets(
     filesScanned: scanned,
     filesSkipped: skipped,
     notScanned,
-    // A high-confidence finding blocks acceptance. A medium one is reported.
-    blocking: findings.some((f) => f.severity === 'HIGH'),
+    complete: notScanned.length === 0,
+    /*
+     * A high-confidence finding blocks acceptance. A medium one is reported.
+     *
+     * A file the scan never read blocks too, and for a different reason: not because a
+     * credential was found in it, but because the gate's sentence cannot be said about it.
+     * Leaving that to `notScanned` as an advisory made the >2MB file the place to put a key.
+     */
+    blocking: findings.some((f) => f.severity === 'HIGH') || notScanned.length > 0,
   };
 }
 
@@ -464,12 +513,31 @@ function longestRun(s: string): number {
 
 /** A report safe to show a model or write to a trace: no values, ever. */
 export function redactedReport(result: SecretsScanResult): string {
+  /*
+   * WHAT WAS NOT READ BELONGS IN THE REPORT, NOT ONLY IN THE FIELD.
+   *
+   * SPEC: findings SEC-SCAN-LARGEFILE-1 and SEC-SCAN-SKIP-SILENT-2 (both MEDIUM), 1.0.1 review.
+   *
+   * This is the detail an owner actually reads, and with no findings it returned a single
+   * sentence about the files that WERE scanned - so a change whose only unscanned file was the
+   * one holding a key was described as 'nothing matched'. The sentence was true and the
+   * impression it left was not.
+   */
+  const gaps =
+    result.notScanned.length === 0
+      ? []
+      : [
+          String(result.notScanned.length) + ' file(s) in this change were NOT read:',
+          ...result.notScanned.map((n) => '  ' + n.path + '  (' + n.reason + ')'),
+          'Nothing is claimed about those files.',
+        ];
   if (result.findings.length === 0) {
-    return (
+    return [
       'No credential-shaped content matched the rule set across ' +
-      String(result.filesScanned) +
-      ' scanned file(s). This means nothing matched these rules; it is not a security review.'
-    );
+        String(result.filesScanned) +
+        ' scanned file(s). This means nothing matched these rules; it is not a security review.',
+      ...gaps,
+    ].join('\n');
   }
   const lines = [String(result.findings.length) + ' finding(s). Values are withheld by design:'];
   for (const f of result.findings) {
@@ -490,5 +558,6 @@ export function redactedReport(result: SecretsScanResult): string {
         f.description,
     );
   }
+  lines.push(...gaps);
   return lines.join('\n');
 }

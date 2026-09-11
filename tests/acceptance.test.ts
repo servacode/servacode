@@ -1463,7 +1463,9 @@ describe('OFFLINE-VERIFICATION must say the suite PASSED, not merely that it ran
     offlineProof(root, {
       ...stripped,
       commands: stripped.commands.map((c) => {
-        const { reportPath: _p, reportDigest: _d, ...rest } = c as Record<string, unknown>;
+        const rest: Record<string, unknown> = { ...(c as Record<string, unknown>) };
+        delete rest['reportPath'];
+        delete rest['reportDigest'];
         return rest;
       }),
     });

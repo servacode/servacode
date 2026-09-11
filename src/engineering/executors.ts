@@ -198,17 +198,40 @@ export function runScopeCheck(ctx: ExecutorContext, options: ScopeOptions): Exec
  */
 export function runSecretsScan(ctx: ExecutorContext): ExecutorOutcome {
   const result = scanChangeSetForSecrets(ctx.workspace, ctx.changeSet);
+  /*
+   * A SCAN THAT SKIPPED A FILE HAS NOT ANSWERED THE QUESTION.
+   *
+   * SPEC: findings SEC-SCAN-LARGEFILE-1 and SEC-SCAN-SKIP-SILENT-2 (both MEDIUM), 1.0.1 review.
+   *
+   * EC-SECRETS is BLOCKING and reads "The change introduces no committed credential". This
+   * recorded PASS whenever no finding came back, including when the reason no finding came
+   * back was that the file was never opened - so the way past a blocking gate was to be too
+   * large to read.
+   *
+   * INDETERMINATE is the word the gate engine already has for it, and it is not a softening:
+   * a BLOCKING criterion with an INDETERMINATE result never composes to PASS. FAIL would have
+   * been the wrong word, because FAIL says a credential is there and nobody knows that.
+   */
+  const outcome = result.findings.some((f) => f.severity === 'HIGH')
+    ? 'FAIL'
+    : result.complete
+      ? 'PASS'
+      : 'INDETERMINATE';
   const evidence = EngineeringEvidenceSchema.parse({
     id: ctx.deps.ids.next('SC-EEV'),
     evidenceClass: EvidenceClass.ANALYSIS,
-    claim: 'The change introduces no credential-shaped content matching the rule set.',
+    claim: result.complete
+      ? 'The change introduces no credential-shaped content matching the rule set.'
+      : 'Whether the change introduces credential-shaped content is unanswered: ' +
+        String(result.notScanned.length) +
+        ' file(s) in it were never read.',
     basis: 'DERIVED',
     workItemId: ctx.workspace.workItemId,
     changeSetId: ctx.changeSet.changeSetId,
     workspaceId: ctx.workspace.workspaceId,
     headCommit: ctx.changeSet.headCommit,
     runtimeComponentId: RuntimeComponent.SECRETS,
-    outcome: result.blocking ? 'FAIL' : 'PASS',
+    outcome,
     detail: redactedReport(result),
     capturedAt: ctx.deps.clock.now(),
     capturedBy: 'RUNTIME',

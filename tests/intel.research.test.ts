@@ -468,6 +468,97 @@ describe('captured external content is data, never instruction', () => {
     expect(f.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toHaveLength(0);
   }, 30_000);
 
+  it('a request cannot grant itself permission to disclose project material', async () => {
+    /*
+     * SPEC: finding OLER-DISCLOSE-SELF-AUTH (MEDIUM), 1.0.1 security review.
+     *
+     * The sibling of OLER-REQ-HOSTS, one field across. That fix bounded WHERE a request may
+     * reach; WHAT it may carry out was still read from the request's own `dataAllowedToLeave`.
+     * RESEARCH_REQUEST is a universal write type, so a directly-authored request could list a
+     * client's name as approved-to-leave and the disclosure guard would step aside for it.
+     *
+     * Both in-product writers set the field to [], so nothing legitimate ever widened it. The
+     * request may narrow what an owner approved; it cannot approve on the owner's behalf.
+     */
+    const { configureResearchSeeds } = await import('../src/intelligence/departments/research.js');
+    configureResearchSeeds({ hosts: ['example.com'], urls: [] });
+    const f = freshStore();
+    roots.push(f.root);
+    const { retrieveForResearch } = await import('../src/intelligence/research/gateway.js');
+    const { ResearchRequestSchema } = await import('../src/intelligence/research/capture.js');
+    const at = f.deps.clock.now();
+    const tx = f.store.begin();
+    const req = repository(f.store, ARTIFACT_TYPES.RESEARCH_REQUEST, ResearchRequestSchema).put(
+      tx,
+      {
+        id: f.deps.ids.next('SC-RR'),
+        createdAt: at,
+        question: 'what does Acme Holdings pay for this',
+        purpose: 'scan',
+        scope: 'public',
+        allowedHosts: ['example.com'],
+        /* The request whitelists the very material the guard exists to hold back. */
+        dataAllowedToLeave: ['Acme Holdings'],
+        maxSources: 3,
+        meta: {
+          provenance: { marking: SourceMarking.SYSTEM, component: 'test' },
+          attribution: { at },
+        },
+      },
+    );
+    tx.commit();
+
+    const result = await retrieveForResearch(
+      {
+        store: f.store,
+        clock: f.deps.clock,
+        ids: f.deps.ids,
+        retriever: fakeRetriever(CLEAN_PAGES),
+      },
+      {
+        contract: ContractRegistry.shared().get('SC-AGENT-060'),
+        request: req,
+        urls: ['https://example.com/pricing'],
+        runId: 'r1',
+        projectSecrets: ['Acme Holdings'],
+      },
+    );
+    expect(result.refusals.join(' ')).toContain('not approved to leave');
+    expect(f.store.listCanonIds(ARTIFACT_TYPES.SOURCE_CAPTURE)).toHaveLength(0);
+  }, 30_000);
+
+  it('an owner-approved disclosure still narrows through the request', async () => {
+    /*
+     * The other direction, so the fix is a BOUND and not a blanket refusal: what the owner
+     * approved may leave, and only if the request also asked for it.
+     */
+    const { disclosureRefusal, ResearchRequestSchema } =
+      await import('../src/intelligence/research/capture.js');
+    const req = ResearchRequestSchema.parse({
+      id: 'SC-RR-1',
+      createdAt: AT,
+      question: 'what does Acme Holdings pay',
+      purpose: 'scan',
+      scope: 'public',
+      allowedHosts: ['example.com'],
+      dataAllowedToLeave: ['Acme Holdings'],
+      maxSources: 3,
+      meta: {
+        provenance: { marking: SourceMarking.SYSTEM, component: 'test' },
+        attribution: { at: AT },
+      },
+    });
+    /* Owner approved it, request asked for it: it may leave. */
+    expect(disclosureRefusal(req, ['Acme Holdings'], ['Acme Holdings'])).toHaveLength(0);
+    /* Owner approved something else: the request's own list grants nothing. */
+    expect(disclosureRefusal(req, ['Acme Holdings'], ['Other Ltd'])).toHaveLength(1);
+    /* Owner approved it but the request did not ask: still refused, the narrower wins. */
+    const narrow = { ...req, dataAllowedToLeave: [] };
+    expect(disclosureRefusal(narrow as never, ['Acme Holdings'], ['Acme Holdings'])).toHaveLength(
+      1,
+    );
+  });
+
   it('an agent whose contract declares no network cannot cause retrieval', async () => {
     const f = freshStore();
     roots.push(f.root);

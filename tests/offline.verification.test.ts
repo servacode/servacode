@@ -67,12 +67,44 @@ function record(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
+/*
+ * A REQUIRED COMMAND CITES ITS REPORT, so the honest fixtures carry one.
+ *
+ * SPEC: verificationRecord.ts, the report binding added for the 1.0.1 acceptance model. The
+ * baseline `record()` here predates that rule and was still describing two runs with nothing
+ * behind them, which is exactly what the rule refuses.
+ */
+const REPORTS: Record<string, string> = {
+  'evidence/acceptance-run/offline-suite.json': '{"numTotalTests":1300}',
+  'evidence/acceptance-run/vscode-suite.json': '{"numTotalTests":35}',
+};
+const digestOfReport = (rel: string): string =>
+  createHash('sha256')
+    .update(REPORTS[rel] as string)
+    .digest('hex');
+const cited = (rel: string): Record<string, unknown> => ({
+  reportPath: rel,
+  reportDigest: digestOfReport(rel),
+});
+
+/** The two required commands, each citing the report it produced. */
+function honestCommands(): Record<string, unknown>[] {
+  return [
+    command(cited('evidence/acceptance-run/offline-suite.json')),
+    command({
+      command: 'npm run test:vscode',
+      testsPassed: 35,
+      ...cited('evidence/acceptance-run/vscode-suite.json'),
+    }),
+  ];
+}
+
 const resolve = (root: string) =>
   resolveVerificationRecord({ root, repository: REPOSITORY, required: REQUIRED });
 
 describe('a verification record resolves against the repository, or it does not', () => {
   it('an honest record for this tree resolves', () => {
-    const result = resolve(pkg(record()));
+    const result = resolve(pkg(record({ commands: honestCommands() }), REPORTS));
     expect(result.resolved, result.refusals.join('; ')).toBe(true);
   });
 

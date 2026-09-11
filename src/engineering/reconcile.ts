@@ -86,6 +86,29 @@ export interface ReconcileDeps {
 
 export async function reconcileWorkspaces(deps: ReconcileDeps): Promise<ReconciliationReport> {
   const divergences: Divergence[] = [];
+  /*
+   * "NOT A REPOSITORY" IS A FACT. "GIT COULD NOT READ IT" IS NOT.
+   *
+   * SPEC: finding ENGINEERING-GIT-AND-COMMIT-INTEGRITY/ENG-GIT-OBS-1 (MEDIUM), 1.0.1 review.
+   *
+   * The reads below now refuse when git fails, instead of answering "clean" - and those two
+   * cases used to arrive here as the same empty list. They are not the same. A project that is
+   * not a git repository has no worktrees and no checkout to be dirty, so nothing to reconcile
+   * is the true answer; a repository git could not read is a question nobody answered, and a
+   * reconciliation that reported it clean would be the fail-open this fix is about.
+   *
+   * `isRepo` asks the first question and returns a boolean, so the distinction is measured
+   * here rather than inferred from the shape of a failure downstream.
+   */
+  if (!(await deps.git.isRepo())) {
+    return {
+      divergences: [],
+      workspacesChecked: 0,
+      changeSetsChecked: 0,
+      primaryCheckoutClean: true,
+      reconciledAt: deps.clock.now(),
+    };
+  }
   const recorded = deps.workspaces.list();
   const gitWorktrees = await deps.git.listWorktrees();
   const gitPaths = new Set(gitWorktrees.map((w) => normalize(w.path)));
