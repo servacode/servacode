@@ -20,6 +20,7 @@ import {
   MANIFEST_NAME,
   createBackup,
   credentialScan,
+  isExcluded,
   manifestDigest,
   safeBundlePath,
   verifyBackup,
@@ -382,6 +383,41 @@ describe('a corrupt or tampered backup is refused, not repaired', () => {
 
   it('a bundle within the limits still verifies, so the cap is a bound and not a wall', () => {
     expect(verifyBackup(goodBundle()).ok).toBe(true);
+  });
+
+  it('catches the credential shapes the engineering scanner knows, not a private five', () => {
+    /*
+     * SPEC: finding RELH-REV-M1 (MEDIUM), 1.0.1 security review.
+     *
+     * The third instance of one class in this campaign, after SC-SSA-CRED-SHAPES in
+     * portabilityProof.ts: a module carrying its own credential list beside SECRET_RULES. Two
+     * rule sets for one question is how the weaker one survives, and this is the list guarding
+     * the bundle the header says 'gets copied to a USB stick and emailed'.
+     *
+     * None of these matched the local five: a database URL with inline credentials, a Google
+     * API key, a Slack token, a JWT, a password assignment. All of them are shapes the shared
+     * rules already knew.
+     */
+    for (const sample of [
+      'DATABASE_URL=postgres://admin:hunter2@db.internal:5432/app',
+      'GOOGLE_KEY=AIza' + 'SyD3k7Qw9tR5mB2xCdE4fG6hJ8kL0nP2qRs',
+      'token: xoxb-' + '2846117248-2847283746-' + 'A9bC3dE5fG7hJ1kL2mN4pQ6r',
+      'password = "s3cr3t-Pa55phrase-value"',
+    ]) {
+      expect(credentialScan(sample), sample.slice(0, 24)).not.toHaveLength(0);
+    }
+  });
+
+  it('excludes every dotenv variant, not the three that were listed', () => {
+    /*
+     * `.env.development`, `.env.test`, `.env.staging` and a nested `config/.env` were none of
+     * them `.env`, `.env.local` or `.env.production`, so each was copied verbatim.
+     */
+    for (const name of ['.env', '.env.local', '.env.production', '.env.development', '.env.test']) {
+      expect(isExcluded(name), name).toBeDefined();
+    }
+    /* A file that merely starts with the letters is not a dotenv file. */
+    expect(isExcluded('.environment-notes.md')).toBeUndefined();
   });
 
   it('a file added to the bundle that the manifest never listed is reported', () => {

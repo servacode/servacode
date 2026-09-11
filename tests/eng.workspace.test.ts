@@ -1170,6 +1170,19 @@ describe('evidence redaction covers the record and not a list of names', () => {
     expect(body, 'a credential reached immutable canon').not.toContain(key);
   });
 
+  it('applies the same whole-record rule to the execution record', () => {
+    /*
+     * SPEC: finding SECREV-EXEC-NAMEDFIELD-1 (MEDIUM), 1.0.1 security review.
+     *
+     * The sibling of the evidence path, which kept the named-field shape the evidence fix was
+     * raised to remove. Asserted structurally, because the field that matters is the one
+     * nobody has added yet: the persisted record must go through redactDeep rather than a
+     * list of names.
+     */
+    const source = readFileSync('src/engineering/execution.ts', 'utf8');
+    expect(source).toContain('tx.putCanon(EXECUTION_CANON_TYPE, record.executionId, redactDeep(');
+  });
+
   it('leaves ids, digests and commits alone, because they are not credential shapes', () => {
     const f = freshStore();
     roots.push(f.root);

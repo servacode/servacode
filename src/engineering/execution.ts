@@ -294,7 +294,25 @@ export async function runRecipe(
   const tx = deps.store.begin();
   // T-CANON: an execution is established fact about something that already happened,
   // and canon gives it immutability and digest verification for free.
-  tx.putCanon(EXECUTION_CANON_TYPE, record.executionId, record);
+  /*
+   * THE WHOLE RECORD HERE TOO, FOR THE SAME REASON.
+   *
+   * SPEC: finding SECREV-EXEC-NAMEDFIELD-1 (MEDIUM), 1.0.1 security review.
+   *
+   * `recordEvidence` switched from redacting two named fields to redacting the whole record,
+   * because a comment promising general coverage sat over code implementing special cases.
+   * This is that path's sibling and kept the named-field shape: executable, args,
+   * terminationReason and the two excerpts are redacted individually, and `cwd` - plus any
+   * string field added to CommandExecutionRecordSchema later - went to immutable canon
+   * untouched. Fixing one side of a pair and leaving the other is the single most repeated
+   * defect in this campaign, so it is not left for a later reviewer to find again.
+   *
+   * Nothing leaks today: cwd is a runtime-derived path and the remaining strings are enums,
+   * digests and commit hashes. The named redactions above stay where they are - they carry the
+   * reasoning for their own fields, and passing an already-redacted string through the same
+   * rule changes nothing.
+   */
+  tx.putCanon(EXECUTION_CANON_TYPE, record.executionId, redactDeep(record));
   tx.appendTrace(EXECUTION_STREAM, {
     type: 'COMMAND_EXECUTED',
     payload: {

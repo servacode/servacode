@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { IsoSchema } from '../domain/schemas.js';
+import { VERIFIER_AUTHORITIES } from './reviewAuthority.js';
 import {
   RECORD_PATH,
   REQUIRED_VERIFICATION_COMMANDS,
@@ -295,8 +296,13 @@ export interface SecurityAssessment {
   readonly refusals: readonly string[];
 }
 
-/** Authorities that are a verifier's rather than a producer's. */
-const VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
+/*
+ * Authorities that are a verifier's rather than a producer's.
+ *
+ * SPEC: finding SSA-PM-A1 (MEDIUM), 1.0.1 security review. This was a second, identical copy
+ * of the set in reviewAuthority.ts. Re-exported rather than restated: the minting path and
+ * this re-derivation path must not be able to disagree about who may certify.
+ */
 
 /**
  * The part of a canonical containment assessment this resolver is entitled to act on.

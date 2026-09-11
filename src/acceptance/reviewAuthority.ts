@@ -26,8 +26,23 @@ import type { Store } from '../store/store.js';
  * rather than merely difficult.
  */
 
-/** Authorities that are a verifier's rather than a producer's. From the contract, always. */
-const VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
+/**
+ * Authorities that are a verifier's rather than a producer's. From the contract, always.
+ *
+ * ONE DEFINITION, BECAUSE TWO IS HOW THEY DRIFT APART.
+ *
+ * SPEC: finding SSA-PM-A1 (MEDIUM), 1.0.1 security review.
+ *
+ * This set existed here and again, identically, in proof.ts - one gating the MINTING path
+ * (isIndependentReviewer) and one the RE-DERIVATION path (resolveProof). Equal at that commit
+ * and therefore harmless at that commit, which is the whole difficulty: widen or narrow either
+ * copy alone and the two paths disagree about who may certify a JUDGED proof, with nothing to
+ * report the disagreement. The same failure this codebase names for credential shapes twice
+ * over (portabilityProof.ts, backup.ts), in the module that decides review authority.
+ *
+ * Exported so proof.ts asks rather than restates.
+ */
+export const VERIFIER_AUTHORITIES: ReadonlySet<string> = new Set(['VERIFY', 'REVIEW', 'ASSESS']);
 
 /** Archetypes whose runs count as having participated in implementation. */
 const IMPLEMENTING_ROLES: ReadonlySet<string> = new Set(['PRODUCER', 'ARCHITECT']);

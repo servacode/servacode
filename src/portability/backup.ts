@@ -22,6 +22,7 @@ import { IsoSchema } from '../domain/schemas.js';
 import { SERVA_DIR } from '../store/paths.js';
 import { BACKUP_FORMAT_VERSION, SERVA_VERSION, SCHEMA_VERSION } from './version.js';
 import { MACHINE_BOUND_KEYS, isMachineBound } from './machine.js';
+import { scanText } from '../engineering/secrets.js';
 import type { Clock } from '../core/clock.js';
 
 /**
@@ -91,9 +92,6 @@ export const EXCLUDED_SENSITIVE: readonly string[] = Object.freeze([
   '.aws',
   '.ssh',
   '.gnupg',
-  '.env',
-  '.env.local',
-  '.env.production',
   '.npmrc',
   '.netrc',
   'id_rsa',
@@ -112,14 +110,6 @@ const EXCLUDED_STORE_SUBDIRS: readonly string[] = Object.freeze(['tmp', 'backups
  * things that would end a Serva owner's day — a live Claude key, a GitHub token, a private
  * key — and its real job is to make a mistake loud rather than silent.
  */
-const CREDENTIAL_PATTERNS: readonly { readonly what: string; readonly re: RegExp }[] =
-  Object.freeze([
-    { what: 'an Anthropic API key', re: /sk-ant-[A-Za-z0-9_-]{20,}/ },
-    { what: 'a GitHub token', re: /gh[pousr]_[A-Za-z0-9]{30,}/ },
-    { what: 'an AWS access key id', re: /AKIA[0-9A-Z]{16}/ },
-    { what: 'a private key block', re: /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/ },
-    { what: 'a bearer token', re: /Authorization:\s*Bearer\s+[A-Za-z0-9._-]{30,}/i },
-  ]);
 
 export const BackupEntrySchema = z
   .object({
@@ -250,9 +240,29 @@ export function manifestDigest(m: Omit<BackupManifest, 'integrityDigest'>): stri
   return digestOf(canonicalJson(m));
 }
 
-function isExcluded(
+/**
+ * Dotenv files, by SHAPE rather than by the three somebody happened to list.
+ *
+ * SPEC: finding RELH-REV-M1 (MEDIUM), 1.0.1 security review.
+ *
+ * `EXCLUDED_SENSITIVE` named `.env`, `.env.local` and `.env.production`, so `.env.development`,
+ * `.env.test` and `.env.staging` were copied verbatim. The three listed are not a rule, they
+ * are the three that came to mind, and the convention they belong to has no fixed suffix.
+ *
+ * `.environment-notes.md` is deliberately not matched: the separator is required, so this
+ * catches the convention and not every name that starts with the letters.
+ */
+const DOTENV = /^\.env(\..+)?$/;
+
+export function isExcluded(
   name: string,
 ): { reason: BackupManifest['excluded'][number]['reason']; detail: string } | undefined {
+  if (DOTENV.test(name)) {
+    return {
+      reason: 'SENSITIVE',
+      detail: 'credential material never travels in a backup',
+    };
+  }
   if (EXCLUDED_SENSITIVE.includes(name)) {
     return {
       reason: 'SENSITIVE',
@@ -268,13 +278,25 @@ function isExcluded(
   return undefined;
 }
 
-/** Scan text content for credential shapes. Returns what it found, never the value. */
+/**
+ * Scan text content for credential shapes. Returns what it found, never the value.
+ *
+ * ONE RULE SET, NOT A PRIVATE FIVE.
+ *
+ * SPEC: finding RELH-REV-M1 (MEDIUM), 1.0.1 security review - the third instance of this
+ * class in the campaign, after SC-SSA-CRED-SHAPES in portabilityProof.ts.
+ *
+ * This module carried its own list of five patterns while `SECRET_RULES` in
+ * engineering/secrets.ts carried the vendor shapes, connection strings, JWTs and generic
+ * keyword assignments, and was widened twice during this work. A database URL with inline
+ * credentials, a Google API key, a Slack token and a plain `password = ...` all passed the
+ * local five - into the bundle the header says gets copied to a USB stick and emailed.
+ *
+ * Two rule sets for one question is how the weaker one survives. There is one now, and a
+ * shape added to it protects the backup walk the day it is added.
+ */
 export function credentialScan(content: string): readonly string[] {
-  const found: string[] = [];
-  for (const p of CREDENTIAL_PATTERNS) {
-    if (p.re.test(content)) found.push(p.what);
-  }
-  return found;
+  return [...new Set(scanText('bundle', content).map((f) => f.description))];
 }
 
 /**
